@@ -369,19 +369,30 @@ server.tool('create_menu', 'Create a menu item in the navigation', {
   return { content: [{ type: 'text', text: `Menu created (ID: ${result.id}):\n${JSON.stringify(result, null, 2)}` }] };
 });
 
-server.tool('create_extension', 'Create a code extension (custom UI page or widget)', {
-  name: z.string().describe('Extension name (unique)'),
-  type: z.enum(['page', 'widget']).describe('Extension type'),
-  code: z.string().describe('Component code as string (React/Vue)'),
-  routePath: z.string().optional().describe('Route path for page type'),
-  menuLabel: z.string().optional().describe('Menu label (auto-creates menu)'),
-  menuIcon: z.string().optional().describe('Menu icon'),
-  isEnabled: z.boolean().optional().default(true).describe('Enable extension'),
-  description: z.string().optional().describe('Extension description'),
-}, async (data) => {
-  const result = await fetchAPI(ENFYRA_API_URL, '/extension_definition', { method: 'POST', body: JSON.stringify(data) });
-  return { content: [{ type: 'text', text: `Extension created (ID: ${result.id}):\n${JSON.stringify(result, null, 2)}` }] };
-});
+server.tool(
+  'create_extension',
+  [
+    'Create an extension (Vue SFC page or widget). Code must be Vue SFC: <template>...</template> + <script setup>...</script> — NO imports, use globals (ref, useToast, useApi, UButton, etc).',
+    'For type=page: create menu first (create_menu), get id, then pass menuId. For type=widget no menu needed. Server auto-compiles; tell user to refresh (F5) after create. See extension rules in MCP instructions.',
+  ].join(' '),
+  {
+    name: z.string().describe('Extension name (unique)'),
+    type: z.enum(['page', 'widget']).describe('Extension type: page = full page linked to menu; widget = embed via Widget component'),
+    code: z.string().describe('Vue SFC string — <template> + <script setup>, NO import statements'),
+    menuId: z.string().optional().describe('Required for type=page — menu_definition id from create_menu. Omit for widget'),
+    isEnabled: z.boolean().optional().default(true).describe('Enable extension'),
+    description: z.string().optional().describe('Extension description'),
+  },
+  async (data) => {
+    const body = { ...data };
+    if (body.menuId) {
+      body.menu = { id: body.menuId };
+      delete body.menuId;
+    }
+    const result = await fetchAPI(ENFYRA_API_URL, '/extension_definition', { method: 'POST', body: JSON.stringify(body) });
+    return { content: [{ type: 'text', text: `Extension created (ID: ${result.id}). Tell user to refresh (F5) to see it.\n${JSON.stringify(result, null, 2)}` }] };
+  },
+);
 
 // ============================================================================
 // MAIN

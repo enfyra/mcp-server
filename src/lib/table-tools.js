@@ -25,6 +25,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'create_table',
     [
       'Create a new table definition. After creating a table, use create_column to add columns.',
+      'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
       'Enfyra auto-creates a REST route at path `/<table_name>` (same segment as `name`, not alias).',
       'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
       'There is NO `GET /<table>/:id`. To fetch one row by id, use GET `/<table>?filter={"id":{"_eq":"<id>"}}&limit=1` or tool query_table / find_one_record.',
@@ -56,7 +57,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'create_column',
-    'Create a column for an existing table. Columns cascade through table_definition.',
+    'Create a column for an existing table. Columns cascade through table_definition. Run schema changes sequentially — migration locks DB per operation.',
     {
       tableId: z.string().describe('Table definition ID (from get_all_tables or create_table).'),
       name: z.string().describe('Column name (e.g., "title", "user_id"). Lowercase with underscores.'),
