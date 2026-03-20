@@ -8,6 +8,7 @@ import { fetchAPI, validateTableName } from './fetch.js';
  * Register table tools with MCP server
  */
 export function registerTableTools(server, ENFYRA_API_URL) {
+  const apiBase = ENFYRA_API_URL.replace(/\/$/, '');
   server.tool(
     'get_all_tables',
     'Get all table definitions in the system',
@@ -22,7 +23,14 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'create_table',
-    'Create a new table definition. After creating a table, use create_column to add columns.',
+    [
+      'Create a new table definition. After creating a table, use create_column to add columns.',
+      'Enfyra auto-creates a REST route at path `/<table_name>` (same segment as `name`, not alias).',
+      'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
+      'There is NO `GET /<table>/:id`. To fetch one row by id, use GET `/<table>?filter={"id":{"_eq":"<id>"}}&limit=1` or tool query_table / find_one_record.',
+      `Full URLs: ${apiBase}/<table_name> (example table post: ${apiBase}/post).`,
+      'GraphQL (GQL_QUERY / GQL_MUTATION) may also be enabled on the route; that is separate from REST paths above.',
+    ].join(' '),
     {
       name: z.string().describe('Table name (e.g., "user_definition", "my_custom_table"). Must be unique, lowercase with underscores.'),
       alias: z.string().optional().describe('Table alias for API. If not provided, the table name will be used.'),
@@ -34,8 +42,14 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         method: 'POST',
         body: JSON.stringify({ name, alias, description, isEnabled }),
       });
+      const base = ENFYRA_API_URL.replace(/\/$/, '');
+      const routePath = `/${name}`;
+      const restHint = [
+        `Auto route path: ${routePath} → full base for REST: ${base}${routePath}`,
+        `REST: GET+POST on ${routePath}; PATCH+DELETE on ${routePath}/:id only. No GET ${routePath}/:id.`,
+      ].join('\n');
       return {
-        content: [{ type: 'text', text: `Table created successfully with ID: ${result.id}. Next step: use create_column to add columns (tableId: ${result.id}).\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
+        content: [{ type: 'text', text: `Table created successfully with ID: ${result.id}. Next step: use create_column to add columns (tableId: ${result.id}).\n${restHint}\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
       };
     }
   );

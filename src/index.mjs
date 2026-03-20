@@ -21,16 +21,22 @@ const ENFYRA_PASSWORD = process.env.ENFYRA_PASSWORD || '';
 // Import modules
 import { login, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
 import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
+import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instructions.js';
 import { registerTableTools } from './lib/table-tools.js';
 
 // Initialize auth module
 initAuth(ENFYRA_API_URL, ENFYRA_EMAIL, ENFYRA_PASSWORD);
 
-// Create MCP server
-const server = new McpServer({
-  name: 'enfyra-mcp',
-  version: '1.0.0',
-});
+// Create MCP server — `instructions` is sent to the host (e.g. Claude Code) for the LLM; not README
+const server = new McpServer(
+  {
+    name: 'enfyra-mcp',
+    version: '1.0.0',
+  },
+  {
+    instructions: buildMcpServerInstructions(ENFYRA_API_URL),
+  },
+);
 
 // ============================================================================
 // METADATA TOOLS
@@ -51,6 +57,40 @@ server.tool('get_table_metadata', 'Get metadata for a specific table by name', {
 // ============================================================================
 // QUERY TOOLS
 // ============================================================================
+
+server.tool(
+  'get_enfyra_api_context',
+  [
+    'Returns the resolved API base URL for this MCP session (env ENFYRA_API_URL).',
+    'Use when the user asks which HTTP endpoint or full URL applies: combine enfyraApiUrl with paths from server instructions (GET/POST /{table}, PATCH/DELETE /{table}/{id}, no GET /{table}/{id}).',
+    'Auth: publishedMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
+    'If path might differ from table name, use get_all_routes before asserting a URL.',
+    'Same mapping as MCP tool → HTTP: query_table=GET /table?..., create_record=POST /table, update_record=PATCH /table/id, delete_record=DELETE /table/id.',
+    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; GQL_QUERY vs GQL_MUTATION in publishedMethods — server instructions.',
+  ].join(' '),
+  {},
+  async () => {
+    const base = ENFYRA_API_URL.replace(/\/$/, '');
+    const gql = buildGraphqlUrls(ENFYRA_API_URL);
+    const payload = {
+      enfyraApiUrl: base,
+      graphqlHttpUrl: gql.graphqlHttpUrl,
+      graphqlSchemaUrl: gql.graphqlSchemaUrl,
+      examples: {
+        listOrCreate: `${base}/<table_name>`,
+        updateOrDelete: `${base}/<table_name>/<id>`,
+        oneRowById: `${base}/<table_name>?filter={"id":{"_eq":"<id>"}}&limit=1`,
+      },
+      auth: {
+        publishedMethods: 'If the HTTP method is published for that route, no Bearer required; else Bearer JWT and routePermissions apply.',
+        mcp: 'This server uses admin credentials from env for tools (fetchAPI).',
+      },
+      pathResolution: 'Confirm route path with get_all_routes or metadata — path may not equal table name.',
+      note: 'Full tool→HTTP mapping is in MCP server instructions (shown to the model at connect).',
+    };
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
 
 server.tool('query_table', 'Query any table in Enfyra with filters, sorting, and pagination', {
   tableName: z.string().describe('Table name to query'),
@@ -75,19 +115,35 @@ server.tool('query_table', 'Query any table in Enfyra with filters, sorting, and
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.tool('find_one_record', 'Find a single record by ID or filter', {
-  tableName: z.string().describe('Table name'),
-  id: z.string().optional().describe('Record ID'),
-  filter: z.string().optional().describe('Filter as JSON string to find by'),
-}, async ({ tableName, id, filter }) => {
-  validateTableName(tableName);
-  if (id) {
-    const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}/${id}`);
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
-  }
-  const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}?filter=${filter}&limit=1`);
-  return { content: [{ type: 'text', text: JSON.stringify(result.data?.[0] || null, null, 2) }] };
-});
+server.tool(
+  'find_one_record',
+  'Find a single record by ID or filter. By ID uses GET with filter (Enfyra has no GET /table/:id route).',
+  {
+    tableName: z.string().describe('Table name'),
+    id: z.string().optional().describe('Record ID'),
+    filter: z.string().optional().describe('Filter as JSON string to find by'),
+  },
+  async ({ tableName, id, filter }) => {
+    validateTableName(tableName);
+    if (id) {
+      // Enfyra route engine does not register GET /<table>/:id (only PATCH/DELETE use /:id). Use list + filter.
+      const filterObj = JSON.stringify({ id: { _eq: id } });
+      const result = await fetchAPI(
+        ENFYRA_API_URL,
+        `/${tableName}?filter=${encodeURIComponent(filterObj)}&limit=1`,
+      );
+      const one = result.data?.[0] ?? null;
+      return { content: [{ type: 'text', text: JSON.stringify(one, null, 2) }] };
+    }
+    if (!filter) throw new Error('Provide id or filter');
+    validateFilter(filter);
+    const result = await fetchAPI(
+      ENFYRA_API_URL,
+      `/${tableName}?filter=${encodeURIComponent(filter)}&limit=1`,
+    );
+    return { content: [{ type: 'text', text: JSON.stringify(result.data?.[0] || null, null, 2) }] };
+  },
+);
 
 // ============================================================================
 // CRUD TOOLS
