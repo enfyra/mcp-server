@@ -2,7 +2,7 @@
  * Table & Column tools for Enfyra MCP Server
  */
 import { z } from 'zod';
-import { fetchAPI, validateTableName } from './fetch.js';
+import { fetchAPI } from './fetch.js';
 
 /**
  * Register table tools with MCP server
@@ -24,7 +24,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'create_table',
     [
-      'Create a new table definition. After creating a table, use create_column to add columns.',
+      'Create a new table definition with an auto-included `id` primary key column.',
+      'Use create_column to add more columns after creation.',
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
       'Enfyra auto-creates a REST route at path `/<table_name>` (same segment as `name`, not alias).',
       'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
@@ -39,9 +40,10 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       isEnabled: z.boolean().optional().default(true).describe('Enable table. Set to false to disable.'),
     },
     async ({ name, alias, description, isEnabled }) => {
+      const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
       const result = await fetchAPI(ENFYRA_API_URL, '/table_definition', {
         method: 'POST',
-        body: JSON.stringify({ name, alias, description, isEnabled }),
+        body: JSON.stringify({ name, alias, description, isEnabled, columns: [idColumn] }),
       });
       const base = ENFYRA_API_URL.replace(/\/$/, '');
       const routePath = `/${name}`;
@@ -51,6 +53,34 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       ].join('\n');
       return {
         content: [{ type: 'text', text: `Table created successfully with ID: ${result.id}. Next step: use create_column to add columns (tableId: ${result.id}).\n${restHint}\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
+      };
+    }
+  );
+
+  server.tool(
+    'create_relation',
+    [
+      'Create a relation between two tables (many-to-one, one-to-many, one-to-one, many-to-many).',
+      'For many-to-one: a FK column is created on the source table. For one-to-many: the FK is on the target (inverse relation).',
+      'Run sequentially — DB migration locks per operation.',
+    ].join(' '),
+    {
+      sourceTableId: z.string().describe('Source table ID (the table that owns the FK for many-to-one).'),
+      targetTableId: z.string().describe('Target table ID.'),
+      type: z.enum(['many-to-one', 'one-to-many', 'one-to-one', 'many-to-many']).describe('Relation type.'),
+      propertyName: z.string().describe('Property name on source table (e.g., "customer", "items").'),
+      inversePropertyName: z.string().optional().describe('Property name on target table for bidirectional relation (e.g., "orders").'),
+      isNullable: z.boolean().optional().default(true).describe('Whether the relation is nullable.'),
+      onDelete: z.enum(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']).optional().default('SET NULL').describe('On delete behavior.'),
+    },
+    async ({ sourceTableId, targetTableId, type, propertyName, inversePropertyName, isNullable, onDelete }) => {
+      const relation = { type, propertyName, inversePropertyName: inversePropertyName || null, isNullable, onDelete };
+      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${sourceTableId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ relations: [{ targetTableId, ...relation }] }),
+      });
+      return {
+        content: [{ type: 'text', text: `Relation created: ${propertyName} (${type}) from table ${sourceTableId} → ${targetTableId}.\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
       };
     }
   );
