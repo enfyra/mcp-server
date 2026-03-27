@@ -5,10 +5,22 @@ import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
 
 /**
+ * Helper: fetch table with columns and relations
+ */
+async function fetchTableWithDetails(ENFYRA_API_URL, tableId) {
+  const filter = encodeURIComponent(JSON.stringify({ id: { _eq: tableId } }));
+  const result = await fetchAPI(ENFYRA_API_URL, `/table_definition?filter=${filter}&limit=1&fields=*,columns.*,relations.*`);
+  return result?.data?.[0] || result?.[0] || null;
+}
+
+/**
  * Register table tools with MCP server
  */
 export function registerTableTools(server, ENFYRA_API_URL) {
   const apiBase = ENFYRA_API_URL.replace(/\/$/, '');
+
+  // ─── READ ───
+
   server.tool(
     'get_all_tables',
     'Get all table definitions in the system',
@@ -21,11 +33,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     }
   );
 
+  // ─── CREATE TABLE ───
+
   server.tool(
     'create_table',
     [
       'Create a new table definition with an auto-included `id` primary key column.',
-      'Use create_column to add more columns after creation.',
+      'Use create_column to add more columns after creation (columns are managed via cascade PATCH on table_definition, NOT via /column_definition).',
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
       'Enfyra auto-creates a REST route at path `/<table_name>` (same segment as `name`, not alias).',
       'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
@@ -57,6 +71,194 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     }
   );
 
+  // ─── UPDATE TABLE ───
+
+  server.tool(
+    'update_table',
+    [
+      'Update table properties: name (rename), alias, description, isSingleRecord, uniques, indexes.',
+      'Does NOT modify columns or relations — use create_column, update_column, delete_column, create_relation for those.',
+      'Run schema changes sequentially — migration locks DB per operation.',
+    ].join(' '),
+    {
+      tableId: z.string().describe('Table definition ID.'),
+      name: z.string().optional().describe('New table name (rename). Lowercase with underscores.'),
+      alias: z.string().optional().describe('New table alias.'),
+      description: z.string().optional().describe('New description.'),
+      isSingleRecord: z.boolean().optional().describe('Set to true for single-record table (e.g., settings/config).'),
+    },
+    async ({ tableId, name, alias, description, isSingleRecord }) => {
+      const body = {};
+      if (name !== undefined) body.name = name;
+      if (alias !== undefined) body.alias = alias;
+      if (description !== undefined) body.description = description;
+      if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
+
+      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      });
+      return {
+        content: [{ type: 'text', text: `Table ${tableId} updated.\n\n${JSON.stringify(result, null, 2)}` }],
+      };
+    }
+  );
+
+  // ─── DELETE TABLE ───
+
+  server.tool(
+    'delete_table',
+    [
+      'Delete a table and ALL associated data. This is DESTRUCTIVE and IRREVERSIBLE.',
+      'Deletes: table metadata, all columns, all relations (source + target), all routes, junction tables, FK columns from other tables, and the PHYSICAL DATABASE TABLE with ALL DATA.',
+      'Always confirm with the user before calling this tool.',
+    ].join(' '),
+    {
+      tableId: z.string().describe('Table definition ID to delete.'),
+    },
+    async ({ tableId }) => {
+      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+        method: 'DELETE',
+      });
+      return {
+        content: [{ type: 'text', text: `Table ${tableId} deleted.\n\n${JSON.stringify(result, null, 2)}` }],
+      };
+    }
+  );
+
+  // ─── CREATE COLUMN ───
+
+  server.tool(
+    'create_column',
+    [
+      'Add a column to an existing table via PATCH /table_definition/{tableId}.',
+      'Columns are managed through cascade with table_definition — there is NO direct /column_definition endpoint.',
+      'This tool fetches existing columns, appends the new one, and PATCHes the table.',
+      'Run schema changes sequentially — migration locks DB per operation.',
+    ].join(' '),
+    {
+      tableId: z.string().describe('Table definition ID (from get_all_tables or create_table).'),
+      name: z.string().describe('Column name (e.g., "title", "user_id"). Lowercase with underscores.'),
+      type: z.string().describe('Column type: varchar, int, text, boolean, datetime, json, decimal, timestamp, uuid, bigint, float, longtext, richtext, simple-json, code, enum, array-select, date.'),
+      isNullable: z.boolean().optional().default(true).describe('Set to false if column cannot be null.'),
+      isUnique: z.boolean().optional().default(false).describe('Set to true for unique constraint.'),
+      defaultValue: z.string().optional().describe('Default value as JSON string.'),
+      description: z.string().optional().describe('Column description.'),
+      options: z.string().optional().describe('Column options as JSON string (e.g., enum values).'),
+    },
+    async ({ tableId, name, type, isNullable, isUnique, defaultValue, description, options }) => {
+      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+      if (!tableData) {
+        return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
+      }
+
+      const existingColumns = (tableData.columns || []).map(col => ({ id: col.id }));
+      const newCol = { name, type, isNullable: isNullable ?? true };
+      if (isUnique) newCol.isUnique = true;
+      if (defaultValue !== undefined) newCol.defaultValue = defaultValue;
+      if (description) newCol.description = description;
+      if (options) newCol.options = JSON.parse(options);
+
+      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ columns: [...existingColumns, newCol] }),
+      });
+
+      return {
+        content: [{ type: 'text', text: `Column "${name}" added to table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
+      };
+    }
+  );
+
+  // ─── UPDATE COLUMN ───
+
+  server.tool(
+    'update_column',
+    [
+      'Update an existing column on a table via PATCH /table_definition/{tableId}.',
+      'Fetches all columns, modifies the target column, and PATCHes the table.',
+      'Run schema changes sequentially — migration locks DB per operation.',
+    ].join(' '),
+    {
+      tableId: z.string().describe('Table definition ID.'),
+      columnId: z.string().describe('Column definition ID to update.'),
+      name: z.string().optional().describe('New column name.'),
+      type: z.string().optional().describe('New column type.'),
+      isNullable: z.boolean().optional().describe('Set nullable.'),
+      isHidden: z.boolean().optional().describe('Hide column from API responses.'),
+      defaultValue: z.string().optional().describe('New default value as JSON string.'),
+      description: z.string().optional().describe('New description.'),
+      options: z.string().optional().describe('New options as JSON string.'),
+    },
+    async ({ tableId, columnId, name, type, isNullable, isHidden, defaultValue, description, options }) => {
+      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+      if (!tableData) {
+        return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
+      }
+
+      const columns = (tableData.columns || []).map(col => {
+        if (String(col.id) === String(columnId)) {
+          const updated = { id: col.id };
+          if (name !== undefined) updated.name = name;
+          if (type !== undefined) updated.type = type;
+          if (isNullable !== undefined) updated.isNullable = isNullable;
+          if (isHidden !== undefined) updated.isHidden = isHidden;
+          if (defaultValue !== undefined) updated.defaultValue = defaultValue;
+          if (description !== undefined) updated.description = description;
+          if (options !== undefined) updated.options = JSON.parse(options);
+          return updated;
+        }
+        return { id: col.id };
+      });
+
+      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ columns }),
+      });
+
+      return {
+        content: [{ type: 'text', text: `Column ${columnId} updated on table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
+      };
+    }
+  );
+
+  // ─── DELETE COLUMN ───
+
+  server.tool(
+    'delete_column',
+    [
+      'Delete a column from a table via PATCH /table_definition/{tableId}.',
+      'Fetches all columns, removes the target, and PATCHes the table.',
+      'The physical column is dropped from the database. System columns (id, createdAt, updatedAt) cannot be deleted.',
+      'Run schema changes sequentially — migration locks DB per operation.',
+    ].join(' '),
+    {
+      tableId: z.string().describe('Table definition ID.'),
+      columnId: z.string().describe('Column definition ID to delete.'),
+    },
+    async ({ tableId, columnId }) => {
+      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+      if (!tableData) {
+        return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
+      }
+
+      const columns = (tableData.columns || [])
+        .filter(col => String(col.id) !== String(columnId))
+        .map(col => ({ id: col.id }));
+
+      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ columns }),
+      });
+
+      return {
+        content: [{ type: 'text', text: `Column ${columnId} deleted from table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
+      };
+    }
+  );
+
+  // ─── CREATE RELATION ───
+
   server.tool(
     'create_relation',
     [
@@ -85,26 +287,36 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     }
   );
 
+  // ─── DELETE RELATION ───
+
   server.tool(
-    'create_column',
-    'Create a column for an existing table. Columns cascade through table_definition. Run schema changes sequentially — migration locks DB per operation.',
+    'delete_relation',
+    [
+      'Delete a relation from a table via PATCH /table_definition/{tableId}.',
+      'Fetches all relations, removes the target, and PATCHes the table.',
+      'Drops FK columns and junction tables (for many-to-many).',
+    ].join(' '),
     {
-      tableId: z.string().describe('Table definition ID (from get_all_tables or create_table).'),
-      name: z.string().describe('Column name (e.g., "title", "user_id"). Lowercase with underscores.'),
-      type: z.string().describe('Column type: varchar, int, text, boolean, datetime, json, decimal, etc.'),
-      length: z.number().optional().describe('Length for varchar types (e.g., 255).'),
-      isRequired: z.boolean().optional().default(false).describe('Set to true if column cannot be null.'),
-      isUnique: z.boolean().optional().default(false).describe('Set to true for unique constraint.'),
-      defaultValue: z.string().optional().describe('Default value as JSON string.'),
-      description: z.string().optional().describe('Column description.'),
+      tableId: z.string().describe('Table definition ID (source table of the relation).'),
+      relationId: z.string().describe('Relation definition ID to delete.'),
     },
-    async ({ tableId, name, type, length, isRequired, isUnique, defaultValue, description }) => {
-      const result = await fetchAPI(ENFYRA_API_URL, '/column_definition', {
-        method: 'POST',
-        body: JSON.stringify({ tableId, name, type, length, isRequired, isUnique, defaultValue, description }),
+    async ({ tableId, relationId }) => {
+      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+      if (!tableData) {
+        return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
+      }
+
+      const relations = (tableData.relations || [])
+        .filter(rel => String(rel.id) !== String(relationId))
+        .map(rel => ({ id: rel.id }));
+
+      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ relations }),
       });
+
       return {
-        content: [{ type: 'text', text: `Column created with ID: ${result.id}.\n\n${JSON.stringify(result, null, 2)}` }],
+        content: [{ type: 'text', text: `Relation ${relationId} deleted from table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
       };
     }
   );
