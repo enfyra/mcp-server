@@ -177,7 +177,26 @@ server.tool('delete_record', 'Delete a record by ID', {
 // ROUTE & HANDLER TOOLS
 // ============================================================================
 
-server.tool('get_all_routes', 'Get all route definitions with handlers, hooks, and permissions', {
+let _methodMap = null;
+async function getMethodMap() {
+  if (_methodMap) return _methodMap;
+  const result = await fetchAPI(ENFYRA_API_URL, '/method_definition?limit=0');
+  _methodMap = {};
+  for (const m of result.data) {
+    _methodMap[m.method] = m.id || m._id;
+  }
+  return _methodMap;
+}
+
+function resolveMethodIds(methodMap, names) {
+  return names.map(m => {
+    const id = methodMap[m.toUpperCase()];
+    if (!id) throw new Error(`Unknown method "${m}". Valid: ${Object.keys(methodMap).join(', ')}`);
+    return { id };
+  });
+}
+
+server.tool('get_all_routes', 'List all route definitions (path, mainTable, handlers, hooks, permissions). Call before create_route to avoid duplicate paths and to pick routeId for hooks/handlers.', {
   includeDisabled: z.boolean().optional().default(false).describe('Include disabled routes'),
 }, async ({ includeDisabled }) => {
   const filter = includeDisabled ? {} : { isEnabled: { _eq: true } };
@@ -185,57 +204,168 @@ server.tool('get_all_routes', 'Get all route definitions with handlers, hooks, a
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.tool('create_route', 'Create a new route definition', {
-  path: z.string().describe('Route path (e.g., "/api/users")'),
-  method: z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'REST', 'GQL_QUERY', 'GQL_MUTATION']).describe('HTTP method'),
-  tableId: z.string().describe('Main table ID for this route'),
-  isEnabled: z.boolean().optional().default(true).describe('Enable route'),
-  description: z.string().optional().describe('Route description'),
-}, async ({ path, method, tableId, isEnabled, description }) => {
-  const result = await fetchAPI(ENFYRA_API_URL, '/route_definition', {
-    method: 'POST',
-    body: JSON.stringify({ path, method, tableId, isEnabled, description }),
-  });
-  return { content: [{ type: 'text', text: `Route created (ID: ${result.id}):\n${JSON.stringify(result, null, 2)}` }] };
-});
+server.tool(
+  'create_route',
+  [
+    '**Use this when the user wants a new API route or path** — not `create_table`. A route links a URL path to an existing table (`mainTableId`) and sets HTTP/GQL methods.',
+    'Do NOT create a new table_definition only to expose an endpoint; pick `mainTableId` from existing metadata unless the user explicitly needs new tables/columns.',
+    'availableMethods = which verbs the route responds to. publishedMethods = which verbs are public (no auth).',
+    'After creation the tool auto-reloads routes. Then create handlers for specific methods via create_handler on this route id.',
+    'Flow: resolve table id → create_route → create_handler (per method) → optionally create_pre_hook / create_post_hook → test via HTTP or admin test APIs (see server instructions).',
+  ].join(' '),
+  {
+    path: z.string().describe('URL path, must start with / (e.g., "/my-endpoint")'),
+    mainTableId: z.union([z.string(), z.number()]).describe('ID of the table_definition this route operates on. The route\'s $repos.main will query this table.'),
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE', 'GQL_QUERY', 'GQL_MUTATION']))
+      .describe('HTTP/GQL methods this route supports (availableMethods). Common: ["GET","POST","PATCH","DELETE"]'),
+    publishedMethods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE', 'GQL_QUERY', 'GQL_MUTATION'])).optional()
+      .describe('Methods accessible WITHOUT auth token. Omit = all methods require auth.'),
+    isEnabled: z.boolean().optional().default(true).describe('Enable route immediately'),
+    description: z.string().optional().describe('Route description'),
+  },
+  async ({ path: routePath, mainTableId, methods, publishedMethods, isEnabled, description }) => {
+    const methodMap = await getMethodMap();
 
-server.tool('create_handler', 'Create a handler for a route. Use template syntax: @BODY, @USER, #table_name, @THROW404', {
-  routeId: z.string().describe('Route definition ID'),
-  logic: z.string().describe('Handler logic (JavaScript code)'),
-  timeout: z.number().optional().describe('Handler timeout in ms (default: 30000)'),
-}, async ({ routeId, logic, timeout }) => {
-  const result = await fetchAPI(ENFYRA_API_URL, '/route_handler_definition', {
-    method: 'POST',
-    body: JSON.stringify({ routeId, logic, timeout: timeout || 30000 }),
-  });
-  return { content: [{ type: 'text', text: `Handler created (ID: ${result.id}):\n${JSON.stringify(result, null, 2)}` }] };
-});
+    const body = {
+      path: routePath.startsWith('/') ? routePath : '/' + routePath,
+      mainTable: { id: mainTableId },
+      isEnabled,
+      description,
+      availableMethods: resolveMethodIds(methodMap, methods),
+    };
 
-server.tool('create_pre_hook', 'Create a pre-hook for a route. Use template syntax: @BODY, @QUERY, @USER', {
-  routeId: z.string().describe('Route definition ID'),
-  code: z.string().describe('Hook code (JavaScript)'),
-  methods: z.array(z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])).optional().describe('Methods this hook applies to'),
-  order: z.number().optional().default(0).describe('Hook execution order'),
-}, async ({ routeId, code, methods, order }) => {
-  const result = await fetchAPI(ENFYRA_API_URL, '/pre_hook_definition', {
-    method: 'POST',
-    body: JSON.stringify({ routeId, code, methods: methods || ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], order }),
-  });
-  return { content: [{ type: 'text', text: `Pre-hook created (ID: ${result.id}):\n${JSON.stringify(result, null, 2)}` }] };
-});
+    if (publishedMethods && publishedMethods.length > 0) {
+      body.publishedMethods = resolveMethodIds(methodMap, publishedMethods);
+    }
 
-server.tool('create_post_hook', 'Create a post-hook for a route. Use template syntax: @DATA, @STATUS', {
-  routeId: z.string().describe('Route definition ID'),
-  code: z.string().describe('Hook code (JavaScript)'),
-  methods: z.array(z.enum(['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])).optional().describe('Methods this hook applies to'),
-  order: z.number().optional().default(0).describe('Hook execution order'),
-}, async ({ routeId, code, methods, order }) => {
-  const result = await fetchAPI(ENFYRA_API_URL, '/post_hook_definition', {
-    method: 'POST',
-    body: JSON.stringify({ routeId, code, methods: methods || ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], order }),
-  });
-  return { content: [{ type: 'text', text: `Post-hook created (ID: ${result.id}):\n${JSON.stringify(result, null, 2)}` }] };
-});
+    const result = await fetchAPI(ENFYRA_API_URL, '/route_definition', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+
+    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+
+    return { content: [{ type: 'text', text: `Route created (ID: ${result.id}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+  },
+);
+
+server.tool(
+  'create_handler',
+  [
+    'Create a handler for a route+method. One handler per (route, method) pair.',
+    'Attach to the route the user cares about (`get_all_routes`): typically a path from `create_route`, not a spurious table created only for handlers.',
+    'Handler code runs inside a sandbox with $ctx. Use macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503, @SOCKET, @PKGS, @LOGS, @SHARE.',
+    'Or use $ctx directly: $ctx.$body, $ctx.$repos.main.find(), $ctx.$helpers.$bcrypt.hash(), etc.',
+    'require("pkg") works for installed Server packages. console.log() writes to $share.$logs.',
+  ].join(' '),
+  {
+    routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE', 'GQL_QUERY', 'GQL_MUTATION']))
+      .describe('Methods to create handlers for. Creates one handler per method.'),
+    logic: z.string().describe('Handler JavaScript code'),
+    timeout: z.number().optional().describe('Timeout in ms (default: system DEFAULT_HANDLER_TIMEOUT, usually 30000)'),
+  },
+  async ({ routeId, methods, logic, timeout }) => {
+    const methodMap = await getMethodMap();
+    const results = [];
+
+    for (const method of methods) {
+      const methodId = methodMap[method.toUpperCase()];
+      if (!methodId) throw new Error(`Unknown method: ${method}. Valid: ${Object.keys(methodMap).join(', ')}`);
+
+      const body = { route: { id: routeId }, method: { id: methodId }, logic };
+      if (timeout) body.timeout = timeout;
+
+      const result = await fetchAPI(ENFYRA_API_URL, '/route_handler_definition', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      results.push(result);
+    }
+
+    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+
+    return { content: [{ type: 'text', text: `Handler(s) created for [${methods.join(', ')}]. Routes reloaded.\n${JSON.stringify(results, null, 2)}` }] };
+  },
+);
+
+server.tool(
+  'create_pre_hook',
+  [
+    'Create a pre-hook that runs BEFORE the handler. Use to validate, transform, or inject data.',
+    'Use `routeId` from `create_route` or `get_all_routes` — do not create a new table just to get a route id.',
+    'Macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503.',
+    'If the hook returns a value, that value becomes the response (handler is skipped).',
+  ].join(' '),
+  {
+    routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
+    name: z.string().describe('Hook name (unique per route)'),
+    code: z.string().describe('Hook JavaScript code'),
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
+      .describe('Methods this hook applies to. Default: all REST methods.'),
+    priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
+    isEnabled: z.boolean().optional().default(true).describe('Enable hook immediately'),
+  },
+  async ({ routeId, name, code, methods, priority, isEnabled }) => {
+    const methodMap = await getMethodMap();
+    const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
+
+    const result = await fetchAPI(ENFYRA_API_URL, '/pre_hook_definition', {
+      method: 'POST',
+      body: JSON.stringify({
+        route: { id: routeId },
+        name,
+        code,
+        methods: resolveMethodIds(methodMap, methodNames),
+        priority,
+        isEnabled,
+      }),
+    });
+
+    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+
+    return { content: [{ type: 'text', text: `Pre-hook "${name}" created (ID: ${result.id}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+  },
+);
+
+server.tool(
+  'create_post_hook',
+  [
+    'Create a post-hook that runs AFTER the handler. Use to transform responses or add metadata.',
+    'Use `routeId` from `create_route` or `get_all_routes` — do not create a new table just to get a route id.',
+    'Macros: @DATA (handler result), @STATUS (HTTP status code), @BODY, @QUERY, @USER, @SHARE.',
+    'Must return a value — that becomes the final response.',
+  ].join(' '),
+  {
+    routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
+    name: z.string().describe('Hook name (unique per route)'),
+    code: z.string().describe('Hook JavaScript code'),
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
+      .describe('Methods this hook applies to. Default: all REST methods.'),
+    priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
+    isEnabled: z.boolean().optional().default(true).describe('Enable hook immediately'),
+  },
+  async ({ routeId, name, code, methods, priority, isEnabled }) => {
+    const methodMap = await getMethodMap();
+    const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
+
+    const result = await fetchAPI(ENFYRA_API_URL, '/post_hook_definition', {
+      method: 'POST',
+      body: JSON.stringify({
+        route: { id: routeId },
+        name,
+        code,
+        methods: resolveMethodIds(methodMap, methodNames),
+        priority,
+        isEnabled,
+      }),
+    });
+
+    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+
+    return { content: [{ type: 'text', text: `Post-hook "${name}" created (ID: ${result.id}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+  },
+);
 
 // Register table tools
 registerTableTools(server, ENFYRA_API_URL);
@@ -410,8 +540,8 @@ server.tool(
       pkgDescription = exactMatch.package.description || '';
     }
 
-    // Step 2: Check if already installed
-    const checkFilter = JSON.stringify({ name: { _eq: name } });
+    // Step 2: Check if already installed (same name AND type)
+    const checkFilter = JSON.stringify({ name: { _eq: name }, type: { _eq: type } });
     const existing = await fetchAPI(ENFYRA_API_URL, `/package_definition?filter=${encodeURIComponent(checkFilter)}&limit=1`);
     if (existing.data && existing.data.length > 0) {
       return {
@@ -456,7 +586,7 @@ server.tool(
 
 server.tool('create_menu', 'Create a menu item in the navigation', {
   label: z.string().describe('Menu label'),
-  type: z.enum(['separator', 'link', 'route', 'dropdown', 'widget', 'extension']).describe('Menu type'),
+  type: z.enum(['Menu', 'Dropdown Menu']).default('Menu').describe('Menu type: "Menu" for leaf items, "Dropdown Menu" for items with children'),
   icon: z.string().optional().describe('Lucide icon name'),
   path: z.string().optional().describe('Route path for type=route'),
   externalUrl: z.string().optional().describe('External URL for type=link'),
@@ -464,7 +594,11 @@ server.tool('create_menu', 'Create a menu item in the navigation', {
   isEnabled: z.boolean().optional().default(true).describe('Enable menu'),
   description: z.string().optional().describe('Menu description'),
 }, async (data) => {
-  const result = await fetchAPI(ENFYRA_API_URL, '/menu_definition', { method: 'POST', body: JSON.stringify(data) });
+  const body = { ...data };
+  if (body.path && !body.path.startsWith('/')) {
+    body.path = '/' + body.path;
+  }
+  const result = await fetchAPI(ENFYRA_API_URL, '/menu_definition', { method: 'POST', body: JSON.stringify(body) });
   return { content: [{ type: 'text', text: `Menu created (ID: ${result.id}):\n${JSON.stringify(result, null, 2)}` }] };
 });
 
@@ -481,6 +615,7 @@ server.tool(
     menuId: z.string().optional().describe('Required for type=page — menu_definition id from create_menu. Omit for widget'),
     isEnabled: z.boolean().optional().default(true).describe('Enable extension'),
     description: z.string().optional().describe('Extension description'),
+    version: z.string().optional().default('1.0.0').describe('Extension version'),
   },
   async (data) => {
     const body = { ...data };

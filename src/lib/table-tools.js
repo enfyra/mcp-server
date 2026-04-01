@@ -39,9 +39,10 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'create_table',
     [
       'Create a new table definition with an auto-included `id` primary key column.',
+      '**Not** for adding a custom API path or handler only — for that use **`create_route`** with an existing `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
       'Use create_column to add more columns after creation (columns are managed via cascade PATCH on table_definition, NOT via /column_definition).',
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
-      'Enfyra auto-creates a REST route at path `/<table_name>` (same segment as `name`, not alias).',
+      'Enfyra auto-creates a default REST route at path `/<table_name>` (same segment as `name`, not alias).',
       'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
       'There is NO `GET /<table>/:id`. To fetch one row by id, use GET `/<table>?filter={"id":{"_eq":"<id>"}}&limit=1` or tool query_table / find_one_record.',
       `Full URLs: ${apiBase}/<table_name> (example table post: ${apiBase}/post).`,
