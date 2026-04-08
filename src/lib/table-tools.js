@@ -14,6 +14,26 @@ async function fetchTableWithDetails(ENFYRA_API_URL, tableId) {
 }
 
 /**
+ * PATCH table_definition with auto-confirm for schema changes.
+ * First PATCH returns preview + requiredConfirmHash; this helper
+ * automatically resends with ?schemaConfirmHash= to apply.
+ */
+async function patchTableAutoConfirm(ENFYRA_API_URL, tableId, body) {
+  const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  const preview = Array.isArray(result?.data) ? result.data[0] : result?.data;
+  if (preview?._preview && preview?.requiredConfirmHash) {
+    return fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}?schemaConfirmHash=${preview.requiredConfirmHash}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+  }
+  return result;
+}
+
+/**
  * Register table tools with MCP server
  */
 export function registerTableTools(server, ENFYRA_API_URL) {
@@ -40,7 +60,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     [
       'Create a new table definition with an auto-included `id` primary key column.',
       '**Not** for adding a custom API path or handler only — for that use **`create_route`** with an existing `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
-      'Use create_column to add more columns after creation (columns are managed via cascade PATCH on table_definition, NOT via /column_definition).',
+      'PREFERRED: pass `columns` param as JSON array to create table WITH columns in one call (cascade). Only use create_column separately if adding to an existing table later.',
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
       'Enfyra auto-creates a default REST route at path `/<table_name>` (same segment as `name`, not alias).',
       'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
@@ -53,12 +73,14 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       alias: z.string().optional().describe('Table alias for API. If not provided, the table name will be used.'),
       description: z.string().optional().describe('Description of what this table stores.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable table. Set to false to disable.'),
+      columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, defaultValue?, description?, options? }. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"status","type":"enum","options":["draft","published"]}]'),
     },
-    async ({ name, alias, description, isEnabled }) => {
+    async ({ name, alias, description, isEnabled, columns: columnsJson }) => {
       const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
+      const userColumns = columnsJson ? JSON.parse(columnsJson) : [];
       const result = await fetchAPI(ENFYRA_API_URL, '/table_definition', {
         method: 'POST',
-        body: JSON.stringify({ name, alias, description, isEnabled, columns: [idColumn] }),
+        body: JSON.stringify({ name, alias, description, isEnabled, columns: [idColumn, ...userColumns] }),
       });
       const base = ENFYRA_API_URL.replace(/\/$/, '');
       const routePath = `/${name}`;
@@ -66,8 +88,11 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         `Auto route path: ${routePath} → full base for REST: ${base}${routePath}`,
         `REST: GET+POST on ${routePath}; PATCH+DELETE on ${routePath}/:id only. No GET ${routePath}/:id.`,
       ].join('\n');
+      const colHint = userColumns.length
+        ? `Table created with ${userColumns.length} column(s) + auto id.`
+        : `Table created. Use create_column to add columns (tableId: ${result.id}).`;
       return {
-        content: [{ type: 'text', text: `Table created successfully with ID: ${result.id}. Next step: use create_column to add columns (tableId: ${result.id}).\n${restHint}\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
+        content: [{ type: 'text', text: `${colHint}\n${restHint}\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
       };
     }
   );
@@ -153,17 +178,14 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
       }
 
-      const existingColumns = (tableData.columns || []).map(col => ({ id: col.id }));
+      const existingColumns = (tableData.columns || []).map(({ table, ...col }) => col);
       const newCol = { name, type, isNullable: isNullable ?? true };
       if (isUnique) newCol.isUnique = true;
       if (defaultValue !== undefined) newCol.defaultValue = defaultValue;
       if (description) newCol.description = description;
       if (options) newCol.options = JSON.parse(options);
 
-      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ columns: [...existingColumns, newCol] }),
-      });
+      const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns: [...existingColumns, newCol] });
 
       return {
         content: [{ type: 'text', text: `Column "${name}" added to table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
@@ -198,24 +220,20 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       }
 
       const columns = (tableData.columns || []).map(col => {
+        const { table, ...rest } = col;
         if (String(col.id) === String(columnId)) {
-          const updated = { id: col.id };
-          if (name !== undefined) updated.name = name;
-          if (type !== undefined) updated.type = type;
-          if (isNullable !== undefined) updated.isNullable = isNullable;
-          if (isHidden !== undefined) updated.isHidden = isHidden;
-          if (defaultValue !== undefined) updated.defaultValue = defaultValue;
-          if (description !== undefined) updated.description = description;
-          if (options !== undefined) updated.options = JSON.parse(options);
-          return updated;
+          if (name !== undefined) rest.name = name;
+          if (type !== undefined) rest.type = type;
+          if (isNullable !== undefined) rest.isNullable = isNullable;
+          if (isHidden !== undefined) rest.isHidden = isHidden;
+          if (defaultValue !== undefined) rest.defaultValue = defaultValue;
+          if (description !== undefined) rest.description = description;
+          if (options !== undefined) rest.options = JSON.parse(options);
         }
-        return { id: col.id };
+        return rest;
       });
 
-      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ columns }),
-      });
+      const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns });
 
       return {
         content: [{ type: 'text', text: `Column ${columnId} updated on table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
@@ -245,12 +263,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 
       const columns = (tableData.columns || [])
         .filter(col => String(col.id) !== String(columnId))
-        .map(col => ({ id: col.id }));
+        .map(({ table, ...col }) => col);
 
-      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ columns }),
-      });
+      const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns });
 
       return {
         content: [{ type: 'text', text: `Column ${columnId} deleted from table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
@@ -277,11 +292,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       onDelete: z.enum(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']).optional().default('SET NULL').describe('On delete behavior.'),
     },
     async ({ sourceTableId, targetTableId, type, propertyName, inversePropertyName, isNullable, onDelete }) => {
-      const relation = { type, propertyName, inversePropertyName: inversePropertyName || null, isNullable, onDelete };
-      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${sourceTableId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ relations: [{ targetTableId, ...relation }] }),
-      });
+      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, sourceTableId);
+      if (!tableData) {
+        return { content: [{ type: 'text', text: `Error: Table with ID ${sourceTableId} not found.` }] };
+      }
+      const existingRelations = (tableData.relations || []).map(({ sourceTable, targetTable, ...rel }) => rel);
+      const newRelation = { targetTableId, type, propertyName, inversePropertyName: inversePropertyName || null, isNullable, onDelete };
+      const result = await patchTableAutoConfirm(ENFYRA_API_URL, sourceTableId, { relations: [...existingRelations, newRelation] });
       return {
         content: [{ type: 'text', text: `Relation created: ${propertyName} (${type}) from table ${sourceTableId} → ${targetTableId}.\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
       };
@@ -309,12 +326,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 
       const relations = (tableData.relations || [])
         .filter(rel => String(rel.id) !== String(relationId))
-        .map(rel => ({ id: rel.id }));
+        .map(({ sourceTable, targetTable, ...rel }) => rel);
 
-      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ relations }),
-      });
+      const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { relations });
 
       return {
         content: [{ type: 'text', text: `Relation ${relationId} deleted from table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
