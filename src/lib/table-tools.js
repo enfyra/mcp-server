@@ -208,12 +208,12 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       name: z.string().optional().describe('New column name.'),
       type: z.string().optional().describe('New column type.'),
       isNullable: z.boolean().optional().describe('Set nullable.'),
-      isHidden: z.boolean().optional().describe('Hide column from API responses.'),
+      isPublished: z.boolean().optional().describe('Set column visibility baseline. false = unpublished (omitted from response unless allowed by field permission rules).'),
       defaultValue: z.string().optional().describe('New default value as JSON string.'),
       description: z.string().optional().describe('New description.'),
       options: z.string().optional().describe('New options as JSON string.'),
     },
-    async ({ tableId, columnId, name, type, isNullable, isHidden, defaultValue, description, options }) => {
+    async ({ tableId, columnId, name, type, isNullable, isPublished, defaultValue, description, options }) => {
       const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
       if (!tableData) {
         return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
@@ -225,7 +225,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           if (name !== undefined) rest.name = name;
           if (type !== undefined) rest.type = type;
           if (isNullable !== undefined) rest.isNullable = isNullable;
-          if (isHidden !== undefined) rest.isHidden = isHidden;
+          if (isPublished !== undefined) rest.isPublished = isPublished;
           if (defaultValue !== undefined) rest.defaultValue = defaultValue;
           if (description !== undefined) rest.description = description;
           if (options !== undefined) rest.options = JSON.parse(options);

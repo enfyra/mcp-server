@@ -333,8 +333,8 @@ server.tool(
   [
     'Create a post-hook that runs AFTER the handler. Use to transform responses or add metadata.',
     'Use `routeId` from `create_route` or `get_all_routes` — do not create a new table just to get a route id.',
-    'Macros: @DATA (handler result), @STATUS (HTTP status code), @BODY, @QUERY, @USER, @SHARE.',
-    'Must return a value — that becomes the final response.',
+    'Macros: @DATA, @STATUS, @ERROR, @BODY, @QUERY, @USER, @SHARE, @API (post-hooks always run; on error path @ERROR is set, @DATA is null).',
+    'Mutate @DATA / $ctx.$data in place, or return a value: if the hook returns anything other than undefined, that value replaces $ctx.$data as the response payload.',
   ].join(' '),
   {
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
