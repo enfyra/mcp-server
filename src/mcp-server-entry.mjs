@@ -374,7 +374,7 @@ registerTableTools(server, ENFYRA_API_URL);
 // CACHE & SYSTEM TOOLS
 // ============================================================================
 
-server.tool('reload_all', 'Reload all caches (metadata, routes, swagger, GraphQL)', {}, async () => {
+server.tool('reload_all', 'Reload all caches (metadata, routes, GraphQL)', {}, async () => {
   const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload', { method: 'POST' });
   return { content: [{ type: 'text', text: `System reloaded:\n${JSON.stringify(result, null, 2)}` }] };
 });
@@ -387,11 +387,6 @@ server.tool('reload_metadata', 'Reload metadata cache only', {}, async () => {
 server.tool('reload_routes', 'Reload routes cache only', {}, async () => {
   const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' });
   return { content: [{ type: 'text', text: `Routes reloaded:\n${JSON.stringify(result, null, 2)}` }] };
-});
-
-server.tool('reload_swagger', 'Reload Swagger/OpenAPI spec', {}, async () => {
-  const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload/swagger', { method: 'POST' });
-  return { content: [{ type: 'text', text: `Swagger reloaded:\n${JSON.stringify(result, null, 2)}` }] };
 });
 
 server.tool('reload_graphql', 'Reload GraphQL schema', {}, async () => {
