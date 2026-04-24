@@ -1,3 +1,7 @@
 node_modules/
 *.log
 .DS_Store
+CLAUDE.md
+AGENTS.md
+.mcp.json
+.cursor/
