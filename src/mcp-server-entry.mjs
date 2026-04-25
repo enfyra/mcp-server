@@ -552,6 +552,7 @@ server.tool(
     const payload = {
       transformer: {
         rule: 'Dynamic server scripts are transformed before sandbox execution. Macros expand to $ctx paths; comments are not transformed.',
+        preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use @BODY/@QUERY/@PARAMS/@USER/@REPOS/@HELPERS/@SOCKET/@TRIGGER/@DATA/@ERROR/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
         coreMacros: {
           '@BODY': '$ctx.$body',
           '@QUERY': '$ctx.$query',
@@ -620,7 +621,12 @@ server.tool(
         },
       },
       helpers: {
-        repos: '$repos.main enforces route main table behavior; $repos.secure.<table> enforces field permissions; $repos.<table> is trusted/internal.',
+        repos: {
+          scopes: '$repos.main enforces route main table behavior; $repos.secure.<table> enforces field permissions; $repos.<table> is trusted/internal.',
+          mutationReturnShape: '$repos.<table>.create({ data }) and $repos.<table>.update({ id, data }) return a collection-shaped result: { data: [...], count? }. data is always an array for create/update, even for one created/updated record. If a script needs the single record object, it must read result.data[0] or result.data?.[0] ?? null.',
+          preferredExample: 'const result = await @REPOS.main.create({ data: @BODY }); const record = result.data?.[0] ?? null; return record;',
+          wrongSingleRecordAccess: 'Do not use result.data.id, do not return result.data when one object is expected, and do not assume create/update returns the bare row object.',
+        },
         socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast, but cannot reply/join/leave/disconnect because there is no bound socket.',
         packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
         files: 'Upload helpers are on $helpers; raw create_record on file_definition is not equivalent to multipart upload/storage rollback.',
