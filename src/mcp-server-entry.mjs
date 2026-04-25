@@ -355,6 +355,7 @@ server.tool(
         relations: routeTables.has('relation_definition')
           ? 'relation_definition has a REST route for reads/metadata, but canonical schema migration is create_relation/delete_relation or table_definition PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
           : 'Use create_relation/delete_relation or table_definition PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
+        relationCascadeFkContract: 'Do not ask for or send physical FK/junction column names in relation create/update payloads. Enfyra derives fk/junction columns from relation propertyName/table metadata and hides FK columns from app schema/forms. Use targetTable, type, propertyName, inversePropertyName or mappedBy, isNullable, onDelete.',
         tableDefinitionRelations: (tableDefinition?.relations || []).map((rel) => rel.propertyName),
         relationDefinitionRelations: (relationTable?.relations || []).map((rel) => rel.propertyName),
       },
@@ -511,6 +512,7 @@ server.tool(
       backendNotes: {
         primaryKey: 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
         relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
+        relationCascadeFkContract: 'When creating relations through create_table/create_relation/table_definition PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms.',
         graphql: 'GraphQL query args also accept filter/sort/page/limit, but GraphQL requires Bearer auth and table enablement via gql_definition.',
       },
       table: tableName
@@ -997,6 +999,7 @@ server.tool(
         fields: 'Use column names and relation propertyName values.',
         filter: 'Use query DSL operators on column names or nested relation propertyName objects.',
         deep: 'Deep fetch keys are relation propertyName values.',
+        relationMutation: 'For relation schema creation/update use targetTable/type/propertyName/inversePropertyName|mappedBy/isNullable/onDelete only. Do not provide physical FK/junction columns; Enfyra derives and hides them.',
       },
     };
 

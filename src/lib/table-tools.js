@@ -43,7 +43,20 @@ function parseJsonArrayParam(name, value) {
 }
 
 function normalizeRelationForTablePatch(relation) {
-  const { sourceTable, targetTable, targetTableId, mappedBy, ...rest } = relation;
+  const {
+    sourceTable,
+    targetTable,
+    targetTableId,
+    mappedBy,
+    fkCol,
+    fkColumn,
+    foreignKeyColumn,
+    sourceColumn,
+    targetColumn,
+    junctionSourceColumn,
+    junctionTargetColumn,
+    ...rest
+  } = relation;
   const normalized = { ...rest };
   const resolvedTargetTable =
     targetTableId ??
@@ -90,6 +103,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       '**Not** for adding a custom API path or handler only — for that use **`create_route`** with an existing `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
       'PREFERRED: pass `columns` and `relations` params as JSON arrays to create a table WITH columns and relations in one call (cascade). Only use create_column/create_relation separately when adding to an existing table later.',
       'Relations are supported in this same create_table call when the target table already exists. Each relation uses { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete? }; targetTable may be a table id or {id}.',
+      'Do NOT provide physical FK/junction columns. Never include fkCol, fkColumn, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn. Enfyra derives and hides those physical columns from relation propertyName/table metadata.',
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
       'Enfyra auto-creates a default REST route at path `/<table_name>` (same segment as `name`, not alias).',
       'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
@@ -102,7 +116,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       alias: z.string().optional().describe('Table alias for API. If not provided, the table name will be used.'),
       description: z.string().optional().describe('Description of what this table stores.'),
       columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, defaultValue?, description?, options? }. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"status","type":"enum","options":["draft","published"]}]'),
-      relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id or {"id": <id>}. Example: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
+      relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id or {"id": <id>}. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Example: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
     },
     async ({ name, alias, description, columns: columnsJson, relations: relationsJson }) => {
       const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
@@ -316,7 +330,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'create_relation',
     [
       'Create a relation between two tables (many-to-one, one-to-many, one-to-one, many-to-many).',
-      'For many-to-one: a FK column is created on the source table. For one-to-many: the FK is on the target (inverse relation).',
+      'For many-to-one: a physical FK column is created on the source table. For one-to-many: the FK is on the target (inverse relation). This physical FK is derived by Enfyra and hidden from app schema/forms.',
+      'Never ask the user for physical FK column names and never send fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. The public API uses relation propertyName only.',
       'Run sequentially — DB migration locks per operation.',
     ].join(' '),
     {
