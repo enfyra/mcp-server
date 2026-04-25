@@ -349,7 +349,7 @@ server.tool(
         customRouteWorkflow: 'For a new endpoint use create_route against an existing table, then create_handler/create_pre_hook/create_post_hook. Do not create a table just to get a path.',
       },
       schemaManagement: {
-        createTable: 'POST /table_definition supports isSingleRecord at create time and supports columns and relations arrays in the same cascade call. MCP create_table exposes isSingleRecord, columns, and relations directly.',
+        createTable: 'POST /table_definition supports isSingleRecord at create time and supports columns and relations arrays in the same cascade call. MCP create_table exposes isSingleRecord, columns, and relations directly. It does not accept alias at create time; table name drives the default route/schema behavior.',
         updateTable: 'PATCH /table_definition/:id is the canonical path for table property changes and column/relation schema changes.',
         columns: 'column_definition has no REST route; use create_table/create_column/update_column/delete_column.',
         relations: routeTables.has('relation_definition')
@@ -498,6 +498,7 @@ server.tool(
         meta: 'Request metadata/counts where supported.',
         deep: 'Nested relation fetch object keyed by relation propertyName.',
       },
+      countPattern: 'For counts, query only fields=id with limit=1 and request meta. Use meta=totalCount without a filter, or meta=filterCount when a filter is supplied. MCP count_records wraps this pattern.',
       deep: {
         shape: '{ [relationName]: { fields?, filter?, sort?, limit?, page?, deep? } }',
         rules: [
@@ -626,6 +627,7 @@ server.tool(
           mutationReturnShape: '$repos.<table>.create({ data }) and $repos.<table>.update({ id, data }) return a collection-shaped result: { data: [...], count? }. data is always an array for create/update, even for one created/updated record. If a script needs the single record object, it must read result.data[0] or result.data?.[0] ?? null.',
           preferredExample: 'const result = await @REPOS.main.create({ data: @BODY }); const record = result.data?.[0] ?? null; return record;',
           wrongSingleRecordAccess: 'Do not use result.data.id, do not return result.data when one object is expected, and do not assume create/update returns the bare row object.',
+          countPattern: 'To count records in custom code, do not fetch full rows. Use const result = await @REPOS.main.find({ fields: "id", limit: 1, meta: filter ? "filterCount" : "totalCount", ...(filter ? { filter } : {}) }); then read result.meta.filterCount or result.meta.totalCount.',
         },
         socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast, but cannot reply/join/leave/disconnect because there is no bound socket.',
         packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
@@ -702,6 +704,49 @@ server.tool('query_table', 'Query any table in Enfyra with filters, sorting, and
   const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}${query ? `?${query}` : ''}`);
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
+
+server.tool(
+  'count_records',
+  [
+    'Count records in a route-backed Enfyra table using the lightweight REST meta pattern.',
+    'Without filter it requests fields=id&limit=1&meta=totalCount and returns meta.totalCount.',
+    'With filter it requests fields=id&limit=1&meta=filterCount and returns meta.filterCount.',
+    'Use this instead of fetching rows when the user only needs a count.',
+  ].join(' '),
+  {
+    tableName: z.string().describe('Table name to count. Must have a REST route.'),
+    filter: z.string().optional().describe('Optional Query DSL filter as JSON string. Example: \'{"status":{"_eq":"active"}}\''),
+  },
+  async ({ tableName, filter }) => {
+    validateTableName(tableName);
+    validateFilter(filter);
+
+    const metaField = filter ? 'filterCount' : 'totalCount';
+    const queryParams = new URLSearchParams();
+    queryParams.set('fields', 'id');
+    queryParams.set('limit', '1');
+    queryParams.set('meta', metaField);
+    if (filter) queryParams.set('filter', filter);
+
+    const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${queryParams.toString()}`);
+    const meta = result?.meta || {};
+    const hasCount = Object.prototype.hasOwnProperty.call(meta, metaField);
+    const count = hasCount ? Number(meta[metaField]) : null;
+    const payload = {
+      tableName,
+      count,
+      countField: metaField,
+      filterApplied: !!filter,
+      meta,
+      request: {
+        path: `/${tableName}`,
+        query: Object.fromEntries(queryParams.entries()),
+      },
+      warning: hasCount ? undefined : `Response meta did not include ${metaField}.`,
+    };
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
 
 server.tool(
   'find_one_record',

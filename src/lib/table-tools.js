@@ -111,20 +111,20 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       'Set `isSingleRecord: true` directly in create_table for settings/config tables that should keep only one record.',
       `Full URLs: ${apiBase}/<table_name> (example table post: ${apiBase}/post).`,
       'GraphQL is enabled separately per table through `gql_definition` or `update_table` with `graphqlEnabled`; it is not controlled by route availableMethods.',
+      'Do not set alias during create_table. The create tool accepts name, description, isSingleRecord, columns, and relations only; use update_table later only if alias really needs to change.',
     ].join(' '),
     {
       name: z.string().describe('Table name (e.g., "user_definition", "my_custom_table"). Must be unique, lowercase with underscores.'),
-      alias: z.string().optional().describe('Table alias for API. If not provided, the table name will be used.'),
       description: z.string().optional().describe('Description of what this table stores.'),
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record tables such as settings/config. This is passed directly to table_definition create.'),
       columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, defaultValue?, description?, options? }. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"status","type":"enum","options":["draft","published"]}]'),
       relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id or {"id": <id>}. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Example: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
     },
-    async ({ name, alias, description, isSingleRecord, columns: columnsJson, relations: relationsJson }) => {
+    async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson }) => {
       const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
       const userColumns = parseJsonArrayParam('columns', columnsJson);
       const userRelations = parseJsonArrayParam('relations', relationsJson).map(normalizeRelationForTablePatch);
-      const body = { name, alias, description, columns: [idColumn, ...userColumns], relations: userRelations };
+      const body = { name, description, columns: [idColumn, ...userColumns], relations: userRelations };
       if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
       const result = await fetchAPI(ENFYRA_API_URL, '/table_definition', {
         method: 'POST',
