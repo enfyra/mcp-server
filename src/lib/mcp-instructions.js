@@ -64,6 +64,7 @@ export function buildMcpServerInstructions(apiBaseUrl) {
     '',
     '### After a new table is created',
     '- MCP **`create_table` supports creating columns and relations in the same call**: pass `columns` and `relations` as JSON arrays. Use `create_relation` only when adding a relation to an existing table later.',
+    '- MCP **`create_table` supports `isSingleRecord` directly**. Set `isSingleRecord: true` in the create call for settings/config tables that should keep only one record; do not create first and then patch only for this flag.',
     '- In `create_table.relations`, each relation uses `targetTable` (table id or `{id}`), `type`, `propertyName`, optional `inversePropertyName` or `mappedBy`, `isNullable`, `onDelete`, and `description`. The target table must already exist.',
     '- **Never ask for or provide physical FK column names** when creating/updating relations. Do not include `fkCol`, `fkColumn`, `foreignKeyColumn`, `sourceColumn`, `targetColumn`, `junctionSourceColumn`, or `junctionTargetColumn` in create/update payloads unless you are only displaying existing metadata. Enfyra relation cascade derives physical FK/junction names from `propertyName` and table metadata, then hides FK columns from app form/schema definition.',
     '- For relation CRUD payloads, the public interface is the relation `propertyName`: example create body uses `"author": {"id": 1}`, not `"authorId"` or a physical FK column. Query/deep/filter keys also use relation `propertyName`.',

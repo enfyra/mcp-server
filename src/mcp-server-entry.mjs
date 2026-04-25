@@ -349,7 +349,7 @@ server.tool(
         customRouteWorkflow: 'For a new endpoint use create_route against an existing table, then create_handler/create_pre_hook/create_post_hook. Do not create a table just to get a path.',
       },
       schemaManagement: {
-        createTable: 'POST /table_definition supports columns and relations arrays in the same cascade call. MCP create_table exposes both.',
+        createTable: 'POST /table_definition supports isSingleRecord at create time and supports columns and relations arrays in the same cascade call. MCP create_table exposes isSingleRecord, columns, and relations directly.',
         updateTable: 'PATCH /table_definition/:id is the canonical path for table property changes and column/relation schema changes.',
         columns: 'column_definition has no REST route; use create_table/create_column/update_column/delete_column.',
         relations: routeTables.has('relation_definition')
