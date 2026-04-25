@@ -23,6 +23,258 @@ import { registerTableTools } from './lib/table-tools.js';
 // Initialize auth module
 initAuth(ENFYRA_API_URL, ENFYRA_EMAIL, ENFYRA_PASSWORD);
 
+const CAPABILITY_AREAS = [
+  {
+    area: 'Schema and metadata',
+    tables: ['table_definition', 'column_definition', 'relation_definition', 'schema_migration_definition'],
+    workflow: 'Use table tools for table/column/relation schema changes. column_definition and session_definition are internal/no-route; do not CRUD them directly.',
+  },
+  {
+    area: 'Dynamic REST API',
+    tables: ['route_definition', 'route_handler_definition', 'pre_hook_definition', 'post_hook_definition', 'route_permission_definition', 'method_definition'],
+    workflow: 'Create paths with create_route on an existing main table, then add handlers/hooks. REST methods are GET/POST/PATCH/DELETE.',
+  },
+  {
+    area: 'Auth, roles, sessions, OAuth',
+    tables: ['user_definition', 'role_definition', 'session_definition', 'oauth_config_definition', 'oauth_account_definition'],
+    workflow: 'Email/password login is /auth/login. OAuth is browser redirect based. session_definition is internal/no-route.',
+  },
+  {
+    area: 'Guards and permissions',
+    tables: ['guard_definition', 'guard_rule_definition', 'field_permission_definition', 'column_rule_definition'],
+    workflow: 'Use route guard metadata for request gating, field permissions for record field access, and column rules for body validation.',
+  },
+  {
+    area: 'GraphQL',
+    tables: ['gql_definition'],
+    workflow: 'Enable per table through gql_definition or update_table graphqlEnabled. GraphQL requires Bearer auth.',
+  },
+  {
+    area: 'Files and storage',
+    tables: ['file_definition', 'file_permission_definition', 'folder_definition', 'storage_config_definition'],
+    workflow: 'Use file endpoints/helpers for uploads and asset streaming; metadata tables describe files, permissions, folders, and storage backends.',
+  },
+  {
+    area: 'WebSocket',
+    tables: ['websocket_definition', 'websocket_event_definition'],
+    workflow: 'Socket.IO gateways/events are metadata-backed. Use admin test runner for handler scripts before relying on a real client.',
+  },
+  {
+    area: 'Flows',
+    tables: ['flow_definition', 'flow_step_definition', 'flow_execution_definition'],
+    workflow: 'Create flows and steps via CRUD, test steps with test_flow_step/run_admin_test, trigger with trigger_flow.',
+  },
+  {
+    area: 'Extensions, menus, packages',
+    tables: ['extension_definition', 'menu_definition', 'package_definition', 'bootstrap_script_definition'],
+    workflow: 'Extensions are Vue SFC records. Use install_package for package_definition rather than raw CRUD.',
+  },
+  {
+    area: 'Settings and platform config',
+    tables: ['setting_definition', 'cors_origin_definition'],
+    workflow: 'Settings and CORS origins are metadata-backed platform configuration.',
+  },
+];
+
+const FILTER_OPERATORS = [
+  '_eq',
+  '_neq',
+  '_gt',
+  '_gte',
+  '_lt',
+  '_lte',
+  '_in',
+  '_not_in',
+  '_nin',
+  '_contains',
+  '_starts_with',
+  '_ends_with',
+  '_between',
+  '_is_null',
+  '_is_not_null',
+  '_and',
+  '_or',
+  '_not',
+];
+
+const FIELD_PERMISSION_CONDITION_OPERATORS = [
+  '_eq',
+  '_neq',
+  '_gt',
+  '_gte',
+  '_lt',
+  '_lte',
+  '_in',
+  '_not_in',
+  '_nin',
+  '_is_null',
+  '_is_not_null',
+  '_and',
+  '_or',
+  '_not',
+];
+
+function normalizeTables(metadata) {
+  const tablesSource = metadata?.data?.tables || metadata?.tables || metadata?.data || [];
+  return Array.isArray(tablesSource)
+    ? tablesSource
+    : Object.values(tablesSource || {});
+}
+
+function getPrimaryColumn(table) {
+  return (table?.columns || []).find((column) => column.isPrimary) || null;
+}
+
+function inferPrimaryKeyContext(tables) {
+  const primaryColumns = tables
+    .map((table) => ({ table: table.name, primaryKey: getPrimaryColumn(table)?.name || null }))
+    .filter((item) => item.primaryKey);
+  const counts = primaryColumns.reduce((acc, item) => {
+    acc[item.primaryKey] = (acc[item.primaryKey] || 0) + 1;
+    return acc;
+  }, {});
+  const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  return {
+    dominantPrimaryKey: dominant,
+    counts,
+    inferredBackendFamily: dominant === '_id' ? 'mongodb-like' : dominant === 'id' ? 'sql-like' : 'unknown',
+    exactDatabaseType: 'not exposed by current public/admin API; infer from metadata or add a backend context endpoint for exact mysql/postgres/mongodb/sqlite',
+    sampleTables: primaryColumns.slice(0, 12),
+  };
+}
+
+function getMetadataDatabaseContext(metadata, tables) {
+  const inferred = inferPrimaryKeyContext(tables);
+  return {
+    dbType: metadata?.dbType || metadata?.data?.dbType || null,
+    pkField: metadata?.pkField || metadata?.data?.pkField || inferred.dominantPrimaryKey,
+    inferredBackendFamily: inferred.inferredBackendFamily,
+    primaryKeyCounts: inferred.counts,
+    source: metadata?.dbType || metadata?.data?.dbType
+      ? 'metadata'
+      : 'inferred from table primary columns',
+    sampleTables: inferred.sampleTables,
+  };
+}
+
+function summarizeTable(table) {
+  if (!table) return null;
+  return {
+    id: table.id ?? table._id,
+    name: table.name,
+    alias: table.alias,
+    primaryKey: getPrimaryColumn(table)?.name || null,
+    validateBody: table.validateBody,
+    graphqlEnabled: table.graphqlEnabled,
+    columns: (table.columns || []).map((column) => ({
+      id: column.id ?? column._id,
+      name: column.name,
+      type: column.type,
+      isPrimary: !!column.isPrimary,
+      isNullable: column.isNullable,
+      isPublished: column.isPublished,
+    })),
+    relations: (table.relations || []).map((relation) => ({
+      id: relation.id ?? relation._id,
+      propertyName: relation.propertyName,
+      type: relation.type,
+      targetTable: relation.targetTable?.name || relation.targetTableName || relation.targetTable,
+      inversePropertyName: relation.inversePropertyName,
+      mappedBy: relation.mappedBy?.propertyName || relation.mappedBy,
+      isNullable: relation.isNullable,
+      onDelete: relation.onDelete,
+      isPublished: relation.isPublished,
+    })),
+  };
+}
+
+function summarizeRoutes(routesResult) {
+  return (routesResult?.data || []).map((route) => ({
+    id: route.id ?? route._id,
+    path: route.path,
+    mainTable: route.mainTable?.name || route.mainTableName || null,
+    availableMethods: (route.availableMethods || []).map((method) => method.method).filter(Boolean),
+    publishedMethods: (route.publishedMethods || []).map((method) => method.method).filter(Boolean),
+    isEnabled: route.isEnabled,
+  }));
+}
+
+function unwrapData(result) {
+  return Array.isArray(result?.data) ? result.data : [];
+}
+
+function getId(record) {
+  return record?.id ?? record?._id ?? null;
+}
+
+function sameId(a, b) {
+  if (a === null || a === undefined || b === null || b === undefined) return false;
+  return String(a) === String(b);
+}
+
+function refId(value) {
+  return typeof value === 'object' && value !== null ? getId(value) : value;
+}
+
+function firstDataRecord(result) {
+  return Array.isArray(result?.data) ? result.data[0] : result;
+}
+
+function resultRecordId(result) {
+  return getId(firstDataRecord(result));
+}
+
+function parseJsonArg(value, fallback = undefined) {
+  if (value === undefined || value === null || value === '') return fallback;
+  return JSON.parse(value);
+}
+
+function normalizeRestPath(path) {
+  if (!path) return '/';
+  if (/^https?:\/\//i.test(path)) {
+    throw new Error('Only Enfyra API paths are allowed, not full external URLs');
+  }
+  return path.startsWith('/') ? path : `/${path}`;
+}
+
+function pickCodeSummary(record, fieldName) {
+  const code = record?.[fieldName];
+  return {
+    ...record,
+    [fieldName]: typeof code === 'string'
+      ? {
+          length: code.length,
+          preview: code.length > 700 ? `${code.slice(0, 700)}...` : code,
+        }
+      : code,
+  };
+}
+
+async function fetchAll(path) {
+  return unwrapData(await fetchAPI(ENFYRA_API_URL, path));
+}
+
+async function getMetadataTables() {
+  const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+  return {
+    metadata,
+    tables: normalizeTables(metadata),
+  };
+}
+
+function resolveTableOrThrow(tables, tableName) {
+  const table = tables.find((item) => item?.name === tableName || item?.alias === tableName);
+  if (!table) throw new Error(`Unknown table "${tableName}"`);
+  return table;
+}
+
+function resolveFieldOrThrow(table, fieldName, kind = 'column') {
+  const list = kind === 'relation' ? table.relations || [] : table.columns || [];
+  const field = list.find((item) => item.name === fieldName || item.propertyName === fieldName);
+  if (!field) throw new Error(`Unknown ${kind} "${fieldName}" on table "${table.name}"`);
+  return field;
+}
+
 // Create MCP server — `instructions` is sent to the host (e.g. Claude Code) for the LLM; not README
 const server = new McpServer(
   {
@@ -50,6 +302,337 @@ server.tool('get_table_metadata', 'Get metadata for a specific table by name', {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
+server.tool(
+  'discover_enfyra_system',
+  [
+    'Call this first when you need to understand the live Enfyra instance.',
+    'Returns a concise capability map from live metadata/routes/method rows, including schema management, REST route behavior, GraphQL enablement, and relation handling.',
+  ].join(' '),
+  {},
+  async () => {
+    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+    const [routesResult, methodsResult] = await Promise.all([
+      fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publishedMethods.*&limit=1000'),
+      fetchAPI(ENFYRA_API_URL, '/method_definition?limit=100'),
+    ]);
+
+    const tables = normalizeTables(metadata);
+    const tableNames = tables.map((table) => table?.name).filter(Boolean).sort();
+    const routes = summarizeRoutes(routesResult);
+    const routeTables = new Set(routes.map((route) => route.mainTable).filter(Boolean));
+    const noRouteTables = tableNames.filter((name) => !routeTables.has(name));
+    const relationTable = tables.find((table) => table?.name === 'relation_definition');
+    const tableDefinition = tables.find((table) => table?.name === 'table_definition');
+    const gqlDefinition = tables.find((table) => table?.name === 'gql_definition');
+    const routeTableList = [...routeTables].sort();
+
+    const payload = {
+      apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
+      counts: {
+        tables: tableNames.length,
+        routes: routes.length,
+        methods: methodsResult?.data?.length || 0,
+      },
+      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, method: method.method })),
+      capabilityAreas: CAPABILITY_AREAS.map((item) => ({
+        ...item,
+        presentTables: item.tables.filter((table) => tableNames.includes(table)),
+        routeBackedTables: item.tables.filter((table) => routeTables.has(table)),
+        noRouteTables: item.tables.filter((table) => tableNames.includes(table) && !routeTables.has(table)),
+      })),
+      rest: {
+        routePattern: 'Dynamic REST routes expose GET/POST at /<route-path> and PATCH/DELETE at /<route-path>/:id; there is no GET /<route-path>/:id.',
+        publicAccess: 'publishedMethods controls anonymous REST access per route/method; otherwise Bearer JWT + routePermissions apply.',
+        routeTables: routeTableList,
+        noRouteTables,
+        canonicalCrudTools: 'query_table/create_record/update_record/delete_record use dynamic REST routes and only work for route-backed tables.',
+        customRouteWorkflow: 'For a new endpoint use create_route against an existing table, then create_handler/create_pre_hook/create_post_hook. Do not create a table just to get a path.',
+      },
+      schemaManagement: {
+        createTable: 'POST /table_definition supports columns and relations arrays in the same cascade call. MCP create_table exposes both.',
+        updateTable: 'PATCH /table_definition/:id is the canonical path for table property changes and column/relation schema changes.',
+        columns: 'column_definition has no REST route; use create_table/create_column/update_column/delete_column.',
+        relations: routeTables.has('relation_definition')
+          ? 'relation_definition has a REST route for reads/metadata, but canonical schema migration is create_relation/delete_relation or table_definition PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
+          : 'Use create_relation/delete_relation or table_definition PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
+        tableDefinitionRelations: (tableDefinition?.relations || []).map((rel) => rel.propertyName),
+        relationDefinitionRelations: (relationTable?.relations || []).map((rel) => rel.propertyName),
+      },
+      adminTesting: {
+        runAdminTest: 'run_admin_test wraps POST /admin/test/run for flow_step, websocket_event, and websocket_connection scripts.',
+        testFlowStep: 'test_flow_step wraps POST /admin/flow/test-step.',
+        triggerFlow: 'trigger_flow wraps POST /admin/flow/trigger/:id and enqueues a flow execution.',
+      },
+      graphql: {
+        endpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`,
+        schemaEndpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql-schema`,
+        enablement: 'A table appears in GraphQL when gql_definition has an enabled row for that table. REST route availableMethods does not enable GraphQL.',
+        auth: 'GraphQL currently requires Authorization: Bearer <accessToken>; REST publishedMethods does not make GraphQL anonymous.',
+        management: routeTables.has('gql_definition')
+          ? 'Use update_table graphqlEnabled or create/update records on gql_definition, then reload_graphql if needed.'
+          : 'Use update_table graphqlEnabled, then reload_graphql if needed.',
+        gqlDefinitionColumns: (gqlDefinition?.columns || []).map((column) => column.name),
+      },
+      tableNames,
+      routes,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+server.tool(
+  'discover_runtime_context',
+  [
+    'Discover live runtime context that affects how an LLM should use Enfyra.',
+    'Reports inferred primary key/backend family, route/cache/admin surfaces, active metadata-backed runtime areas, and what is not exposed by the backend API.',
+  ].join(' '),
+  {},
+  async () => {
+    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+    const [
+      routesResult,
+      methodsResult,
+      gqlResult,
+      flowsResult,
+      websocketResult,
+      storageResult,
+      settingsResult,
+      meResult,
+    ] = await Promise.all([
+      fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publishedMethods.*,isEnabled&limit=1000'),
+      fetchAPI(ENFYRA_API_URL, '/method_definition?limit=100'),
+      fetchAPI(ENFYRA_API_URL, '/gql_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/flow_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/websocket_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/storage_config_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/setting_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/me').catch((error) => ({ error: String(error.message || error), data: [] })),
+    ]);
+
+    const tables = normalizeTables(metadata);
+    const routes = summarizeRoutes(routesResult);
+    const routeTables = new Set(routes.map((route) => route.mainTable).filter(Boolean));
+    const adminRoutes = routes.filter((route) => route.path?.startsWith('/admin'));
+    const publicRoutes = routes.filter((route) => route.publishedMethods?.length);
+
+    const payload = {
+      apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
+      authenticatedUser: Array.isArray(meResult?.data) ? meResult.data[0] || null : meResult?.data || null,
+      database: getMetadataDatabaseContext(metadata, tables),
+      counts: {
+        tables: tables.length,
+        routes: routes.length,
+        routeBackedTables: routeTables.size,
+        noRouteTables: tables.filter((table) => !routeTables.has(table.name)).length,
+        methods: methodsResult?.data?.length || 0,
+        graphqlDefinitions: gqlResult?.data?.length || 0,
+        enabledGraphqlDefinitions: (gqlResult?.data || []).filter((row) => row.isEnabled !== false).length,
+        flows: flowsResult?.data?.length || 0,
+        enabledFlows: (flowsResult?.data || []).filter((row) => row.isEnabled !== false).length,
+        websocketGateways: websocketResult?.data?.length || 0,
+        enabledWebsocketGateways: (websocketResult?.data || []).filter((row) => row.isEnabled !== false).length,
+        storageConfigs: storageResult?.data?.length || 0,
+        settings: settingsResult?.data?.length || 0,
+      },
+      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, method: method.method })),
+      routeRuntime: {
+        routePattern: 'GET/POST /<route-path>; PATCH/DELETE /<route-path>/:id; no dynamic GET /<route-path>/:id.',
+        adminRoutes: adminRoutes.map((route) => route.path).sort(),
+        publicRoutes: publicRoutes.map((route) => ({
+          path: route.path,
+          mainTable: route.mainTable,
+          publishedMethods: route.publishedMethods,
+        })),
+      },
+      cacheAndCluster: {
+        metadataMutationReloads: 'Metadata-backed mutations emit cache invalidation; admin reload endpoints exist for metadata/routes/graphql/guards/all.',
+        multiInstanceContract: 'Backend is cluster-aware through cache invalidation and Redis/BullMQ paths, but this MCP can only observe metadata/API state, not every node health.',
+        flowWorkerContract: 'Flow jobs require the backend flow worker to be initialized after HTTP listen and websocket gateway init; trigger_flow only confirms enqueue/result from admin endpoint.',
+      },
+      runtimeGaps: [
+        metadata?.dbType || metadata?.data?.dbType
+          ? null
+          : 'Exact database type is not exposed by current MCP-visible API.',
+        'Redis/BullMQ/socket adapter health is not exposed by current MCP-visible API.',
+        'MCP can test flow steps and websocket scripts through admin test endpoints, but not prove every production queue/client path without a real end-to-end client.',
+      ].filter(Boolean),
+    };
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+server.tool(
+  'discover_query_capabilities',
+  [
+    'Discover Enfyra query/filter/deep-fetch capabilities for the live instance.',
+    'Optionally pass tableName to include columns, relations, primary key, route paths, and examples for that table.',
+  ].join(' '),
+  {
+    tableName: z.string().optional().describe('Optional table name to summarize query fields and relation/deep capabilities.'),
+  },
+  async ({ tableName }) => {
+    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+    const routesResult = await fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publishedMethods.*,isEnabled&limit=1000');
+    const tables = normalizeTables(metadata);
+    const routes = summarizeRoutes(routesResult);
+    const table = tableName ? tables.find((item) => item.name === tableName) : null;
+    const primaryKey = table ? getPrimaryColumn(table)?.name || 'id' : inferPrimaryKeyContext(tables).dominantPrimaryKey || 'id';
+    const tableRoutes = tableName
+      ? routes.filter((route) => route.mainTable === tableName)
+      : [];
+
+    const payload = {
+      operators: {
+        filter: FILTER_OPERATORS,
+        fieldPermissionConditions: FIELD_PERMISSION_CONDITION_OPERATORS,
+        fieldPermissionConditionUnsupported: ['_contains', '_starts_with', '_ends_with', '_between'],
+      },
+      queryParams: {
+        fields: 'Comma-separated scalar/relation fields. Relations use relation propertyName, not physical FK column names.',
+        filter: 'JSON object using operators above. Relation filters use nested relation propertyName objects.',
+        sort: 'Field name or -field. Dotted relation sort is constrained by relation type and deep validation.',
+        page: '1-based page.',
+        limit: 'Page size.',
+        meta: 'Request metadata/counts where supported.',
+        deep: 'Nested relation fetch object keyed by relation propertyName.',
+      },
+      deep: {
+        shape: '{ [relationName]: { fields?, filter?, sort?, limit?, page?, deep? } }',
+        rules: [
+          'Unknown relation keys are invalid.',
+          'Unknown deep entry keys are invalid.',
+          'limit on many-to-one/one-to-one relations is invalid.',
+          'Dotted sort through one-to-many/many-to-many is invalid.',
+          'Nested deep is recursively validated.',
+          'Field permissions may rewrite filters/sorts and sanitize post-query results.',
+        ],
+      },
+      backendNotes: {
+        primaryKey: 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
+        relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
+        graphql: 'GraphQL query args also accept filter/sort/page/limit, but GraphQL requires Bearer auth and table enablement via gql_definition.',
+      },
+      table: tableName
+        ? {
+            exists: !!table,
+            metadata: summarizeTable(table),
+            routes: tableRoutes,
+            examples: table
+              ? {
+                  list: `GET /${tableRoutes[0]?.path?.replace(/^\//, '') || table.name}?limit=10`,
+                  oneByPkFilter: { [primaryKey]: { _eq: '<id>' } },
+                  relationDeep: (table.relations || [])[0]
+                    ? { [(table.relations || [])[0].propertyName]: { fields: ['id'], limit: 5 } }
+                    : null,
+                  relationFilter: (table.relations || [])[0]
+                    ? { [(table.relations || [])[0].propertyName]: { [primaryKey]: { _eq: '<related-id>' } } }
+                    : null,
+                }
+              : null,
+          }
+        : null,
+      discoveryRule: 'When building a query, inspect table metadata first, then use relation propertyName and primary column from that metadata.',
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+server.tool(
+  'discover_script_contexts',
+  [
+    'Discover runtime script contexts and macro availability for handlers, hooks, flows, websocket scripts, GraphQL, packages, and extensions.',
+    'Use before writing dynamic JavaScript logic so the model does not mix context variables across surfaces.',
+  ].join(' '),
+  {},
+  async () => {
+    const payload = {
+      transformer: {
+        rule: 'Dynamic server scripts are transformed before sandbox execution. Macros expand to $ctx paths; comments are not transformed.',
+        coreMacros: {
+          '@BODY': '$ctx.$body',
+          '@QUERY': '$ctx.$query',
+          '@PARAMS': '$ctx.$params',
+          '@USER': '$ctx.$user',
+          '@REPOS': '$ctx.$repos',
+          '@HELPERS': '$ctx.$helpers',
+          '@SOCKET': '$ctx.$socket',
+          '@DATA': '$ctx.$data',
+          '@STATUS': '$ctx.$statusCode',
+          '@ERROR': '$ctx.$error',
+          '@PKGS': '$ctx.$pkgs',
+          '@LOGS': '$ctx.$logs',
+          '@SHARE': '$ctx.$share',
+          '@TRIGGER(name,payload)': '$ctx.$trigger(name,payload)',
+        },
+        flowMacros: {
+          '@FLOW': '$ctx.$flow',
+          '@FLOW_PAYLOAD': '$ctx.$flow.$payload',
+          '@FLOW_LAST': '$ctx.$flow.$last',
+          '@FLOW_META': '$ctx.$flow.$meta',
+          '#table_name': '$ctx.$repos.table_name',
+        },
+        throws: '@THROW400 through @THROW503 and @THROW map to $ctx.$throw helpers.',
+      },
+      contexts: {
+        preHook: {
+          runs: 'Before handler.',
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@HELPERS', '@THROW*', '@SOCKET emit helpers'],
+          returnBehavior: 'Returning a non-undefined value skips handler and becomes response data.',
+        },
+        handler: {
+          runs: 'Main route logic, or canonical CRUD if no handler overrides.',
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS.main', '@REPOS.secure', '@HELPERS', '@PKGS', '@SOCKET emit helpers', '@TRIGGER'],
+          returnBehavior: 'Return value becomes response body unless post-hook changes it.',
+        },
+        postHook: {
+          runs: 'After handler, including error path.',
+          data: ['@DATA', '@STATUS', '@ERROR', '@BODY', '@QUERY', '@USER', '@SHARE', '@API'],
+          returnBehavior: 'Mutate @DATA/$ctx.$data or return a non-undefined replacement response.',
+        },
+        flowStep: {
+          runs: 'Inside flow execution or admin flow step test.',
+          data: ['@FLOW_PAYLOAD', '@FLOW_LAST', '@FLOW', '@FLOW_META', '#table_name', '@HELPERS', '@SOCKET', '@TRIGGER'],
+          resultBehavior: 'Step return value is injected into @FLOW.<step.key> and @FLOW_LAST.',
+          branching: 'Condition steps use JavaScript truthy/falsy result; child branch is true/false.',
+        },
+        websocketConnection: {
+          runs: 'Socket.IO connection handler.',
+          data: ['@BODY connection info', '@USER if authenticated', '@SOCKET reply/join/leave/disconnect/emit helpers'],
+        },
+        websocketEvent: {
+          runs: 'Socket.IO event handler.',
+          data: ['@BODY event payload', '@USER if authenticated', '@SOCKET reply/join/leave/disconnect/emit helpers'],
+          resultBehavior: 'Client ack receives queued state first; handler result is emitted asynchronously as ws:result/ws:error with requestId.',
+        },
+        graphqlResolver: {
+          runs: 'Generated GraphQL resolver delegates to dynamic repo/query services.',
+          data: ['GraphQL request context', 'Bearer auth user', 'dynamic repositories'],
+          caveat: 'REST publishedMethods do not make GraphQL anonymous.',
+        },
+        extensionVueSfc: {
+          runs: 'Frontend extension code, not server sandbox.',
+          data: ['Vue/Nuxt composables', 'Enfyra composables', 'auto-resolved UI components'],
+          caveat: 'No import statements; save as extension_definition Vue SFC record.',
+        },
+      },
+      helpers: {
+        repos: '$repos.main enforces route main table behavior; $repos.secure.<table> enforces field permissions; $repos.<table> is trusted/internal.',
+        socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast, but cannot reply/join/leave/disconnect because there is no bound socket.',
+        packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
+        files: 'Upload helpers are on $helpers; raw create_record on file_definition is not equivalent to multipart upload/storage rollback.',
+      },
+      adminTesting: {
+        flowStep: 'Use test_flow_step or run_admin_test(kind=flow_step).',
+        websocket: 'Use run_admin_test(kind=websocket_event|websocket_connection).',
+      },
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
 // ============================================================================
 // QUERY TOOLS
 // ============================================================================
@@ -62,7 +645,7 @@ server.tool(
     'Auth: publishedMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
     'If path might differ from table name, use get_all_routes before asserting a URL.',
     'Same mapping as MCP tool → HTTP: query_table=GET /table?..., create_record=POST /table, update_record=PATCH /table/id, delete_record=DELETE /table/id.',
-    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; GQL_QUERY vs GQL_MUTATION in publishedMethods — server instructions.',
+    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via gql_definition/update_table graphqlEnabled and send Bearer auth.',
   ].join(' '),
   {},
   async () => {
@@ -79,6 +662,7 @@ server.tool(
       },
       auth: {
         publishedMethods: 'If the HTTP method is published for that route, no Bearer required; else Bearer JWT and routePermissions apply.',
+        graphql: 'GraphQL currently requires Bearer auth; route publishedMethods do not make GraphQL anonymous.',
         mcp: 'This server uses admin credentials from env for tools (fetchAPI).',
       },
       pathResolution: 'Confirm route path with get_all_routes or metadata — path may not equal table name.',
@@ -173,6 +757,68 @@ server.tool('delete_record', 'Delete a record by ID', {
   return { content: [{ type: 'text', text: `Record deleted:\n${JSON.stringify(result, null, 2)}` }] };
 });
 
+server.tool(
+  'run_admin_test',
+  [
+    'Run an Enfyra admin test without saving metadata. Wraps POST /admin/test/run.',
+    'Kinds: flow_step, websocket_event, websocket_connection. Use this to validate flow/websocket script behavior before creating records.',
+  ].join(' '),
+  {
+    kind: z.enum(['flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
+    body: z.string().describe('JSON body for the test. Include type/config for flow_step or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
+  },
+  async ({ kind, body }) => {
+    const parsed = body ? JSON.parse(body) : {};
+    const result = await fetchAPI(ENFYRA_API_URL, '/admin/test/run', {
+      method: 'POST',
+      body: JSON.stringify({ ...parsed, kind }),
+    });
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  'test_flow_step',
+  'Test a single flow step without saving it. Wraps POST /admin/flow/test-step.',
+  {
+    type: z.enum(['script', 'condition', 'query', 'create', 'update', 'delete', 'http', 'trigger_flow', 'sleep', 'log']).describe('Flow step type'),
+    config: z.string().describe('Step config as JSON string'),
+    timeout: z.number().optional().describe('Timeout in ms'),
+    key: z.string().optional().describe('Optional step key for mock flow context'),
+    mockFlow: z.string().optional().describe('Optional mockFlow JSON object'),
+  },
+  async ({ type, config, timeout, key, mockFlow }) => {
+    const body = {
+      type,
+      config: JSON.parse(config),
+      ...(timeout ? { timeout } : {}),
+      ...(key ? { key } : {}),
+      ...(mockFlow ? { mockFlow: JSON.parse(mockFlow) } : {}),
+    };
+    const result = await fetchAPI(ENFYRA_API_URL, '/admin/flow/test-step', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
+server.tool(
+  'trigger_flow',
+  'Trigger a saved flow by id or name. Wraps POST /admin/flow/trigger/:id.',
+  {
+    flowIdOrName: z.union([z.string(), z.number()]).describe('Flow id or name accepted by FlowService.trigger'),
+    payload: z.string().optional().describe('Payload JSON object. Default {}.'),
+  },
+  async ({ flowIdOrName, payload }) => {
+    const result = await fetchAPI(ENFYRA_API_URL, `/admin/flow/trigger/${encodeURIComponent(String(flowIdOrName))}`, {
+      method: 'POST',
+      body: JSON.stringify({ payload: payload ? JSON.parse(payload) : {} }),
+    });
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  },
+);
+
 // ============================================================================
 // ROUTE & HANDLER TOOLS
 // ============================================================================
@@ -196,6 +842,319 @@ function resolveMethodIds(methodMap, names) {
   });
 }
 
+async function getMethodIdNameMap() {
+  const methodMap = await getMethodMap();
+  return Object.fromEntries(Object.entries(methodMap).map(([method, id]) => [String(id), method]));
+}
+
+function withMethodNames(records, methodIdNameMap, field = 'methods') {
+  return records.map((record) => ({
+    ...record,
+    [field]: Array.isArray(record?.[field])
+      ? record[field].map((item) => ({
+          ...item,
+          method: item.method || methodIdNameMap[String(getId(item))] || null,
+        }))
+      : record?.[field],
+  }));
+}
+
+async function collectRestDefinitionState() {
+  await getValidToken();
+  const [
+    metadataContext,
+    routes,
+    handlers,
+    preHooks,
+    postHooks,
+    routePermissions,
+    guards,
+    guardRules,
+    fieldPermissions,
+    columnRules,
+    methodIdNameMap,
+  ] = await Promise.all([
+    getMetadataTables(),
+    fetchAll('/route_definition?limit=1000'),
+    fetchAll('/route_handler_definition?limit=1000'),
+    fetchAll('/pre_hook_definition?limit=1000'),
+    fetchAll('/post_hook_definition?limit=1000'),
+    fetchAll('/route_permission_definition?limit=1000'),
+    fetchAll('/guard_definition?limit=1000'),
+    fetchAll('/guard_rule_definition?limit=1000'),
+    fetchAll('/field_permission_definition?limit=1000'),
+    fetchAll('/column_rule_definition?limit=1000'),
+    getMethodIdNameMap(),
+  ]);
+
+  return {
+    ...metadataContext,
+    routes,
+    handlers,
+    preHooks,
+    postHooks,
+    routePermissions,
+    guards,
+    guardRules,
+    fieldPermissions,
+    columnRules,
+    methodIdNameMap,
+  };
+}
+
+function enrichRoute(route, state) {
+  const routeId = getId(route);
+  const routeHandlers = state.handlers
+    .filter((item) => sameId(refId(item.route), routeId))
+    .map((item) => pickCodeSummary({
+      ...item,
+      method: item.method ? { ...item.method, method: state.methodIdNameMap[String(getId(item.method))] || item.method.method || null } : item.method,
+    }, 'logic'));
+  const routePreHooks = withMethodNames(
+    state.preHooks.filter((item) => item.isGlobal || sameId(refId(item.route), routeId)),
+    state.methodIdNameMap,
+  ).map((item) => pickCodeSummary(item, 'code'));
+  const routePostHooks = withMethodNames(
+    state.postHooks.filter((item) => item.isGlobal || sameId(refId(item.route), routeId)),
+    state.methodIdNameMap,
+  ).map((item) => pickCodeSummary(item, 'code'));
+  const routePermissions = withMethodNames(
+    state.routePermissions.filter((item) => sameId(refId(item.route), routeId)),
+    state.methodIdNameMap,
+  );
+  const routeGuards = withMethodNames(
+    state.guards.filter((item) => item.isGlobal || sameId(refId(item.route), routeId)),
+    state.methodIdNameMap,
+  ).map((guard) => ({
+    ...guard,
+    rules: state.guardRules.filter((rule) => sameId(refId(rule.guard), getId(guard))),
+  }));
+
+  return {
+    ...route,
+    availableMethods: Array.isArray(route.availableMethods)
+      ? route.availableMethods.map((method) => ({ ...method, method: method.method || state.methodIdNameMap[String(getId(method))] || null }))
+      : route.availableMethods,
+    publishedMethods: Array.isArray(route.publishedMethods)
+      ? route.publishedMethods.map((method) => ({ ...method, method: method.method || state.methodIdNameMap[String(getId(method))] || null }))
+      : route.publishedMethods,
+    skipRoleGuardMethods: Array.isArray(route.skipRoleGuardMethods)
+      ? route.skipRoleGuardMethods.map((method) => ({ ...method, method: method.method || state.methodIdNameMap[String(getId(method))] || null }))
+      : route.skipRoleGuardMethods,
+    handlers: routeHandlers,
+    preHooks: routePreHooks,
+    postHooks: routePostHooks,
+    routePermissions,
+    guards: routeGuards,
+  };
+}
+
+server.tool(
+  'inspect_table',
+  [
+    'REST-first inspection for one table. Use before writing code, filters, permissions, validation, or routes for a table.',
+    'Returns columns, relations, route-backed REST paths, route handlers/hooks/guards/permissions, field permissions, and column validation rules.',
+  ].join(' '),
+  {
+    tableName: z.string().describe('Table name or alias to inspect'),
+  },
+  async ({ tableName }) => {
+    let state = await collectRestDefinitionState();
+    let table = state.tables.find((item) => item?.name === tableName || item?.alias === tableName);
+    if (!table) {
+      await fetchAPI(ENFYRA_API_URL, '/admin/reload/metadata', { method: 'POST' }).catch(() => {});
+      await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      state = await collectRestDefinitionState();
+      table = state.tables.find((item) => item?.name === tableName || item?.alias === tableName);
+    }
+    if (!table) throw new Error(`Unknown table "${tableName}"`);
+    const tableId = getId(table);
+    const columnIds = new Set((table.columns || []).map((column) => String(getId(column))));
+    const relationIds = new Set((table.relations || []).map((relation) => String(getId(relation))));
+    const routes = state.routes.filter((route) => sameId(refId(route.mainTable), tableId));
+
+    const payload = {
+      table: summarizeTable(table),
+      database: getMetadataDatabaseContext(state.metadata, state.tables),
+      rest: {
+        routePattern: 'GET/POST /<path>; PATCH/DELETE /<path>/:id; no dynamic GET /<path>/:id.',
+        routes: routes.map((route) => enrichRoute(route, state)),
+        routeBacked: routes.length > 0,
+      },
+      validation: {
+        validateBody: table.validateBody,
+        columnRules: state.columnRules.filter((rule) => columnIds.has(String(refId(rule.column)))),
+      },
+      permissions: {
+        fieldPermissions: state.fieldPermissions.filter((permission) => (
+          permission.column && columnIds.has(String(refId(permission.column)))
+        ) || (
+          permission.relation && relationIds.has(String(refId(permission.relation)))
+        )),
+      },
+      queryGuidance: {
+        fields: 'Use column names and relation propertyName values.',
+        filter: 'Use query DSL operators on column names or nested relation propertyName objects.',
+        deep: 'Deep fetch keys are relation propertyName values.',
+      },
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+server.tool(
+  'inspect_route',
+  [
+    'REST-first inspection for a route/path. Use before changing handlers, hooks, permissions, guards, or testing an endpoint.',
+    'Returns the backing table, available/published methods, handlers, hooks, route permissions, guards, and exact REST URL pattern.',
+  ].join(' '),
+  {
+    path: z.string().optional().describe('Route path, e.g. /user_definition'),
+    routeId: z.union([z.string(), z.number()]).optional().describe('route_definition id. Use either path or routeId.'),
+  },
+  async ({ path, routeId }) => {
+    if (!path && !routeId) throw new Error('Provide path or routeId');
+    const state = await collectRestDefinitionState();
+    const route = state.routes.find((item) => (
+      routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
+    ));
+    if (!route) throw new Error(`Route not found: ${routeId || path}`);
+    const table = state.tables.find((item) => sameId(getId(item), refId(route.mainTable))) || null;
+
+    const payload = {
+      apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
+      route: enrichRoute(route, state),
+      mainTable: summarizeTable(table),
+      restPattern: {
+        listOrCreate: `${ENFYRA_API_URL.replace(/\/$/, '')}${route.path}`,
+        updateOrDelete: `${ENFYRA_API_URL.replace(/\/$/, '')}${route.path}/<id>`,
+        oneById: `Use GET ${route.path}?filter=${JSON.stringify({ [getPrimaryColumn(table)?.name || 'id']: { _eq: '<id>' } })}&limit=1`,
+      },
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+server.tool(
+  'inspect_feature',
+  [
+    'Search live REST/system metadata for a feature name, route path, table, handler, hook, guard, or permission.',
+    'Use when the user mentions a capability and you need to find where it lives before editing.',
+  ].join(' '),
+  {
+    query: z.string().describe('Feature keyword, table name, route path, handler text, hook name, or guard name'),
+  },
+  async ({ query }) => {
+    const state = await collectRestDefinitionState();
+    const q = query.toLowerCase();
+    const matchesText = (value) => JSON.stringify(value ?? '').toLowerCase().includes(q);
+    const tableMatches = state.tables.filter((table) => matchesText({
+      name: table.name,
+      alias: table.alias,
+      description: table.description,
+      columns: table.columns?.map((column) => ({ name: column.name, description: column.description })),
+      relations: table.relations?.map((relation) => ({ propertyName: relation.propertyName, description: relation.description })),
+    }));
+    const routeMatches = state.routes.filter((route) => matchesText(route));
+    const handlerMatches = state.handlers.filter((handler) => matchesText(handler)).map((item) => pickCodeSummary(item, 'logic'));
+    const preHookMatches = state.preHooks.filter((hook) => matchesText(hook)).map((item) => pickCodeSummary(item, 'code'));
+    const postHookMatches = state.postHooks.filter((hook) => matchesText(hook)).map((item) => pickCodeSummary(item, 'code'));
+    const guardMatches = state.guards.filter((guard) => matchesText(guard));
+    const permissionMatches = [
+      ...state.routePermissions.filter((permission) => matchesText(permission)).map((permission) => ({ type: 'route_permission', ...permission })),
+      ...state.fieldPermissions.filter((permission) => matchesText(permission)).map((permission) => ({ type: 'field_permission', ...permission })),
+    ];
+
+    const payload = {
+      query,
+      counts: {
+        tables: tableMatches.length,
+        routes: routeMatches.length,
+        handlers: handlerMatches.length,
+        preHooks: preHookMatches.length,
+        postHooks: postHookMatches.length,
+        guards: guardMatches.length,
+        permissions: permissionMatches.length,
+      },
+      tables: tableMatches.map(summarizeTable).slice(0, 20),
+      routes: routeMatches.map((route) => enrichRoute(route, state)).slice(0, 20),
+      handlers: handlerMatches.slice(0, 20),
+      preHooks: preHookMatches.slice(0, 20),
+      postHooks: postHookMatches.slice(0, 20),
+      guards: guardMatches.slice(0, 20),
+      permissions: permissionMatches.slice(0, 20),
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+server.tool(
+  'test_rest_endpoint',
+  [
+    'Execute a real REST request against the configured Enfyra API base.',
+    'Use this after inspecting a route or changing handlers/hooks/guards. Pass paths like /table_definition?limit=1, not external URLs.',
+  ].join(' '),
+  {
+    method: z.enum(['GET', 'POST', 'PATCH', 'DELETE']).default('GET').describe('HTTP method'),
+    path: z.string().describe('Enfyra API path, e.g. /route_definition?limit=1'),
+    query: z.string().optional().describe('Optional query params JSON object, merged onto path query string'),
+    body: z.string().optional().describe('Optional JSON request body string'),
+    headers: z.string().optional().describe('Optional headers JSON object'),
+    useAuth: z.boolean().optional().default(true).describe('Attach MCP admin Bearer token. Set false to test published/public access.'),
+  },
+  async ({ method, path, query, body, headers, useAuth }) => {
+    const restPath = normalizeRestPath(path);
+    const url = new URL(`${ENFYRA_API_URL.replace(/\/$/, '')}${restPath}`);
+    const queryObj = parseJsonArg(query, {});
+    for (const [key, value] of Object.entries(queryObj || {})) {
+      url.searchParams.set(key, typeof value === 'string' ? value : JSON.stringify(value));
+    }
+
+    const requestHeaders = {
+      'Content-Type': 'application/json',
+      ...(parseJsonArg(headers, {}) || {}),
+    };
+    if (useAuth) {
+      requestHeaders.Authorization = `Bearer ${await getValidToken()}`;
+    }
+
+    const started = Date.now();
+    const response = await fetch(url, {
+      method,
+      headers: requestHeaders,
+      ...(body !== undefined && body !== null && method !== 'GET' ? { body } : {}),
+    });
+    const contentType = response.headers.get('content-type') || '';
+    const responseText = await response.text();
+    let parsedBody = responseText;
+    if (contentType.includes('application/json') && responseText) {
+      parsedBody = JSON.parse(responseText);
+    }
+
+    const payload = {
+      request: {
+        method,
+        url: url.toString(),
+        authenticated: !!useAuth,
+      },
+      response: {
+        ok: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        contentType,
+        durationMs: Date.now() - started,
+        body: parsedBody,
+      },
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
 server.tool('get_all_routes', 'List all route definitions (path, mainTable, handlers, hooks, permissions). Call before create_route to avoid duplicate paths and to pick routeId for hooks/handlers.', {
   includeDisabled: z.boolean().optional().default(false).describe('Include disabled routes'),
 }, async ({ includeDisabled }) => {
@@ -207,18 +1166,18 @@ server.tool('get_all_routes', 'List all route definitions (path, mainTable, hand
 server.tool(
   'create_route',
   [
-    '**Use this when the user wants a new API route or path** — not `create_table`. A route links a URL path to an existing table (`mainTableId`) and sets HTTP/GQL methods.',
+    '**Use this when the user wants a new REST API route or path** — not `create_table`. A route links a URL path to an existing table (`mainTableId`) and sets HTTP methods.',
     'Do NOT create a new table_definition only to expose an endpoint; pick `mainTableId` from existing metadata unless the user explicitly needs new tables/columns.',
-    'availableMethods = which verbs the route responds to. publishedMethods = which verbs are public (no auth).',
+    'availableMethods = which REST verbs the route responds to. publishedMethods = which REST verbs are public (no auth). GraphQL is enabled separately through gql_definition/update_table graphqlEnabled.',
     'After creation the tool auto-reloads routes. Then create handlers for specific methods via create_handler on this route id.',
     'Flow: resolve table id → create_route → create_handler (per method) → optionally create_pre_hook / create_post_hook → test via HTTP or admin test APIs (see server instructions).',
   ].join(' '),
   {
     path: z.string().describe('URL path, must start with / (e.g., "/my-endpoint")'),
     mainTableId: z.union([z.string(), z.number()]).describe('ID of the table_definition this route operates on. The route\'s $repos.main will query this table.'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE', 'GQL_QUERY', 'GQL_MUTATION']))
-      .describe('HTTP/GQL methods this route supports (availableMethods). Common: ["GET","POST","PATCH","DELETE"]'),
-    publishedMethods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE', 'GQL_QUERY', 'GQL_MUTATION'])).optional()
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE']))
+      .describe('HTTP methods this route supports (availableMethods). Common: ["GET","POST","PATCH","DELETE"]'),
+    publishedMethods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
       .describe('Methods accessible WITHOUT auth token. Omit = all methods require auth.'),
     isEnabled: z.boolean().optional().default(true).describe('Enable route immediately'),
     description: z.string().optional().describe('Route description'),
@@ -260,7 +1219,7 @@ server.tool(
   ].join(' '),
   {
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE', 'GQL_QUERY', 'GQL_MUTATION']))
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE']))
       .describe('Methods to create handlers for. Creates one handler per method.'),
     logic: z.string().describe('Handler JavaScript code'),
     timeout: z.number().optional().describe('Timeout in ms (default: system DEFAULT_HANDLER_TIMEOUT, usually 30000)'),
@@ -364,6 +1323,197 @@ server.tool(
     await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
 
     return { content: [{ type: 'text', text: `Post-hook "${name}" created (ID: ${result.id}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+  },
+);
+
+server.tool(
+  'create_column_rule',
+  [
+    'Create a REST body validation rule for a table column.',
+    'Use inspect_table first to confirm validateBody, column type, and existing rules. Rule value is JSON; common shape is {"v": ...}.',
+  ].join(' '),
+  {
+    tableName: z.string().describe('Table name or alias'),
+    columnName: z.string().describe('Column name'),
+    ruleType: z.enum(['min', 'max', 'minLength', 'maxLength', 'pattern', 'format', 'minItems', 'maxItems', 'custom']).describe('Validation rule type'),
+    value: z.string().optional().describe('Rule payload JSON, e.g. {"v":10} or {"v":"email"}'),
+    message: z.string().optional().describe('Custom validation error message'),
+    description: z.string().optional().describe('Admin note'),
+    isEnabled: z.boolean().optional().default(true).describe('Enable the rule immediately'),
+  },
+  async ({ tableName, columnName, ruleType, value, message, description, isEnabled }) => {
+    const { tables } = await getMetadataTables();
+    const table = resolveTableOrThrow(tables, tableName);
+    const column = resolveFieldOrThrow(table, columnName, 'column');
+    const body = {
+      ruleType,
+      value: parseJsonArg(value, null),
+      message,
+      description,
+      isEnabled,
+      column: { id: getId(column) },
+    };
+    const result = await fetchAPI(ENFYRA_API_URL, '/column_rule_definition', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: 'text', text: `Column rule created for ${table.name}.${column.name}.\n${JSON.stringify(result, null, 2)}` }] };
+  },
+);
+
+server.tool(
+  'create_field_permission',
+  [
+    'Create a field permission for one column or relation.',
+    'Exactly one of columnName or relationName is required. Scope requires roleId or allowedUserIds. Conditions use the field permission condition DSL, not the full query DSL.',
+  ].join(' '),
+  {
+    tableName: z.string().describe('Table name or alias'),
+    columnName: z.string().optional().describe('Column name to protect'),
+    relationName: z.string().optional().describe('Relation propertyName to protect'),
+    action: z.enum(['read', 'create', 'update']).default('read').describe('Action this permission applies to'),
+    effect: z.enum(['allow', 'deny']).default('allow').describe('Allow or deny this field action'),
+    roleId: z.union([z.string(), z.number()]).optional().describe('Role id scope'),
+    allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Specific user ids scope'),
+    condition: z.string().optional().describe('Optional condition JSON using field permission condition DSL'),
+    description: z.string().optional().describe('Admin note'),
+    isEnabled: z.boolean().optional().default(true).describe('Enable immediately'),
+  },
+  async ({ tableName, columnName, relationName, action, effect, roleId, allowedUserIds, condition, description, isEnabled }) => {
+    if (!!columnName === !!relationName) throw new Error('Provide exactly one of columnName or relationName');
+    if (!roleId && (!allowedUserIds || allowedUserIds.length === 0)) {
+      throw new Error('Provide roleId or allowedUserIds');
+    }
+    const { tables } = await getMetadataTables();
+    const table = resolveTableOrThrow(tables, tableName);
+    const body = {
+      isEnabled,
+      description,
+      action,
+      effect,
+      condition: parseJsonArg(condition, null),
+      ...(roleId ? { role: { id: roleId } } : {}),
+      ...(allowedUserIds?.length ? { allowedUsers: allowedUserIds.map((id) => ({ id })) } : {}),
+    };
+    if (columnName) {
+      body.column = { id: getId(resolveFieldOrThrow(table, columnName, 'column')) };
+    } else {
+      body.relation = { id: getId(resolveFieldOrThrow(table, relationName, 'relation')) };
+    }
+    const result = await fetchAPI(ENFYRA_API_URL, '/field_permission_definition', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return { content: [{ type: 'text', text: `Field permission created on ${table.name}.${columnName || relationName}.\n${JSON.stringify(result, null, 2)}` }] };
+  },
+);
+
+server.tool(
+  'create_route_permission',
+  [
+    'Create route access permission for a route and REST methods.',
+    'Use this when a non-root role/user should access an authenticated route. publishedMethods are for public access; route permissions are for authenticated role/user access.',
+  ].join(' '),
+  {
+    path: z.string().optional().describe('Route path, e.g. /user_definition'),
+    routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).describe('REST methods this permission allows'),
+    roleId: z.union([z.string(), z.number()]).optional().describe('Role id scope'),
+    allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Specific user ids scope'),
+    description: z.string().optional().describe('Admin note'),
+    isEnabled: z.boolean().optional().default(true).describe('Enable immediately'),
+  },
+  async ({ path, routeId, methods, roleId, allowedUserIds, description, isEnabled }) => {
+    if (!path && !routeId) throw new Error('Provide path or routeId');
+    if (!roleId && (!allowedUserIds || allowedUserIds.length === 0)) {
+      throw new Error('Provide roleId or allowedUserIds');
+    }
+    const routes = await fetchAll('/route_definition?limit=1000');
+    const route = routes.find((item) => (
+      routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
+    ));
+    if (!route) throw new Error(`Route not found: ${routeId || path}`);
+    const methodMap = await getMethodMap();
+    const body = {
+      isEnabled,
+      description,
+      route: { id: getId(route) },
+      methods: resolveMethodIds(methodMap, methods),
+      ...(roleId ? { role: { id: roleId } } : {}),
+      ...(allowedUserIds?.length ? { allowedUsers: allowedUserIds.map((id) => ({ id })) } : {}),
+    };
+    const result = await fetchAPI(ENFYRA_API_URL, '/route_permission_definition', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+    return { content: [{ type: 'text', text: `Route permission created for ${route.path}. Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+  },
+);
+
+server.tool(
+  'create_guard',
+  [
+    'Create a metadata guard with optional rules for REST request gating.',
+    'Root guards attach to route or global position. Rule configs: rate limits use {"maxRequests":number,"perSeconds":number}; IP lists use {"ips":["127.0.0.1"]}.',
+  ].join(' '),
+  {
+    name: z.string().describe('Guard name'),
+    position: z.enum(['pre_auth', 'post_auth']).default('pre_auth').describe('Execution position for root guard'),
+    routeId: z.union([z.string(), z.number()]).optional().describe('Optional route id'),
+    path: z.string().optional().describe('Optional route path'),
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional().describe('Methods this guard applies to. Empty means all configured behavior for route/global.'),
+    combinator: z.enum(['and', 'or']).default('and').describe('How child guards/rules combine'),
+    priority: z.number().optional().default(0).describe('Lower runs first'),
+    isGlobal: z.boolean().optional().default(false).describe('Apply globally instead of one route'),
+    isEnabled: z.boolean().optional().default(false).describe('Enable immediately. Default false to avoid accidental lockout.'),
+    description: z.string().optional().describe('Admin note'),
+    rules: z.string().optional().describe('Optional rules JSON array: [{type, config, priority?, isEnabled?, description?, userIds?}]'),
+  },
+  async ({ name, position, routeId, path, methods, combinator, priority, isGlobal, isEnabled, description, rules }) => {
+    let route = null;
+    if (!isGlobal && (routeId || path)) {
+      const routes = await fetchAll('/route_definition?limit=1000');
+      route = routes.find((item) => (
+        routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
+      ));
+      if (!route) throw new Error(`Route not found: ${routeId || path}`);
+    }
+    const methodMap = await getMethodMap();
+    const guardBody = {
+      name,
+      position,
+      combinator,
+      priority,
+      isGlobal,
+      isEnabled,
+      description,
+      ...(route ? { route: { id: getId(route) } } : {}),
+      ...(methods?.length ? { methods: resolveMethodIds(methodMap, methods) } : {}),
+    };
+    const guard = await fetchAPI(ENFYRA_API_URL, '/guard_definition', {
+      method: 'POST',
+      body: JSON.stringify(guardBody),
+    });
+    const ruleInputs = parseJsonArg(rules, []);
+    const createdRules = [];
+    for (const rule of ruleInputs) {
+      const ruleBody = {
+        type: rule.type,
+        config: rule.config,
+        priority: rule.priority ?? 0,
+        isEnabled: rule.isEnabled ?? true,
+        description: rule.description,
+        guard: { id: resultRecordId(guard) },
+        ...(Array.isArray(rule.userIds) && rule.userIds.length ? { users: rule.userIds.map((id) => ({ id })) } : {}),
+      };
+      createdRules.push(await fetchAPI(ENFYRA_API_URL, '/guard_rule_definition', {
+        method: 'POST',
+        body: JSON.stringify(ruleBody),
+      }));
+    }
+    await fetchAPI(ENFYRA_API_URL, '/admin/reload/guards', { method: 'POST' }).catch(() => {});
+    return { content: [{ type: 'text', text: `Guard created. Guard cache reloaded.\n${JSON.stringify({ guard, rules: createdRules }, null, 2)}` }] };
   },
 );
 
