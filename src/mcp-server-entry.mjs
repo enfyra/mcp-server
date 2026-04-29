@@ -448,7 +448,9 @@ server.tool(
       },
       cacheAndCluster: {
         metadataMutationReloads: 'Metadata-backed mutations emit cache invalidation; admin reload endpoints exist for metadata/routes/graphql/guards/all.',
-        multiInstanceContract: 'Backend is cluster-aware through cache invalidation and Redis/BullMQ paths, but this MCP can only observe metadata/API state, not every node health.',
+        runtimeCacheContract: 'REDIS_RUNTIME_CACHE=true stores runtime definition snapshots in Redis so instances with the same NODE_NAME read the same runtime cache namespace.',
+        userCacheContract: '$cache/@CACHE uses managed user cache under NODE_NAME:user_cache:* with REDIS_USER_CACHE_LIMIT_MB default 30 MB; quota eviction only removes user cache keys, not runtime cache, BullMQ, Socket.IO, telemetry, or lock keys.',
+        multiInstanceContract: 'Backend is cluster-aware through cache invalidation, Redis runtime cache, Redis user cache, and BullMQ paths, but this MCP can only observe metadata/API state, not every node health.',
         flowWorkerContract: 'Flow jobs require the backend flow worker to be initialized after HTTP listen and websocket gateway init; trigger_flow only confirms enqueue/result from admin endpoint.',
       },
       runtimeGaps: [
@@ -553,13 +555,14 @@ server.tool(
     const payload = {
       transformer: {
         rule: 'Dynamic server scripts are transformed before sandbox execution. Macros expand to $ctx paths; comments are not transformed.',
-        preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use @BODY/@QUERY/@PARAMS/@USER/@REPOS/@HELPERS/@SOCKET/@TRIGGER/@DATA/@ERROR/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
+        preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use @BODY/@QUERY/@PARAMS/@USER/@REPOS/@CACHE/@HELPERS/@SOCKET/@TRIGGER/@DATA/@ERROR/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
         coreMacros: {
           '@BODY': '$ctx.$body',
           '@QUERY': '$ctx.$query',
           '@PARAMS': '$ctx.$params',
           '@USER': '$ctx.$user',
           '@REPOS': '$ctx.$repos',
+          '@CACHE': '$ctx.$cache',
           '@HELPERS': '$ctx.$helpers',
           '@SOCKET': '$ctx.$socket',
           '@DATA': '$ctx.$data',
@@ -577,27 +580,32 @@ server.tool(
           '@FLOW_META': '$ctx.$flow.$meta',
           '#table_name': '$ctx.$repos.table_name',
         },
+        cache: {
+          contract: '@CACHE and $ctx.$cache use managed user cache. Use logical keys only; Enfyra stores Redis-backed user cache under NODE_NAME:user_cache:* and Redis Admin Key Editor uses the same storage path.',
+          quota: 'REDIS_USER_CACHE_LIMIT_MB defaults to 30 MB. If exceeded, Enfyra evicts least-recently-used user-cache keys only; system Redis keys are not counted or evicted.',
+          keyRule: 'Do not include NODE_NAME, user_cache:, or Redis namespace prefixes in scripts. Prefer TTL-based set(key, value, ttlMs); setNoExpire may still be evicted by the user-cache soft allocation.',
+        },
         throws: '@THROW400 through @THROW503 and @THROW map to $ctx.$throw helpers.',
       },
       contexts: {
         preHook: {
           runs: 'Before handler.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@HELPERS', '@THROW*', '@SOCKET emit helpers'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@CACHE', '@HELPERS', '@THROW*', '@SOCKET emit helpers'],
           returnBehavior: 'Returning a non-undefined value skips handler and becomes response data.',
         },
         handler: {
           runs: 'Main route logic, or canonical CRUD if no handler overrides.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS.main', '@REPOS.secure', '@HELPERS', '@PKGS', '@SOCKET emit helpers', '@TRIGGER'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS.main', '@REPOS.secure', '@CACHE', '@HELPERS', '@PKGS', '@SOCKET emit helpers', '@TRIGGER'],
           returnBehavior: 'Return value becomes response body unless post-hook changes it.',
         },
         postHook: {
           runs: 'After handler, including error path.',
-          data: ['@DATA', '@STATUS', '@ERROR', '@BODY', '@QUERY', '@USER', '@SHARE', '@API'],
+          data: ['@DATA', '@STATUS', '@ERROR', '@BODY', '@QUERY', '@USER', '@CACHE', '@SHARE', '@API'],
           returnBehavior: 'Mutate @DATA/$ctx.$data or return a non-undefined replacement response.',
         },
         flowStep: {
           runs: 'Inside flow execution or admin flow step test.',
-          data: ['@FLOW_PAYLOAD', '@FLOW_LAST', '@FLOW', '@FLOW_META', '#table_name', '@HELPERS', '@SOCKET', '@TRIGGER'],
+          data: ['@FLOW_PAYLOAD', '@FLOW_LAST', '@FLOW', '@FLOW_META', '#table_name', '@CACHE', '@HELPERS', '@SOCKET', '@TRIGGER'],
           resultBehavior: 'Step return value is injected into @FLOW.<step.key> and @FLOW_LAST.',
           branching: 'Condition steps use JavaScript truthy/falsy result; child branch is true/false.',
         },
