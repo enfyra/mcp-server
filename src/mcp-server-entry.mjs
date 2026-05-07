@@ -138,7 +138,7 @@ function inferPrimaryKeyContext(tables) {
     dominantPrimaryKey: dominant,
     counts,
     inferredBackendFamily: dominant === '_id' ? 'mongodb-like' : dominant === 'id' ? 'sql-like' : 'unknown',
-    exactDatabaseType: 'not exposed by current public/admin API; infer from metadata or add a backend context endpoint for exact mysql/postgres/mongodb/sqlite',
+    exactDatabaseType: 'not exposed by current public/admin API; infer from metadata or add a backend context endpoint for exact mysql/postgres/mongodb',
     sampleTables: primaryColumns.slice(0, 12),
   };
 }
