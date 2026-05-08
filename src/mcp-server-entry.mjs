@@ -591,6 +591,8 @@ server.tool(
         preHook: {
           runs: 'Before handler.',
           data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@CACHE', '@HELPERS', '@THROW*', '@SOCKET emit helpers'],
+          queryContract: '@QUERY.filter is initialized as an object. When adding RLS or tenant filters in pre-hooks, merge directly with _and; do not add defensive type checks around @QUERY.filter.',
+          rlsPattern: 'For relation-scoped reads, mutate @QUERY.filter instead of returning data. Example: const incomingFilter = @QUERY.filter; const scope = { memberships: { member: { id: { _eq: @USER.id } } } }; @QUERY.filter = Object.keys(incomingFilter).length ? { _and: [incomingFilter, scope] } : scope;',
           returnBehavior: 'Returning a non-undefined value skips handler and becomes response data.',
         },
         handler: {

@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
+import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output, cwd } from 'node:process';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
@@ -12,32 +13,34 @@ function printHelp() {
 Usage:
   npx @enfyra/mcp-server config [options]
 
-Writes project config under the current working directory and Codex config under your home directory:
+Writes project config under the current working directory:
   • ./.mcp.json           — Claude Code project scope
   • ./.cursor/mcp.json    — Cursor project scope
-  • ~/.codex/config.toml  — Codex user scope
+  • ./.codex/config.toml  — Codex project scope
 
 Options:
   --api-url, -a <url>     ENFYRA_API_URL
   --email, -e <email>     ENFYRA_EMAIL
   --password, -p <secret> ENFYRA_PASSWORD
+  --global                Write global/user config for selected hosts instead of project config
   --reconfig              Always choose target again in interactive mode and replace the old enfyra config for that target
   --yes                   Non-interactive: no prompts (CI / scripts); use CLI, env, existing file, then defaults
-  Target — non-interactive default is all; with TTY and no target flags, you are prompted [1]/[2]/[3]/[4]:
+  Target — non-interactive default is all; with TTY and no target flags, choose with ↑/↓:
   --claude-code, --claude, --claude-only   Only ./.mcp.json (Claude Code project scope)
   --cursor, --cursor-only                  Only ./.cursor/mcp.json (Cursor)
-  --codex, --codex-only                    Only ~/.codex/config.toml (Codex)
+  --codex, --codex-only                    Only ./.codex/config.toml (Codex project scope)
   Passing multiple target flags writes each selected target.
   -h, --help              Show this help
 
-Interactive mode: asks Claude Code vs Cursor vs both if you did not pass target flags; then asks for URL / email / password
-  when missing. Existing ./.mcp.json, ./.cursor/mcp.json, and ~/.codex/config.toml are used as defaults. Re-run to update.
+Interactive mode: lets you choose Claude Code / Cursor / Codex / all if you did not pass target flags; then asks for URL / email / password
+  when missing. Existing project config is used as defaults. Re-run to update.
 
 Examples:
   npx @enfyra/mcp-server config
   npx @enfyra/mcp-server config --claude-code
   npx @enfyra/mcp-server config --cursor --yes
   npx @enfyra/mcp-server config --codex --yes
+  npx @enfyra/mcp-server config --global --codex
   npx @enfyra/mcp-server config --reconfig
   npx @enfyra/mcp-server config -a http://localhost:3000/api -e admin@x.com -p 'secret'
   npx @enfyra/mcp-server config --yes
@@ -56,6 +59,7 @@ function parseArgs(argv) {
     help: false,
     yes: false,
     reconfig: false,
+    global: false,
   };
   let pickClaude = false;
   let pickCursor = false;
@@ -72,6 +76,7 @@ function parseArgs(argv) {
     else if (a === 'help') out.help = true;
     else if (a === '--yes') out.yes = true;
     else if (a === '--reconfig') out.reconfig = true;
+    else if (a === '--global') out.global = true;
     else if (a === '--api-url' || a === '-a') out.apiUrl = next();
     else if (a === '--email' || a === '-e') out.email = next();
     else if (a === '--password' || a === '-p') out.password = next();
@@ -199,11 +204,23 @@ async function readCodexEnfyraEnv(absPath) {
   return null;
 }
 
-async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex) {
+function getCodexConfigPath(root, globalScope) {
+  return globalScope ? join(homedir(), '.codex', 'config.toml') : join(root, '.codex', 'config.toml');
+}
+
+function getClaudeConfigPath(root, globalScope) {
+  return globalScope ? join(homedir(), '.mcp.json') : join(root, '.mcp.json');
+}
+
+function getCursorConfigPath(root, globalScope) {
+  return globalScope ? join(homedir(), '.cursor', 'mcp.json') : join(root, '.cursor', 'mcp.json');
+}
+
+async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, globalScope) {
   const paths = [];
-  if (readClaude) paths.push(join(root, '.mcp.json'));
-  if (readCursor) paths.push(join(root, '.cursor', 'mcp.json'));
-  if (!readClaude && readCursor) paths.push(join(root, '.mcp.json'));
+  if (readClaude) paths.push(getClaudeConfigPath(root, globalScope));
+  if (readCursor) paths.push(getCursorConfigPath(root, globalScope));
+  if (!globalScope && !readClaude && readCursor) paths.push(join(root, '.mcp.json'));
   const seen = new Set();
   for (const p of paths) {
     if (seen.has(p)) continue;
@@ -224,19 +241,41 @@ async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex) {
     }
   }
   if (readCodex) {
-    const codex = await readCodexEnfyraEnv(join(homedir(), '.codex', 'config.toml'));
+    const codex = await readCodexEnfyraEnv(getCodexConfigPath(root, globalScope));
     if (codex) return codex;
   }
   return { apiUrl: '', email: '', password: '' };
 }
 
 async function promptTargetChoice() {
+  const choices = [
+    {
+      label: 'Claude Code — project ./.mcp.json',
+      value: { claude: true, cursor: false, codex: false },
+    },
+    {
+      label: 'Cursor — project ./.cursor/mcp.json',
+      value: { claude: false, cursor: true, codex: false },
+    },
+    {
+      label: 'Codex — project ./.codex/config.toml',
+      value: { claude: false, cursor: false, codex: true },
+    },
+    {
+      label: 'All',
+      value: { claude: true, cursor: true, codex: true },
+    },
+  ];
+  if (input.setRawMode && output.isTTY) {
+    return promptTargetSelect(choices, 3);
+  }
+
   const rl = createInterface({ input, output });
   const line = (await rl.question(
     'Where should Enfyra MCP config be written?\n'
       + '  [1] Claude Code — ./.mcp.json\n'
       + '  [2] Cursor — ./.cursor/mcp.json\n'
-      + '  [3] Codex — ~/.codex/config.toml\n'
+      + '  [3] Codex — ./.codex/config.toml\n'
       + '  [4] All [default]\n'
       + 'Choice [4]: ',
   )).trim().toLowerCase();
@@ -254,6 +293,66 @@ async function promptTargetChoice() {
     return { claude: false, cursor: false, codex: true };
   }
   return { claude: true, cursor: true, codex: true };
+}
+
+async function promptTargetSelect(choices, initialIndex = 0) {
+  let selected = Math.max(0, Math.min(initialIndex, choices.length - 1));
+  let renderedLines = 0;
+
+  const render = () => {
+    if (renderedLines > 0) {
+      output.write(`\x1B[${renderedLines}A\x1B[0J`);
+    }
+    const lines = [
+      'Where should Enfyra MCP config be written?',
+      ...choices.map((choice, index) => `${index === selected ? '›' : ' '} ${choice.label}`),
+      '',
+      'Use ↑/↓ to move, Enter to select.',
+    ];
+    renderedLines = lines.length;
+    output.write(`${lines.join('\n')}\n`);
+  };
+
+  return new Promise((resolve, reject) => {
+    const wasRaw = input.isRaw;
+    const cleanup = () => {
+      input.off('keypress', onKeypress);
+      if (!wasRaw) input.setRawMode(false);
+      output.write('\x1B[?25h');
+    };
+    const finish = () => {
+      cleanup();
+      resolve(choices[selected].value);
+    };
+    const onKeypress = (_str, key = {}) => {
+      if (key.ctrl && key.name === 'c') {
+        cleanup();
+        output.write('\n');
+        reject(new Error('Cancelled'));
+        return;
+      }
+      if (key.name === 'up') {
+        selected = selected <= 0 ? choices.length - 1 : selected - 1;
+        render();
+        return;
+      }
+      if (key.name === 'down') {
+        selected = selected >= choices.length - 1 ? 0 : selected + 1;
+        render();
+        return;
+      }
+      if (key.name === 'return' || key.name === 'enter') {
+        finish();
+      }
+    };
+
+    emitKeypressEvents(input);
+    input.setRawMode(true);
+    input.resume();
+    output.write('\x1B[?25l');
+    input.on('keypress', onKeypress);
+    render();
+  });
 }
 
 async function promptConfig(opts, existing) {
@@ -337,7 +436,7 @@ export async function runLocalConfig(argv) {
     writeCodex = t.codex;
   }
 
-  const existing = await loadExistingEnfyraEnv(root, writeClaude, writeCursor, writeCodex);
+  const existing = await loadExistingEnfyraEnv(root, writeClaude, writeCursor, writeCodex, opts.global);
 
   let apiUrl;
   let email;
@@ -358,17 +457,17 @@ export async function runLocalConfig(argv) {
   const written = [];
 
   if (writeClaude) {
-    const p = join(root, '.mcp.json');
+    const p = getClaudeConfigPath(root, opts.global);
     await mergeMcpFile(p, serverEntry);
     written.push(p);
   }
   if (writeCursor) {
-    const p = join(root, '.cursor', 'mcp.json');
+    const p = getCursorConfigPath(root, opts.global);
     await mergeMcpFile(p, serverEntry);
     written.push(p);
   }
   if (writeCodex) {
-    const p = join(homedir(), '.codex', 'config.toml');
+    const p = getCodexConfigPath(root, opts.global);
     await mergeCodexConfig(p, apiUrl, email, password);
     written.push(p);
   }
@@ -376,9 +475,9 @@ export async function runLocalConfig(argv) {
   console.log('Enfyra MCP — local config updated:\n');
   for (const p of written) console.log(`  ${p}`);
   console.log('\nNext steps:');
-  console.log('  • Codex: restart Codex or start a new session so ~/.codex/config.toml is reloaded.');
+  console.log('  • Codex: open this folder in a new Codex session so project ./.codex/config.toml is loaded.');
   console.log('  • Claude Code: open this folder; approve project MCP if prompted (`claude mcp reset-project-choices` to reset).');
-  console.log('  • Cursor: restart Cursor or reload MCP; confirm server under Settings → MCP.');
+  console.log('  • Cursor: open this folder, restart Cursor or reload MCP, then confirm server under Settings → MCP.');
   console.log('  • Run `config` again anytime to change values (same files are merged/overwritten for `enfyra`).');
   if (!email || !password) {
     console.log('\nWarning: ENFYRA_EMAIL or ENFYRA_PASSWORD is empty — tools may not authenticate until set.');

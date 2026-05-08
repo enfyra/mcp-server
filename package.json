@@ -1,13 +1,14 @@
 {
   "name": "@enfyra/mcp-server",
-  "version": "0.0.27",
+  "version": "0.0.31",
   "description": "MCP server for Enfyra - manage your Enfyra instance via Claude Code",
   "type": "module",
   "license": "MIT",
   "main": "src/index.mjs",
   "bin": "src/index.mjs",
   "files": [
-    "src"
+    "src",
+    ".codex/skills"
   ],
   "scripts": {
     "start": "node src/index.mjs",

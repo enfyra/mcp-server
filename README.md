@@ -17,11 +17,12 @@ From your **Enfyra project root**:
 npx @enfyra/mcp-server config
 ```
 
-- **Interactive (default in a terminal):** first asks **where** to write config — `[1]` Claude Code, `[2]` Cursor, `[3]` Codex, `[4]` all (default) — unless you already passed target flags. Then prompts for `ENFYRA_API_URL`, `ENFYRA_EMAIL`, and `ENFYRA_PASSWORD` when missing. Press **Enter** to accept bracketed defaults from env or existing `enfyra` config. Password **Enter** keeps the current saved password when updating.
+- **Interactive (default in a terminal):** first asks **where** to write config with an arrow-key selector — Claude Code, Cursor, Codex, or all — unless you already passed target flags. Then prompts for `ENFYRA_API_URL`, `ENFYRA_EMAIL`, and `ENFYRA_PASSWORD` when missing. Press **Enter** to accept bracketed defaults from env or existing `enfyra` config. Password **Enter** keeps the current saved password when updating.
 - **Re-run anytime** to update the same files; other entries under `mcpServers` are preserved.
 - **Non-interactive** (CI / scripts): `npx @enfyra/mcp-server config --yes` plus optional `-a` / `-e` / `-p` and/or env vars.
-- **One host only:** `--claude-code` / `--claude` / `--claude-only` → `./.mcp.json`. `--cursor` / `--cursor-only` → `./.cursor/mcp.json`. `--codex` / `--codex-only` → `~/.codex/config.toml`. Pass multiple target flags to write each selected host.
-- **Reconfigure:** `npx @enfyra/mcp-server config --reconfig` prompts for the target host again, uses existing values as defaults, and replaces the old `enfyra` entry for that host.
+- **One host only:** `--claude-code` / `--claude` / `--claude-only` → `./.mcp.json`. `--cursor` / `--cursor-only` → `./.cursor/mcp.json`. `--codex` / `--codex-only` → `./.codex/config.toml`. Pass multiple target flags to write each selected host.
+- **Reconfigure:** `npx @enfyra/mcp-server config --reconfig` prompts for the target host again, uses existing project values as defaults, and replaces the old project `enfyra` entry for that host.
+- **Global/user config:** add `--global` only when you intentionally want the selected host config under your home directory instead of this project.
 - **Help:** `npx @enfyra/mcp-server -h` or `npx @enfyra/mcp-server config --help`
 
 Equivalent in this repo: `yarn mcp:config` (Yarn v1 reserves `yarn config` for registry settings). Same as `node src/index.mjs config` / `npm run mcp:config`.
@@ -34,18 +35,18 @@ Use this table to see **where** each host stores config. The **`mcpServers.enfyr
 
 | | **Codex** | **Claude Code** | **Cursor** |
 |---|-----------|-----------------|------------|
-| **Global (all projects)** | `~/.codex/config.toml` | `~/.claude.json` — scopes **user** or **local** | `~/.cursor/mcp.json` |
-| **Project (repo)** | Use global config | **`.mcp.json`** at repository root (`--scope project`) | **`.cursor/mcp.json`** in the project |
-| **Typical install** | `npx @enfyra/mcp-server config --codex` | `claude mcp add --transport stdio …` | Edit `mcp.json` or **Settings → MCP** |
-| **Precedence / merge** | `config.toml` section is replaced for `enfyra`; other servers are preserved | local → project `.mcp.json` → user | Project `.cursor/mcp.json` overrides global `~/.cursor/mcp.json` |
-| **Gotcha** | Restart Codex or start a new session after editing config | Do not put MCP server definitions in `.claude/settings.json` | Root **`.mcp.json`** is for Claude Code project scope, not Cursor — use **`.cursor/mcp.json`** for Cursor |
+| **Project (repo, default)** | **`.codex/config.toml`** in the project | **`.mcp.json`** at repository root | **`.cursor/mcp.json`** in the project |
+| **Global (explicit `--global`)** | `~/.codex/config.toml` | `~/.mcp.json` from this helper, or Claude's `~/.claude.json` via `claude mcp add --scope user` | `~/.cursor/mcp.json` |
+| **Typical install** | `npx @enfyra/mcp-server config --codex` | `npx @enfyra/mcp-server config --claude-code` | `npx @enfyra/mcp-server config --cursor` |
+| **Precedence / merge** | Project config is merged/replaced for `enfyra` | Project `.mcp.json` is merged/replaced for `enfyra` | Project `.cursor/mcp.json` is merged/replaced for `enfyra` |
+| **Gotcha** | Open this folder in a new Codex session after editing config | Do not put MCP server definitions in `.claude/settings.json` | Root **`.mcp.json`** is for Claude Code project scope, not Cursor — use **`.cursor/mcp.json`** for Cursor |
 
 Expand **one** block below for step-by-step setup.
 
 <details open>
 <summary><strong>Codex</strong> — setup</summary>
 
-The config command can write/update `~/.codex/config.toml` directly:
+The config command writes project Codex config to `./.codex/config.toml` by default:
 
 ```bash
 npx @enfyra/mcp-server config --codex
@@ -73,7 +74,7 @@ ENFYRA_EMAIL = "your-email@example.com"
 ENFYRA_PASSWORD = "your-password"
 ```
 
-The config writer replaces only `[mcp_servers.enfyra]` and `[mcp_servers.enfyra.env]`; other Codex config and other MCP servers are preserved. Restart Codex or start a new session after updating `~/.codex/config.toml`.
+The config writer replaces only `[mcp_servers.enfyra]` and `[mcp_servers.enfyra.env]`; other Codex config and other MCP servers are preserved. Open this folder in a new Codex session after updating `./.codex/config.toml`. Use `--global --codex` only when you intentionally want `~/.codex/config.toml`.
 
 </details>
 
@@ -184,26 +185,30 @@ Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env 
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ENFYRA_API_URL` | Base for REST + GraphQL + auth (see table below) | `http://localhost:3000/api` |
+| `ENFYRA_API_URL` | Base for REST + GraphQL + auth through the Nuxt/app proxy | `http://localhost:3000/api` |
 | `ENFYRA_EMAIL` | Admin email | — |
 | `ENFYRA_PASSWORD` | Admin password | — |
 
-### `ENFYRA_API_URL` — two valid setups
+### `ENFYRA_API_URL` — use the app proxy
 
-| Mode | Example | When to use |
-|------|---------|-------------|
-| **Via Nuxt admin (typical local dev)** | `http://localhost:3000/api` | Browser app on 3000; Nitro proxies `/api/*` to Nest (`API_URL`, often `http://localhost:1105`). GraphQL at `{ENFYRA_API_URL}/graphql` is proxied to the backend `/graphql`. |
-| **Direct to Nest backend** | `http://localhost:1105` | Call Enfyra **without** the Nuxt prefix. **Do not** append `/api` unless your reverse proxy serves routes under `/api`—`http://localhost:1105/api/...` will not match default Nest paths. |
+For normal apps and demos, set `ENFYRA_API_URL` to the Nuxt/app proxy:
 
-Pick the base URL that matches how **your** HTTP client reaches the same server as the Enfyra REST API.
+```text
+http://localhost:3000/api
+```
+
+The Enfyra backend is private infrastructure. MCP, browser code, SSR routes, GraphQL calls, and generated app code should go through the app origin `/api/**`; do not connect them directly to the backend host/port. Direct backend URLs are only for Enfyra core/server debugging when you intentionally bypass the app proxy.
 
 ### SSR app auth pattern
 
-When an LLM builds a Nuxt, Next, or other SSR frontend for Enfyra, use a same-origin proxy:
+When an LLM builds a Nuxt, Next, or other SSR frontend for Enfyra, follow the Enfyra Cloud pattern:
 
-- Browser code calls `{{ appOrigin }}/api/**`, never the raw Enfyra backend URL.
-- Cookie-managed password login is `POST {{ appOrigin }}/api/login`, not `/api/auth/login`. The SSR route calls backend `/auth/login` and stores Enfyra `accessToken`, `refreshToken`, and `expTime` as httpOnly cookies.
-- Cookie-managed OAuth should enable Enfyra OAuth cookie handling (`autoSetCookies` / set-cookies mode). Start OAuth at `{{ appOrigin }}/api/auth/:provider?redirect=...`; Enfyra redirects to `{{ appOrigin }}/api/auth/set-cookies`, then the SSR route sets cookies and redirects to the requested page.
+- Browser code calls a same-origin proxy such as `{{ appOrigin }}/enfyra/**`, never the raw Enfyra backend URL.
+- Nuxt can proxy it with `routeRules: { "/enfyra/**": { proxy: { to: `${API_URL}/**` } } }`.
+- Generated apps should not create custom login/logout/me routes that manually set `accessToken`, `refreshToken`, or `expTime` cookies when the proxy is enough.
+- Password login is `POST /enfyra/login`, not `/enfyra/auth/login`.
+- Fetch the current user with `GET /enfyra/me` and logout with `POST /enfyra/logout`.
+- OAuth starts through the same proxy prefix, for example `/enfyra/auth/google?redirect=...`.
 - Use token-query OAuth callback pages only for non-SSR/manual-token apps.
 
 ---

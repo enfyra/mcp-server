@@ -42,6 +42,16 @@ function parseJsonArrayParam(name, value) {
   return parsed;
 }
 
+function normalizeConstraintGroups(name, groups) {
+  return groups.map((group, index) => {
+    const value = Array.isArray(group) ? group : group?.value;
+    if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== 'string' || !item.trim())) {
+      throw new Error(`${name}[${index}] must be a non-empty string array or { "value": [...] }.`);
+    }
+    return value;
+  });
+}
+
 function normalizeRelationForTablePatch(relation) {
   const {
     sourceTable,
@@ -102,6 +112,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       'Create a new table definition with an auto-included `id` primary key column.',
       '**Not** for adding a custom API path or handler only — for that use **`create_route`** with an existing `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
       'PREFERRED: pass `columns` and `relations` params as JSON arrays to create a table WITH columns and relations in one call (cascade). Only use create_column/create_relation separately when adding to an existing table later.',
+      'Indexes and uniques are first-class table metadata. Use `indexes` for query performance and `uniques` for data integrity. Each entry is a logical field group such as [["member","is_read","conversation"]] or [{"value":["message","member"]}]. Relation property names are allowed; Enfyra resolves them to physical FK columns.',
       'Relations are supported in this same create_table call when the target table already exists. Each relation uses { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete? }; targetTable may be a table id or {id}.',
       'Do NOT provide physical FK/junction columns. Never include fkCol, fkColumn, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn. Enfyra derives and hides those physical columns from relation propertyName/table metadata.',
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
@@ -119,13 +130,19 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record tables such as settings/config. This is passed directly to table_definition create.'),
       columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, defaultValue?, description?, options? }. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"status","type":"enum","options":["draft","published"]}]'),
       relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id or {"id": <id>}. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Example: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
+      indexes: z.string().optional().describe('JSON array of logical index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Example: [["member","is_read","conversation"],["conversation","member","is_read"]]'),
+      uniques: z.string().optional().describe('JSON array of logical unique field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Example: [["message","member"]]'),
     },
-    async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson }) => {
+    async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson, indexes: indexesJson, uniques: uniquesJson }) => {
       const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
       const userColumns = parseJsonArrayParam('columns', columnsJson);
       const userRelations = parseJsonArrayParam('relations', relationsJson).map(normalizeRelationForTablePatch);
+      const indexes = normalizeConstraintGroups('indexes', parseJsonArrayParam('indexes', indexesJson));
+      const uniques = normalizeConstraintGroups('uniques', parseJsonArrayParam('uniques', uniquesJson));
       const body = { name, description, columns: [idColumn, ...userColumns], relations: userRelations };
       if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
+      if (indexesJson !== undefined) body.indexes = indexes;
+      if (uniquesJson !== undefined) body.uniques = uniques;
       const result = await fetchAPI(ENFYRA_API_URL, '/table_definition', {
         method: 'POST',
         body: JSON.stringify(body),
@@ -144,8 +161,12 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       const relHint = userRelations.length
         ? `Relation(s) created in same call: ${userRelations.length}.`
         : `No relations were included in this create_table call.`;
+      const constraintHint = [
+        indexes.length ? `Index group(s): ${indexes.length}.` : null,
+        uniques.length ? `Unique group(s): ${uniques.length}.` : null,
+      ].filter(Boolean).join(' ');
       return {
-        content: [{ type: 'text', text: `${colHint}\n${relHint}\n${restHint}\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
+        content: [{ type: 'text', text: `${colHint}\n${relHint}${constraintHint ? `\n${constraintHint}` : ''}\n${restHint}\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
       };
     }
   );
@@ -155,8 +176,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'update_table',
     [
-      'Update table properties: name (rename), alias, description, isSingleRecord, graphqlEnabled.',
+      'Update table properties: name (rename), alias, description, isSingleRecord, graphqlEnabled, indexes, and uniques.',
       'Does NOT modify columns or relations — use create_column, update_column, delete_column, create_relation for those.',
+      'When passing `indexes` or `uniques`, pass the complete desired array of logical field groups; omitted fields are preserved. Relation property names are allowed and are resolved by Enfyra. Example indexes: [["member","is_read","conversation"],["conversation","member","is_read"]].',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
     {
@@ -166,19 +188,20 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('New description.'),
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record table (e.g., settings/config).'),
       graphqlEnabled: z.boolean().optional().describe('Enable or disable GraphQL for this table by syncing gql_definition.isEnabled. GraphQL still requires Bearer auth.'),
+      indexes: z.string().optional().describe('Complete JSON array of logical index field groups to store on table_definition.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear.'),
+      uniques: z.string().optional().describe('Complete JSON array of logical unique field groups to store on table_definition.uniques. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current uniques; pass [] to clear.'),
     },
-    async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled }) => {
+    async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled, indexes: indexesJson, uniques: uniquesJson }) => {
       const body = {};
       if (name !== undefined) body.name = name;
       if (alias !== undefined) body.alias = alias;
       if (description !== undefined) body.description = description;
       if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
       if (graphqlEnabled !== undefined) body.graphqlEnabled = graphqlEnabled;
+      if (indexesJson !== undefined) body.indexes = normalizeConstraintGroups('indexes', parseJsonArrayParam('indexes', indexesJson));
+      if (uniquesJson !== undefined) body.uniques = normalizeConstraintGroups('uniques', parseJsonArrayParam('uniques', uniquesJson));
 
-      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
-        method: 'PATCH',
-        body: JSON.stringify(body),
-      });
+      const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, body);
       return {
         content: [{ type: 'text', text: `Table ${tableId} updated.\n\n${JSON.stringify(result, null, 2)}` }],
       };
