@@ -90,12 +90,12 @@ window.location.href = url.toString()`,
   columns: JSON.stringify([
     { name: "kind", type: "varchar", isNullable: false, defaultValue: "dm" },
     { name: "title", type: "varchar", isNullable: true },
-    { name: "last_message_text", type: "text", isNullable: true },
-    { name: "last_message_at", type: "datetime", isNullable: true }
+    { name: "description", type: "text", isNullable: true }
   ])
 })`,
         notes: [
           'create_table creates the default route for /chat_conversation.',
+          'Keep the latest message as a relation named lastMessage after chat_message exists; do not duplicate last message text/date columns.',
           'Do not create tables just to get custom paths; use create_route for that.',
         ],
       },
@@ -105,7 +105,7 @@ window.location.href = url.toString()`,
   name: "chat_message",
   columns: JSON.stringify([
     { name: "text", type: "text", isNullable: false },
-    { name: "persist_status", type: "varchar", defaultValue: "persisted" }
+    { name: "persistStatus", type: "varchar", defaultValue: "persisted" }
   ]),
   relations: JSON.stringify([
     {
@@ -135,12 +135,38 @@ window.location.href = url.toString()`,
         ],
       },
       {
+        name: 'Add chat_conversation.lastMessage after chat_message exists',
+        code: `update_table({
+  tableId: "<chat_conversation_id>",
+  relations: JSON.stringify([
+    {
+      propertyName: "createdBy",
+      type: "many-to-one",
+      targetTable: { id: "<user_definition_id>" },
+      isNullable: true,
+      onDelete: "CASCADE"
+    },
+    {
+      propertyName: "lastMessage",
+      type: "many-to-one",
+      targetTable: { id: "<chat_message_id>" },
+      isNullable: true,
+      onDelete: "SET NULL"
+    }
+  ])
+})`,
+        notes: [
+          'Use relation fields such as lastMessage.id,lastMessage.text,lastMessage.createdAt when loading conversation lists.',
+          'When deleting the current last message, a post-hook should set lastMessage to the newest remaining message or null.',
+        ],
+      },
+      {
         name: 'Unread/read table with unique and indexes',
         code: `create_table({
   name: "chat_message_read",
   columns: JSON.stringify([
-    { name: "is_read", type: "boolean", defaultValue: false },
-    { name: "read_at", type: "datetime", isNullable: true }
+    { name: "isRead", type: "boolean", defaultValue: false },
+    { name: "readAt", type: "datetime", isNullable: true }
   ]),
   relations: JSON.stringify([
     { propertyName: "message", type: "many-to-one", targetTable: { id: "<chat_message_id>" }, onDelete: "CASCADE" },
@@ -149,8 +175,8 @@ window.location.href = url.toString()`,
   ]),
   uniques: JSON.stringify([["message", "member"]]),
   indexes: JSON.stringify([
-    ["member", "is_read", "conversation"],
-    ["conversation", "member", "is_read"]
+    ["member", "isRead", "conversation"],
+    ["conversation", "member", "isRead"]
   ])
 })`,
         notes: [
@@ -165,15 +191,12 @@ window.location.href = url.toString()`,
     useWhen: 'Use when fetching records, filtering by relations, loading nested data, or counting efficiently.',
     examples: [
       {
-        name: 'List current user conversations through membership',
-        code: `GET /enfyra/chat_conversation_member?filter={
-  "member": { "id": { "_eq": "<currentUserId>" } }
-}&deep={
-  "conversation": { "fields": "id,kind,title,last_message_text,last_message_at" }
-}&limit=0`,
+        name: 'List current user conversations through RLS',
+        code: `GET /enfyra/chat_conversation?fields=id,kind,title,lastMessage.id,lastMessage.text,lastMessage.createdAt&limit=0`,
         notes: [
-          'Use relation property names in filter and deep.',
-          'limit=0 means load all matching rows.',
+          'Use a conversation read pre-hook/RLS boundary so the route only returns conversations visible to @USER.',
+          'lastMessage is a relation to chat_message; do not duplicate preview fields on chat_conversation.',
+          'limit=0 means load all matching conversation rows.',
           'Do not fetch messages for every conversation on initial list load; load messages after selecting a conversation.',
         ],
       },
@@ -189,7 +212,7 @@ window.location.href = url.toString()`,
         name: 'Count without loading all rows',
         code: `GET /enfyra/chat_message_read?fields=id&limit=1&meta=filterCount&filter={
   "member": { "id": { "_eq": "<currentUserId>" } },
-  "is_read": { "_eq": false }
+  "isRead": { "_eq": false }
 }`,
         notes: [
           'Use meta=totalCount with no filter and meta=filterCount with a filter.',
@@ -372,7 +395,7 @@ const socket = io("/chat", {
         code: `const conversationId = @BODY.conversationId
 if (!conversationId) @THROW400("conversationId is required")
 
-const membership = await #chat_conversation_member.find({
+const membership = await @REPOS.chat_conversation_member.find({
   filter: {
     conversation: { id: { _eq: conversationId } },
     member: { id: { _eq: @USER.id } }
@@ -394,7 +417,7 @@ if (!membership.data[0]) @THROW403("Not a conversation member")
         code: `const { conversationId, text, clientId } = @BODY
 if (!conversationId || !text) @THROW400("conversationId and text are required")
 
-const membership = await #chat_conversation_member.find({
+const membership = await @REPOS.chat_conversation_member.find({
   filter: {
     conversation: { id: { _eq: conversationId } },
     member: { id: { _eq: @USER.id } }
@@ -403,16 +426,22 @@ const membership = await #chat_conversation_member.find({
 })
 if (!membership.data[0]) @THROW403("Not a conversation member")
 
-const created = await #chat_message.create({
+const created = await @REPOS.chat_message.create({
   data: {
     conversation: { id: conversationId },
     sender: { id: @USER.id },
     text,
-    persist_status: "persisted"
+    persistStatus: "persisted"
   }
 })
 
 const message = created.data?.[0] ?? null
+if (message?.id) {
+  await @REPOS.chat_conversation.update({
+    id: conversationId,
+    data: { lastMessage: { id: message.id }, updatedAt: message.createdAt || new Date().toISOString() }
+  })
+}
 @SOCKET.emitToRoom(\`conversation:\${conversationId}\`, "chat:message", {
   clientId,
   message
