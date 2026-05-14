@@ -3,7 +3,7 @@
 MCP server for managing Enfyra instances from **Codex**, **Claude Code**, **Cursor**, and other MCP-compatible clients. All operations go through Enfyra's REST API.
 
 
-**LLM rules (REST, GraphQL, auth, URL, mutation `create_{tableName}`, etc.):** not in this README — see **`src/lib/mcp-instructions.js`** (content sent via MCP `instructions`) and tool descriptions in **`src/index.mjs`**. This README only covers **MCP installation and configuration** for users/devs.
+**LLM rules (REST, GraphQL, auth, URL, mutation `create_{tableName}`, etc.):** not in this README — see **`src/lib/mcp-instructions.js`** (content sent via MCP `instructions`), **`src/lib/mcp-examples.js`** (concrete examples loaded through `get_enfyra_examples`), and tool descriptions in **`src/index.mjs`**. This README only covers **MCP installation and configuration** for users/devs.
 
 **Official docs:** [Claude Code MCP](https://docs.anthropic.com/en/docs/claude-code/mcp) · [Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings) · [Cursor MCP (`mcp.json`)](https://cursor.com/docs/context/mcp)
 
@@ -204,18 +204,21 @@ The Enfyra backend is private infrastructure. MCP, browser code, SSR routes, Gra
 When an LLM builds a Nuxt, Next, or other SSR frontend for Enfyra, follow the Enfyra Cloud pattern:
 
 - Browser code calls a same-origin proxy such as `{{ appOrigin }}/enfyra/**`, never the raw Enfyra backend URL.
-- Nuxt can proxy it with `routeRules: { "/enfyra/**": { proxy: { to: `${API_URL}/**` } } }`.
+- Nuxt can proxy it with `routeRules: { "/enfyra/**": { proxy: { to: `${API_URL}/**`, fetchOptions: { redirect: "manual" } } } }`. Keep redirects manual so OAuth set-cookie redirects reach the browser as real HTTP redirects with `Set-Cookie`.
 - Generated apps should not create custom login/logout/me routes that manually set `accessToken`, `refreshToken`, or `expTime` cookies when the proxy is enough.
 - Password login is `POST /enfyra/login`, not `/enfyra/auth/login`.
 - Fetch the current user with `GET /enfyra/me` and logout with `POST /enfyra/logout`.
-- OAuth starts through the same proxy prefix, for example `/enfyra/auth/google?redirect=...`.
+- OAuth starts through the same proxy prefix, for example `/enfyra/auth/google?redirect=<absoluteReturnUrl>&cookieBridgePrefix=/enfyra`. `redirect` must include the app origin, and `cookieBridgePrefix` is the same proxy prefix that reaches Enfyra API routes. Enfyra validates the redirect, exchanges OAuth on its callback, then redirects through `{redirect.origin}{cookieBridgePrefix}/auth/set-cookies` so the third app origin stores the cookies before returning to `redirect`.
+- Socket.IO browser clients use a same-origin bridge too. Connect to the namespace, e.g. `io("/chat", { path: "/socket.io", withCredentials: true })`, and proxy `/socket.io/**` to the Enfyra app bridge `/ws/socket.io/**`. The backend gateway metadata path remains `/chat`.
 - Use token-query OAuth callback pages only for non-SSR/manual-token apps.
 
 ---
 
 ## Tools (summary)
 
-Metadata, query/CRUD, route/handler/hook, tables/columns, reload cache, logs, user/roles, login, menu/extension, `get_enfyra_api_context`. For full tool list and behavior, see the app after enabling MCP or the source in `src/index.mjs`.
+Metadata, examples, query/CRUD, route/handler/hook, tables/columns, reload cache, logs, user/roles, login, menu/extension, `get_enfyra_api_context`. For full tool list and behavior, see the app after enabling MCP or the source in `src/mcp-server-entry.mjs`.
+
+Use `get_enfyra_examples` when asking an LLM to generate concrete Enfyra implementation patterns. It returns categorized examples for SSR app auth/OAuth/proxy setup, schema/relations, queries/deep, handlers/hooks, permissions/RLS, websocket, flows, files, and extensions.
 
 ## Security
 

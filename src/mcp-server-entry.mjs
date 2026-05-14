@@ -18,6 +18,7 @@ const ENFYRA_PASSWORD = process.env.ENFYRA_PASSWORD || '';
 import { login, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
 import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
 import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instructions.js';
+import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
 import { registerTableTools } from './lib/table-tools.js';
 
 // Initialize auth module
@@ -301,6 +302,21 @@ server.tool('get_table_metadata', 'Get metadata for a specific table by name', {
   const result = await fetchAPI(ENFYRA_API_URL, `/metadata/${tableName}`);
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
+
+server.tool(
+  'get_enfyra_examples',
+  [
+    'Return concrete Enfyra examples by category.',
+    'Use this before generating schemas, queries, handlers/hooks, SSR app auth, OAuth, Socket.IO, flows, files, or extensions so implementation details follow proven patterns.',
+  ].join(' '),
+  {
+    category: z.enum(listExampleCategories().map((item) => item.key)).optional().describe('Example category key. Omit to list categories.'),
+  },
+  async ({ category }) => {
+    const result = getExamples(category);
+    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  },
+);
 
 server.tool(
   'discover_enfyra_system',
