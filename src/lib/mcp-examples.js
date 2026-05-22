@@ -288,6 +288,18 @@ const scope = {
         ],
       },
       {
+        name: 'Pre-hook encrypted field normalization',
+        code: `const value = @BODY.api_token_encrypted
+if (value && value.slice(0, 7) !== "enc:v1:") {
+  @BODY.api_token_encrypted = @HELPERS.$encrypt.encrypt(value)
+}`,
+        notes: [
+          'Use Enfyra pre-hooks for request-body normalization before canonical CRUD persists the record.',
+          'Do not implement encrypted field normalization as a Knex/database hook.',
+          'Use $encrypt for encryption and $ssh.generateKeyPair for SSH key generation; do not use $secrets.',
+        ],
+      },
+      {
         name: 'Post-hook response shaping',
         code: `if (@ERROR) {
   @LOGS("Request failed", @ERROR.message)
@@ -353,6 +365,75 @@ return @DATA`,
         notes: [
           'Field permissions are for field-level access.',
           'Use route/pre-hook filters for row-level access.',
+        ],
+      },
+      {
+        name: 'Admin menu and extension permission gates',
+        code: `<template>
+  <section class="space-y-4">
+    <PermissionGate :condition="canReadCloudProjects">
+      <template #default>
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="text-lg font-semibold">Cloud projects</h2>
+
+          <PermissionGate :condition="canCreateCloudProject">
+            <UButton icon="i-lucide-plus" label="Create instance" @click="openCreate = true" />
+          </PermissionGate>
+        </div>
+
+        <div v-for="project in projects" :key="project.id" class="rounded-lg border p-4">
+          <NuxtLink :to="\`/cloud/projects/\${project.id}\`" class="font-medium">
+            {{ project.name }}
+          </NuxtLink>
+
+          <div class="mt-3 flex gap-2">
+            <PermissionGate :condition="canUpdateCloudProject">
+              <UButton icon="i-lucide-pause" variant="soft" label="Disable" @click="openDisable(project)" />
+            </PermissionGate>
+
+            <PermissionGate :condition="canDeleteCloudProject">
+              <UButton icon="i-lucide-trash-2" color="error" variant="soft" label="Delete" @click="openDelete(project)" />
+            </PermissionGate>
+          </div>
+        </div>
+      </template>
+
+      <template #fallback>
+        <EmptyState title="No access" description="You do not have permission to view Cloud projects." />
+      </template>
+    </PermissionGate>
+  </section>
+</template>
+
+<script setup>
+const { checkPermissionCondition } = usePermissions()
+
+const canReadCloudProjects = computed(() => checkPermissionCondition({
+  or: [
+    { route: '/cloud/projects', methods: ['GET'] },
+    { route: '/cloud_projects', methods: ['GET'] }
+  ]
+}))
+
+const canCreateCloudProject = computed(() => checkPermissionCondition({
+  or: [{ route: '/cloud_projects', methods: ['POST'] }]
+}))
+
+const canUpdateCloudProject = computed(() => checkPermissionCondition({
+  or: [{ route: '/cloud_projects', methods: ['PATCH'] }]
+}))
+
+const canDeleteCloudProject = computed(() => checkPermissionCondition({
+  or: [{ route: '/cloud_projects', methods: ['DELETE'] }]
+}))
+</script>`,
+        notes: [
+          'This is menu/extension visibility, not row-level RLS.',
+          'Set menu_definition.permission on every sensitive admin menu. Example for /cloud/hosts: { or: [{ route: "/cloud/admin/hosts", methods: ["GET"] }, { route: "/cloud_servers", methods: ["GET"] }] }.',
+          'Admin pages are sensitive. Use permission gates by default, not as an optional polish step.',
+          'Menus should only be visible when the user has at least GET permission for the page route or backing data route.',
+          'Inside the extension, gate each action by its own route/method: GET for page visibility, POST for create/flow-trigger buttons, PATCH for normal record edits, DELETE for native delete routes.',
+          'Server route permissions remain mandatory; UI gates are for clear operator UX and least-privilege surfaces.',
         ],
       },
     ],
@@ -539,40 +620,155 @@ return {
       {
         name: 'Create menu then extension',
         code: `create_menu({
-  title: "Reports",
+  label: "Reports",
+  type: "Menu",
   path: "/reports",
-  icon: "i-lucide-bar-chart-3",
-  order: 20
+  icon: "lucide:bar-chart-3",
+  order: 20,
+  isEnabled: true
 })
 
+// Read the created menu id from the tool response, then:
 create_extension({
+  type: "page",
   name: "ReportsPage",
-  route: "/reports",
-  component: "<template><div>Reports</div></template>"
+  description: "Reports dashboard",
+  menuId: "<created-menu-id>",
+  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-3\\"><UCard><p class=\\"text-sm text-muted\\">Total</p><p class=\\"mt-2 text-2xl font-semibold\\">0</p></UCard></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); useHeaderActionRegistry({ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', onClick: () => {}, order: 0 })</script>",
+  isEnabled: true
 })`,
         notes: [
           'Menu provides navigation; extension provides content.',
-          'Extensions are Vue SFC records.',
+          'Use menu_definition.label, not title.',
+          'For page extensions, create the menu first and pass menuId to create_extension.',
+          'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',
+          'Use variant: "minimal" for operational pages unless a larger header is intentionally needed.',
+          'Do not put ordinary KPI cards in PageHeader.stats; render metrics in the extension body.',
+          'Put page-level actions in useHeaderActionRegistry or useSubHeaderActionRegistry.',
+          'Page extensions should be full-bleed by default and responsive from the first version.',
+          'The extension root is already inside eApp main; do not add root-level page padding.',
+        ],
+      },
+      {
+        name: 'Plan a Cloud admin dashboard as multiple pages',
+        code: `// Recommended menu shape for an operations surface:
+create_menu({
+  type: "Dropdown Menu",
+  label: "Cloud",
+  path: "/cloud",
+  icon: "lucide:cloud",
+  order: 2,
+  isEnabled: true
+})
+
+// Child page extensions should be focused:
+// /dashboard            compact summary/routing hub: KPIs, current signal, attention queue, navigation cards
+// /cloud/projects      project status and drill-downs
+// /cloud/provisioning  project/run grouped provisioning status, current step, meaning, next action
+// /cloud/billing       orders/subscriptions/refunds
+// /cloud/infrastructure hosts/capacity/plans/system credential readiness
+// /cloud/readiness     legal/Paddle/landing launch checklist
+// Use UTabs inside large pages instead of placing every section in one dashboard.
+// For admin record management, link to /data/<table>, e.g. /data/landing_terms, not public landing paths.`,
+        notes: [
+          'Design the menu/page split before generating dashboard code.',
+          'Keep /dashboard as a summary and distribution page, not a detailed operations table.',
+          'Use focused pages for operational domains.',
+          'Each page extension must use usePageHeaderRegistry for the app-shell title strip and should not render a duplicate top header in the body.',
+          'PageHeader.stats is reserved for deliberate overview headers; operational KPIs belong in body cards/tables.',
+          'Provisioning pages should not show raw history rows as the primary UI; group by project/run and translate step keys into operator-facing labels.',
+          'Operational lists should use pagination plus search/filter controls; do not rely on arbitrary fixed limits such as limit=50.',
+          'UTabs is available in eApp extension runtime for page-level sections.',
+          'Admin links for editing or inspecting records should point to /data/<table> routes.',
         ],
       },
       {
         name: 'Extension fetches Enfyra data',
         code: `<script setup>
-const { data, pending, refresh } = await useApi('/order_definition', {
+const { data, pending, execute: fetchOrders } = useApi('/order_definition', {
   query: {
     limit: 10,
     sort: '-createdAt'
   }
 })
+
+onMounted(() => fetchOrders())
 </script>
 
 <template>
-  <UButton :loading="pending" @click="refresh">Refresh</UButton>
+  <UButton :loading="pending" @click="fetchOrders">Refresh</UButton>
   <pre>{{ data }}</pre>
 </template>`,
         notes: [
           'Use app-provided composables in extensions.',
+          'useApi does not auto-run; call execute() on mounted or through an action.',
           'Keep extension UI focused; move backend logic into handlers/hooks when needed.',
+        ],
+      },
+      {
+        name: 'Extension can use modern browser APIs',
+        code: `<script setup lang="ts">
+const statuses = ['active', 'ready']
+const ok = statuses.includes('active')
+const requiredTerms = new Set(['cloud-terms', 'privacy-policy', 'refund-policy'])
+const loaded = await Promise.all([Promise.resolve(1), Promise.resolve(2)])
+const label = String('pending_payment').replace(/_/g, ' ')
+const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date())
+console.log(ok, requiredTerms.has('cloud-terms'), loaded, label, date)
+</script>`,
+        notes: [
+          'Do not rewrite extension code to ES5 when tooling rejects modern APIs.',
+          'If diagnostics complain about these APIs, fix eApp extension TypeScript lib/runtime contract.',
+        ],
+      },
+      {
+        name: 'Dashboard aggregate stats with a time range',
+        code: `<script setup>
+const range = ref('7d')
+const now = () => new Date()
+const rangeStart = computed(() => {
+  const d = now()
+  if (range.value === '24h') d.setHours(d.getHours() - 24)
+  else if (range.value === '30d') d.setDate(d.getDate() - 30)
+  else d.setDate(d.getDate() - 7)
+  return d.toISOString()
+})
+
+const flowStats = useApi('/flow_execution_definition', {
+  query: computed(() => ({
+    fields: 'id',
+    limit: 1,
+    meta: 'filterCount',
+    filter: { startedAt: { _gte: rangeStart.value } },
+    aggregate: {
+      id: { count: true },
+      status: { count: { _eq: 'failed' } }
+    }
+  }))
+})
+
+const orderStats = useApi('/cloud_payment_orders', {
+  query: computed(() => ({
+    fields: 'id',
+    limit: 1,
+    meta: 'filterCount',
+    filter: { createdAt: { _gte: rangeStart.value } },
+    aggregate: {
+      id: { count: true },
+      status: { count: { _eq: 'applied' } },
+      amount_usd: { sum: true }
+    }
+  }))
+})
+
+watch(range, () => Promise.all([flowStats.execute(), orderStats.execute()]))
+onMounted(() => Promise.all([flowStats.execute(), orderStats.execute()]))
+</script>`,
+        notes: [
+          'Aggregate keys must be real fields or relations.',
+          'Read results from response.meta.aggregate.',
+          'Use top-level filter for time windows and cross-field conditions.',
+          'sum/avg require numeric fields; amount_usd must be a real float/numeric SQL column, not metadata-only float over a varchar physical column.',
         ],
       },
     ],
