@@ -1831,7 +1831,7 @@ server.tool(
   'create_extension',
   [
     'Create an extension (Vue SFC page or widget). Code must be Vue SFC: <template>...</template> + <script setup>...</script> — NO imports, use globals (ref, useToast, useApi, UButton, etc).',
-    'For type=page: create menu first (create_menu), get id, then pass menuId. For type=widget no menu needed. Server auto-compiles; tell user to refresh (F5) after create. See extension rules in MCP instructions.',
+    'For type=page: create menu first (create_menu), get id, then pass menuId. For type=widget no menu needed. Server auto-compiles and should emit realtime reload to open eApp tabs. See extension rules in MCP instructions.',
   ].join(' '),
   {
     name: z.string().describe('Extension name (unique)'),
@@ -1849,7 +1849,7 @@ server.tool(
       delete body.menuId;
     }
     const result = await fetchAPI(ENFYRA_API_URL, '/extension_definition', { method: 'POST', body: JSON.stringify(body) });
-    return { content: [{ type: 'text', text: `Extension created (ID: ${result.id}). Tell user to refresh (F5) to see it.\n${JSON.stringify(result, null, 2)}` }] };
+    return { content: [{ type: 'text', text: `Extension created (ID: ${result.id}). Open eApp tabs should update through the realtime reload contract.\n${JSON.stringify(result, null, 2)}` }] };
   },
 );
 

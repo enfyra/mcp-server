@@ -377,7 +377,7 @@ return @DATA`,
           <h2 class="text-lg font-semibold">Cloud projects</h2>
 
           <PermissionGate :condition="canCreateCloudProject">
-            <UButton icon="i-lucide-plus" label="Create instance" @click="openCreate = true" />
+            <UButton icon="i-lucide-plus" label="Create project" @click="openCreate = true" />
           </PermissionGate>
         </div>
 
@@ -647,6 +647,36 @@ create_extension({
           'Put page-level actions in useHeaderActionRegistry or useSubHeaderActionRegistry.',
           'Page extensions should be full-bleed by default and responsive from the first version.',
           'The extension root is already inside eApp main; do not add root-level page padding.',
+          'After saving, open eApp tabs should update through the server/eApp realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',
+        ],
+      },
+      {
+        name: 'Debug menu or extension changes that do not appear in open eApp tabs',
+        code: `// Server side: menu_definition and extension_definition are runtime UI definitions.
+// They must participate in partial reload, just like metadata/routes.
+// Expected server contract:
+// - cache orchestrator maps menu_definition -> menu reload
+// - cache orchestrator maps extension_definition -> extension reload
+// - successful writes emit $system:reload to the admin Socket.IO namespace
+
+// eApp side expected listener behavior:
+// if reload target is metadata/menu:
+//   await fetch menus
+//   rebuild menu registry with reset: true
+//   invalidate dynamic extension cache too, because route-to-extension mapping may change
+// if reload target is extension/menu or extension/global:
+//   clear dynamic extension component/meta cache
+
+// Verification pattern:
+// 1. Save the menu or extension record.
+// 2. Watch the open eApp tab for the $system:reload event.
+// 3. Confirm sidebar/menu registry or extension component cache changed.
+// 4. Only use manual reload endpoints or browser refresh after the natural event path is proven stale.`,
+        notes: [
+          'Do not treat menu and extension writes as plain CRUD when debugging live admin UI.',
+          'Check both halves: ASV/ESV emits the reload event, and eApp consumes it.',
+          'Menu reload should also invalidate extension cache because menu records attach page extensions to routes.',
+          'Manual reload is a fallback, not the default fix.',
         ],
       },
       {
