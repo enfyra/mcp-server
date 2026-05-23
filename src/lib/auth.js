@@ -1,6 +1,6 @@
 /**
  * Authentication module for Enfyra MCP Server
- * Handles login, token refresh, and token validation
+ * Handles API-token exchange and token validation
  */
 
 // Token state
@@ -11,8 +11,7 @@ let isRefreshing = false;
 
 // Config
 let API_URL = 'http://localhost:3000/api';
-let EMAIL = '';
-let PASSWORD = '';
+let API_TOKEN = '';
 
 // Refresh buffer: refresh token 1 minute before expiry
 const TOKEN_REFRESH_BUFFER = 60000;
@@ -20,16 +19,16 @@ const TOKEN_REFRESH_BUFFER = 60000;
 /**
  * Initialize auth module with config
  */
-export function initAuth(apiUrl, email, password) {
+export function initAuth(apiUrl, apiToken = '') {
   API_URL = apiUrl;
-  EMAIL = email;
-  PASSWORD = password;
+  API_TOKEN = apiToken;
 }
 
 /**
  * Check if token needs refresh (expires within 1 minute)
  */
 export function needsRefresh() {
+  if (tokenExpiry === Infinity) return false;
   if (!tokenExpiry) return true;
   const now = Date.now();
   return now + TOKEN_REFRESH_BUFFER >= tokenExpiry;
@@ -49,54 +48,54 @@ export function getTokenExpiry() {
   return tokenExpiry;
 }
 
-/**
- * Login and get access + refresh tokens
- */
-export async function login(url, email, password) {
+export async function exchangeApiToken(url, apiToken) {
   const apiUrl = url || API_URL;
-  const authEmail = email || EMAIL;
-  const authPassword = password || PASSWORD;
+  const token = apiToken || API_TOKEN;
 
-  if (!authEmail || !authPassword) {
-    throw new Error('Email and password required');
+  if (!token) {
+    throw new Error('API token required');
   }
 
-  console.error('[Auth] Logging in...');
-  const response = await fetch(`${apiUrl}/auth/login`, {
+  console.error('[Auth] Exchanging API token...');
+  const response = await fetch(`${apiUrl}/auth/token/exchange`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: authEmail, password: authPassword }),
+    body: JSON.stringify({ apiToken: token }),
   });
 
   if (!response.ok) {
-    throw new Error(`Login failed: ${await response.text()}`);
+    throw new Error(`API token exchange failed: ${await response.text()}`);
   }
 
   const data = await response.json();
   accessToken = data.accessToken || data.access_token;
-  refreshToken = data.refreshToken || data.refresh_token;
-  tokenExpiry = data.expTime;
+  refreshToken = null;
+  tokenExpiry = data.expTime == null ? Infinity : data.expTime;
 
-  console.error(`[Auth] Logged in as ${authEmail}, token expires at ${new Date(tokenExpiry).toISOString()}`);
+  const expiryLabel = tokenExpiry === Infinity
+    ? 'no expiration'
+    : new Date(tokenExpiry).toISOString();
+  console.error(`[Auth] API token exchanged, access token expires at ${expiryLabel}`);
   return accessToken;
 }
 
 /**
  * Refresh access token using refresh token
  */
-export async function refreshAccessToken(url, email, password) {
+export async function refreshAccessToken(url) {
   const apiUrl = url || API_URL;
-  const authEmail = email || EMAIL;
-  const authPassword = password || PASSWORD;
 
   if (isRefreshing) {
     await new Promise(resolve => setTimeout(resolve, 500));
     return accessToken;
   }
 
+  if (API_TOKEN) {
+    return await exchangeApiToken(apiUrl, API_TOKEN);
+  }
+
   if (!refreshToken) {
-    console.error('[Auth] No refresh token, performing fresh login');
-    return await login(apiUrl, authEmail, authPassword);
+    throw new Error('ENFYRA_API_TOKEN required');
   }
 
   isRefreshing = true;
@@ -109,9 +108,8 @@ export async function refreshAccessToken(url, email, password) {
     });
 
     if (!response.ok) {
-      console.error('[Auth] Refresh failed, logging in fresh');
       refreshToken = null;
-      return await login(apiUrl, authEmail, authPassword);
+      return await exchangeApiToken(apiUrl, API_TOKEN);
     }
 
     const data = await response.json();
@@ -129,16 +127,17 @@ export async function refreshAccessToken(url, email, password) {
 /**
  * Get valid access token, refreshing if needed
  */
-export async function getValidToken(url, email, password) {
+export async function getValidToken(url) {
   const apiUrl = url || API_URL;
-  const authEmail = email || EMAIL;
-  const authPassword = password || PASSWORD;
 
   if (!accessToken || needsRefresh()) {
-    if (refreshToken) {
-      return await refreshAccessToken(apiUrl, authEmail, authPassword);
+    if (API_TOKEN) {
+      return await exchangeApiToken(apiUrl, API_TOKEN);
     }
-    return await login(apiUrl, authEmail, authPassword);
+    if (refreshToken) {
+      return await refreshAccessToken(apiUrl);
+    }
+    throw new Error('ENFYRA_API_TOKEN required');
   }
   return accessToken;
 }

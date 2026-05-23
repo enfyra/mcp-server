@@ -17,9 +17,9 @@ From your **Enfyra project root**:
 npx @enfyra/mcp-server config
 ```
 
-- **Interactive (default in a terminal):** first asks **where** to write config with an arrow-key selector — Claude Code, Cursor, Codex, or all — unless you already passed target flags. Then prompts for `ENFYRA_API_URL`, `ENFYRA_EMAIL`, and `ENFYRA_PASSWORD` when missing. Press **Enter** to accept bracketed defaults from env or existing `enfyra` config. Password **Enter** keeps the current saved password when updating.
+- **Interactive (default in a terminal):** first asks **where** to write config with an arrow-key selector — Claude Code, Cursor, Codex, or all — unless you already passed target flags. Then prompts for `ENFYRA_API_URL` and `ENFYRA_API_TOKEN` when missing. Press **Enter** to accept bracketed defaults from env or existing `enfyra` config.
 - **Re-run anytime** to update the same files; other entries under `mcpServers` are preserved.
-- **Non-interactive** (CI / scripts): `npx @enfyra/mcp-server config --yes` plus optional `-a` / `-e` / `-p` and/or env vars.
+- **Non-interactive** (CI / scripts): `npx @enfyra/mcp-server config --yes` plus optional `-a` / `-t` and/or env vars.
 - **One host only:** `--claude-code` / `--claude` / `--claude-only` → `./.mcp.json`. `--cursor` / `--cursor-only` → `./.cursor/mcp.json`. `--codex` / `--codex-only` → `./.codex/config.toml`. Pass multiple target flags to write each selected host.
 - **Reconfigure:** `npx @enfyra/mcp-server config --reconfig` prompts for the target host again, uses existing project values as defaults, and replaces the old project `enfyra` entry for that host.
 - **Global/user config:** add `--global` only when you intentionally want the selected host config under your home directory instead of this project.
@@ -57,8 +57,7 @@ Non-interactive:
 ```bash
 npx @enfyra/mcp-server config --codex --yes \
   -a http://localhost:3000/api \
-  -e your-email@example.com \
-  -p your-password
+  -t efy_pat_your-token
 ```
 
 The generated TOML section is:
@@ -70,8 +69,7 @@ args = ["-y", "@enfyra/mcp-server"]
 
 [mcp_servers.enfyra.env]
 ENFYRA_API_URL = "http://localhost:3000/api"
-ENFYRA_EMAIL = "your-email@example.com"
-ENFYRA_PASSWORD = "your-password"
+ENFYRA_API_TOKEN = "efy_pat_your-token"
 ```
 
 The config writer replaces only `[mcp_servers.enfyra]` and `[mcp_servers.enfyra.env]`; other Codex config and other MCP servers are preserved. Open this folder in a new Codex session after updating `./.codex/config.toml`. Use `--global --codex` only when you intentionally want `~/.codex/config.toml`.
@@ -103,22 +101,19 @@ Use the CLI (recommended). **User** and **local** configs are stored in **`~/.cl
 # User scope — available in all projects (options before server name per Claude Code docs)
 claude mcp add --transport stdio --scope user \
   --env ENFYRA_API_URL=http://localhost:3000/api \
-  --env ENFYRA_EMAIL=your-email@example.com \
-  --env ENFYRA_PASSWORD=your-password \
+  --env ENFYRA_API_TOKEN=efy_pat_your-token \
   enfyra -- npx -y @enfyra/mcp-server
 
 # Local scope (default) — only when this repo is cwd; still stored in ~/.claude.json under project path
 claude mcp add --transport stdio \
   --env ENFYRA_API_URL=http://localhost:3000/api \
-  --env ENFYRA_EMAIL=your-email@example.com \
-  --env ENFYRA_PASSWORD=your-password \
+  --env ENFYRA_API_TOKEN=efy_pat_your-token \
   enfyra -- npx -y @enfyra/mcp-server
 
 # Project scope — writes/updates .mcp.json at repo root (good for teams)
 claude mcp add --transport stdio --scope project \
   --env ENFYRA_API_URL=http://localhost:3000/api \
-  --env ENFYRA_EMAIL=your-email@example.com \
-  --env ENFYRA_PASSWORD=your-password \
+  --env ENFYRA_API_TOKEN=efy_pat_your-token \
   enfyra -- npx -y @enfyra/mcp-server
 ```
 
@@ -148,7 +143,7 @@ Cursor reads MCP from **`mcp.json`** in two places ([Cursor docs](https://cursor
 | **Global** | `~/.cursor/mcp.json` (macOS/Linux) or `%USERPROFILE%\.cursor\mcp.json` (Windows) |
 | **Project** | **`.cursor/mcp.json`** inside the project (directory **`.cursor`** at repo root) |
 
-Paste the **same** `mcpServers` structure as in the [Shared](#shared-enfyra-mcp-json-and-environment) section. Cursor supports **interpolation**, e.g. `${env:ENFYRA_PASSWORD}`, `${workspaceFolder}`, for secrets and paths.
+Paste the **same** `mcpServers` structure as in the [Shared](#shared-enfyra-mcp-json-and-environment) section. Cursor supports **interpolation**, e.g. `${env:ENFYRA_API_TOKEN}`, `${workspaceFolder}`, for secrets and paths.
 
 Optional **STDIO** fields per Cursor: `type`, `command`, `args`, `env`, `envFile` — see [STDIO server configuration](https://cursor.com/docs/context/mcp).
 
@@ -172,8 +167,7 @@ Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env 
       "args": ["-y", "@enfyra/mcp-server"],
       "env": {
         "ENFYRA_API_URL": "http://localhost:3000/api",
-        "ENFYRA_EMAIL": "your-email@example.com",
-        "ENFYRA_PASSWORD": "your-password"
+        "ENFYRA_API_TOKEN": "efy_pat_your-token"
       }
     }
   }
@@ -186,8 +180,7 @@ Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ENFYRA_API_URL` | Base for REST + GraphQL + auth through the Nuxt/app proxy | `http://localhost:3000/api` |
-| `ENFYRA_EMAIL` | Admin email | — |
-| `ENFYRA_PASSWORD` | Admin password | — |
+| `ENFYRA_API_TOKEN` | Programmatic token from eApp `/me`. MCP exchanges it through `/auth/token/exchange` for an access token. | — |
 
 ### `ENFYRA_API_URL` — use the app proxy
 

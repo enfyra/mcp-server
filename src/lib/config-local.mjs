@@ -20,8 +20,7 @@ Writes project config under the current working directory:
 
 Options:
   --api-url, -a <url>     ENFYRA_API_URL
-  --email, -e <email>     ENFYRA_EMAIL
-  --password, -p <secret> ENFYRA_PASSWORD
+  --api-token, -t <secret> ENFYRA_API_TOKEN
   --global                Write global/user config for selected hosts instead of project config
   --reconfig              Always choose target again in interactive mode and replace the old enfyra config for that target
   --yes                   Non-interactive: no prompts (CI / scripts); use CLI, env, existing file, then defaults
@@ -32,7 +31,7 @@ Options:
   Passing multiple target flags writes each selected target.
   -h, --help              Show this help
 
-Interactive mode: lets you choose Claude Code / Cursor / Codex / all if you did not pass target flags; then asks for URL / email / password
+Interactive mode: lets you choose Claude Code / Cursor / Codex / all if you did not pass target flags; then asks for URL / API token
   when missing. Existing project config is used as defaults. Re-run to update.
 
 Examples:
@@ -42,17 +41,16 @@ Examples:
   npx @enfyra/mcp-server config --codex --yes
   npx @enfyra/mcp-server config --global --codex
   npx @enfyra/mcp-server config --reconfig
-  npx @enfyra/mcp-server config -a http://localhost:3000/api -e admin@x.com -p 'secret'
+  npx @enfyra/mcp-server config -a http://localhost:3000/api -t 'efy_pat_...'
   npx @enfyra/mcp-server config --yes
-  ENFYRA_PASSWORD=secret npx @enfyra/mcp-server config --yes -e admin@x.com
+  ENFYRA_API_TOKEN=efy_pat_... npx @enfyra/mcp-server config --yes
 `);
 }
 
 function parseArgs(argv) {
   const out = {
     apiUrl: undefined,
-    email: undefined,
-    password: undefined,
+    apiToken: undefined,
     claude: true,
     cursor: true,
     codex: true,
@@ -78,8 +76,10 @@ function parseArgs(argv) {
     else if (a === '--reconfig') out.reconfig = true;
     else if (a === '--global') out.global = true;
     else if (a === '--api-url' || a === '-a') out.apiUrl = next();
-    else if (a === '--email' || a === '-e') out.email = next();
-    else if (a === '--password' || a === '-p') out.password = next();
+    else if (a === '--api-token' || a === '-t') out.apiToken = next();
+    else if (a === '--email' || a === '-e' || a === '--password' || a === '-p') {
+      throw new Error(`${a} is no longer supported; use --api-token instead`);
+    }
     else if (a === '--claude-only' || a === '--claude-code' || a === '--claude') pickClaude = true;
     else if (a === '--cursor-only' || a === '--cursor') pickCursor = true;
     else if (a === '--codex-only' || a === '--codex') pickCodex = true;
@@ -94,14 +94,13 @@ function parseArgs(argv) {
   return out;
 }
 
-function buildServerEntry(apiUrl, email, password) {
+function buildServerEntry(apiUrl, apiToken) {
   return {
     command: 'npx',
     args: ['-y', '@enfyra/mcp-server'],
     env: {
       ENFYRA_API_URL: apiUrl,
-      ENFYRA_EMAIL: email,
-      ENFYRA_PASSWORD: password,
+      ENFYRA_API_TOKEN: apiToken,
     },
   };
 }
@@ -129,7 +128,7 @@ function tomlString(value) {
   return JSON.stringify(String(value ?? ''));
 }
 
-function buildCodexTomlBlock(apiUrl, email, password) {
+function buildCodexTomlBlock(apiUrl, apiToken) {
   return [
     '[mcp_servers.enfyra]',
     'command = "npx"',
@@ -137,13 +136,12 @@ function buildCodexTomlBlock(apiUrl, email, password) {
     '',
     '[mcp_servers.enfyra.env]',
     `ENFYRA_API_URL = ${tomlString(apiUrl)}`,
-    `ENFYRA_EMAIL = ${tomlString(email)}`,
-    `ENFYRA_PASSWORD = ${tomlString(password)}`,
+    `ENFYRA_API_TOKEN = ${tomlString(apiToken)}`,
     '',
   ].join('\n');
 }
 
-async function mergeCodexConfig(absPath, apiUrl, email, password) {
+async function mergeCodexConfig(absPath, apiUrl, apiToken) {
   let raw = '';
   try {
     raw = await readFile(absPath, 'utf8');
@@ -162,7 +160,7 @@ async function mergeCodexConfig(absPath, apiUrl, email, password) {
     if (!skip) kept.push(line);
   }
 
-  const next = `${kept.join('\n').trimEnd()}\n\n${buildCodexTomlBlock(apiUrl, email, password)}`;
+  const next = `${kept.join('\n').trimEnd()}\n\n${buildCodexTomlBlock(apiUrl, apiToken)}`;
   await mkdir(dirname(absPath), { recursive: true });
   await writeFile(absPath, next, 'utf8');
 }
@@ -180,7 +178,7 @@ function parseTomlString(value) {
 async function readCodexEnfyraEnv(absPath) {
   try {
     const raw = await readFile(absPath, 'utf8');
-    const values = { apiUrl: '', email: '', password: '' };
+    const values = { apiUrl: '', apiToken: '' };
     let inEnv = false;
     for (const line of raw.split(/\r?\n/)) {
       const header = line.match(/^\s*\[([^\]]+)\]\s*$/);
@@ -194,10 +192,9 @@ async function readCodexEnfyraEnv(absPath) {
       const key = pair[1];
       const value = parseTomlString(pair[2]);
       if (key === 'ENFYRA_API_URL') values.apiUrl = value;
-      if (key === 'ENFYRA_EMAIL') values.email = value;
-      if (key === 'ENFYRA_PASSWORD') values.password = value;
+      if (key === 'ENFYRA_API_TOKEN') values.apiToken = value;
     }
-    if (values.apiUrl || values.email || values.password) return values;
+    if (values.apiUrl || values.apiToken) return values;
   } catch {
     /* */
   }
@@ -229,11 +226,10 @@ async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, gl
       const raw = await readFile(p, 'utf8');
       const j = JSON.parse(raw);
       const e = j?.mcpServers?.[SERVER_KEY]?.env;
-      if (e && typeof e === 'object' && (e.ENFYRA_API_URL || e.ENFYRA_EMAIL || e.ENFYRA_PASSWORD)) {
+      if (e && typeof e === 'object' && (e.ENFYRA_API_URL || e.ENFYRA_API_TOKEN)) {
         return {
           apiUrl: typeof e.ENFYRA_API_URL === 'string' ? e.ENFYRA_API_URL : '',
-          email: typeof e.ENFYRA_EMAIL === 'string' ? e.ENFYRA_EMAIL : '',
-          password: typeof e.ENFYRA_PASSWORD === 'string' ? e.ENFYRA_PASSWORD : '',
+          apiToken: typeof e.ENFYRA_API_TOKEN === 'string' ? e.ENFYRA_API_TOKEN : '',
         };
       }
     } catch {
@@ -244,7 +240,7 @@ async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, gl
     const codex = await readCodexEnfyraEnv(getCodexConfigPath(root, globalScope));
     if (codex) return codex;
   }
-  return { apiUrl: '', email: '', password: '' };
+  return { apiUrl: '', apiToken: '' };
 }
 
 async function promptTargetChoice() {
@@ -357,10 +353,9 @@ async function promptTargetSelect(choices, initialIndex = 0) {
 
 async function promptConfig(opts, existing) {
   let apiUrl = opts.apiUrl;
-  let email = opts.email;
-  let password = opts.password;
-  if (apiUrl !== undefined && email !== undefined && password !== undefined) {
-    return { apiUrl: String(apiUrl).replace(/\/$/, ''), email, password };
+  let apiToken = opts.apiToken;
+  if (apiUrl !== undefined && apiToken !== undefined) {
+    return { apiUrl: String(apiUrl).replace(/\/$/, ''), apiToken };
   }
 
   const rl = createInterface({ input, output });
@@ -378,22 +373,15 @@ async function promptConfig(opts, existing) {
   }
   apiUrl = String(apiUrl).replace(/\/$/, '');
 
-  const defaultEmail = opts.email ?? process.env.ENFYRA_EMAIL ?? existing.email ?? '';
-  if (email === undefined) {
-    const hint = defaultEmail ? `[${defaultEmail}]` : '[empty]';
-    const line = (await q(`ENFYRA_EMAIL ${hint}: `)).trim();
-    email = line || defaultEmail;
-  }
-
-  const defaultPass = opts.password ?? process.env.ENFYRA_PASSWORD ?? existing.password ?? '';
-  if (password === undefined) {
-    const hint = existing.password ? '(Enter = keep current)' : '(optional)';
-    const line = (await q(`ENFYRA_PASSWORD ${hint}: `)).trim();
-    password = line !== '' ? line : defaultPass;
+  const defaultApiToken = opts.apiToken ?? process.env.ENFYRA_API_TOKEN ?? existing.apiToken ?? '';
+  if (apiToken === undefined) {
+    const hint = defaultApiToken ? '(Enter = keep current)' : '(recommended)';
+    const line = (await q(`ENFYRA_API_TOKEN ${hint}: `)).trim();
+    apiToken = line !== '' ? line : defaultApiToken;
   }
 
   await rl.close();
-  return { apiUrl, email, password };
+  return { apiUrl, apiToken };
 }
 
 function resolveNonInteractive(opts, existing) {
@@ -403,9 +391,8 @@ function resolveNonInteractive(opts, existing) {
     (existing.apiUrl || undefined) ??
     'http://localhost:3000/api'
   ).replace(/\/$/, '');
-  const email = opts.email ?? process.env.ENFYRA_EMAIL ?? existing.email ?? '';
-  const password = opts.password ?? process.env.ENFYRA_PASSWORD ?? existing.password ?? '';
-  return { apiUrl, email, password };
+  const apiToken = opts.apiToken ?? process.env.ENFYRA_API_TOKEN ?? existing.apiToken ?? '';
+  return { apiUrl, apiToken };
 }
 
 export async function runLocalConfig(argv) {
@@ -439,21 +426,18 @@ export async function runLocalConfig(argv) {
   const existing = await loadExistingEnfyraEnv(root, writeClaude, writeCursor, writeCodex, opts.global);
 
   let apiUrl;
-  let email;
-  let password;
+  let apiToken;
   if (usePrompt) {
     const resolved = await promptConfig(opts, existing);
     apiUrl = resolved.apiUrl;
-    email = resolved.email;
-    password = resolved.password;
+    apiToken = resolved.apiToken;
   } else {
     const resolved = resolveNonInteractive(opts, existing);
     apiUrl = resolved.apiUrl;
-    email = resolved.email;
-    password = resolved.password;
+    apiToken = resolved.apiToken;
   }
 
-  const serverEntry = buildServerEntry(apiUrl, email, password);
+  const serverEntry = buildServerEntry(apiUrl, apiToken);
   const written = [];
 
   if (writeClaude) {
@@ -468,7 +452,7 @@ export async function runLocalConfig(argv) {
   }
   if (writeCodex) {
     const p = getCodexConfigPath(root, opts.global);
-    await mergeCodexConfig(p, apiUrl, email, password);
+    await mergeCodexConfig(p, apiUrl, apiToken);
     written.push(p);
   }
 
@@ -479,7 +463,7 @@ export async function runLocalConfig(argv) {
   console.log('  • Claude Code: open this folder; approve project MCP if prompted (`claude mcp reset-project-choices` to reset).');
   console.log('  • Cursor: open this folder, restart Cursor or reload MCP, then confirm server under Settings → MCP.');
   console.log('  • Run `config` again anytime to change values (same files are merged/overwritten for `enfyra`).');
-  if (!email || !password) {
-    console.log('\nWarning: ENFYRA_EMAIL or ENFYRA_PASSWORD is empty — tools may not authenticate until set.');
+  if (!apiToken) {
+    console.log('\nWarning: ENFYRA_API_TOKEN is empty — tools will not authenticate until set.');
   }
 }

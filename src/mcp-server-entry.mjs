@@ -11,18 +11,17 @@ import { z } from 'zod';
 
 // Configuration
 const ENFYRA_API_URL = process.env.ENFYRA_API_URL || 'http://localhost:3000/api';
-const ENFYRA_EMAIL = process.env.ENFYRA_EMAIL || '';
-const ENFYRA_PASSWORD = process.env.ENFYRA_PASSWORD || '';
+const ENFYRA_API_TOKEN = process.env.ENFYRA_API_TOKEN || '';
 
 // Import modules
-import { login, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
+import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
 import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
 import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instructions.js';
 import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
 import { registerTableTools } from './lib/table-tools.js';
 
 // Initialize auth module
-initAuth(ENFYRA_API_URL, ENFYRA_EMAIL, ENFYRA_PASSWORD);
+initAuth(ENFYRA_API_URL, ENFYRA_API_TOKEN);
 
 const CAPABILITY_AREAS = [
   {
@@ -37,8 +36,8 @@ const CAPABILITY_AREAS = [
   },
   {
     area: 'Auth, roles, sessions, OAuth',
-    tables: ['user_definition', 'role_definition', 'session_definition', 'oauth_config_definition', 'oauth_account_definition'],
-    workflow: 'Email/password login is /auth/login. OAuth is browser redirect based. session_definition is internal/no-route.',
+    tables: ['user_definition', 'role_definition', 'api_token_definition', 'session_definition', 'oauth_config_definition', 'oauth_account_definition'],
+    workflow: 'MCP auth exchanges ENFYRA_API_TOKEN through /auth/token/exchange. Configure an API token from eApp /me.',
   },
   {
     area: 'Guards and permissions',
@@ -1691,15 +1690,17 @@ server.tool('get_all_roles', 'Get all role definitions', {}, async () => {
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
-server.tool('login', 'Force login to Enfyra and get new tokens', {
-  email: z.string().email().optional().describe('Admin email'),
-  password: z.string().optional().describe('Password'),
-}, async ({ email, password }) => {
-  const loginEmail = email || ENFYRA_EMAIL;
-  const loginPassword = password || ENFYRA_PASSWORD;
-  if (!loginEmail || !loginPassword) throw new Error('Email and password required');
-  await login(ENFYRA_API_URL, loginEmail, loginPassword);
-  return { content: [{ type: 'text', text: `Logged in successfully!\nToken expires: ${new Date(getTokenExpiry()).toISOString()}` }] };
+server.tool('login', 'Force authentication to Enfyra and get a new access token', {
+  apiToken: z.string().optional().describe('API token; preferred for MCP and automation'),
+}, async ({ apiToken }) => {
+  const token = apiToken || ENFYRA_API_TOKEN;
+  if (token) {
+    await exchangeApiToken(ENFYRA_API_URL, token);
+    const expiry = getTokenExpiry();
+    const expiryLabel = expiry === Infinity ? 'no expiration' : new Date(expiry).toISOString();
+    return { content: [{ type: 'text', text: `Authenticated with API token.\nToken expires: ${expiryLabel}` }] };
+  }
+  throw new Error('ENFYRA_API_TOKEN required');
 });
 
 // ============================================================================
@@ -1860,7 +1861,7 @@ server.tool(
 async function main() {
   console.error('Starting Enfyra MCP Server...');
   console.error(`API URL: ${ENFYRA_API_URL}`);
-  console.error(`Auth: ${ENFYRA_EMAIL ? `Configured (${ENFYRA_EMAIL})` : 'Not configured'}`);
+  console.error(`Auth: ${ENFYRA_API_TOKEN ? 'API token configured' : 'Not configured'}`);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

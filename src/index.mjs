@@ -20,8 +20,7 @@ Common config flags:
   --reconfig          Prompt for host and credentials again, replacing the enfyra entry
   --yes               Non-interactive
   -a, --api-url       ENFYRA_API_URL
-  -e, --email         ENFYRA_EMAIL
-  -p, --password      ENFYRA_PASSWORD
+  -t, --api-token     ENFYRA_API_TOKEN
   -h, --help          Show config help
 
 Run \`npx @enfyra/mcp-server config --help\` for full config details.
