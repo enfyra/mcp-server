@@ -651,6 +651,58 @@ create_extension({
         ],
       },
       {
+        name: 'Page header and action button variants',
+        code: `<script setup>
+const { registerPageHeader } = usePageHeaderRegistry()
+
+registerPageHeader({
+  title: 'Host detail',
+  description: 'Provider state, capacity, projects, and reconciliation status.',
+  leadingIcon: 'lucide:server',
+  gradient: 'cyan',
+  variant: 'minimal'
+})
+
+useHeaderActionRegistry([
+  {
+    id: 'back-to-hosts',
+    label: 'Hosts',
+    icon: 'lucide:arrow-left',
+    color: 'neutral',
+    variant: 'ghost',
+    order: 0,
+    onClick: () => navigateTo('/cloud/hosts')
+  },
+  {
+    id: 'run-host-check',
+    label: 'Run check',
+    icon: 'lucide:scan-search',
+    color: 'neutral',
+    variant: 'outline',
+    order: 1,
+    permission: { or: [{ route: '/cloud/admin/hosts/reconcile', methods: ['POST'] }] },
+    onClick: runCheck
+  },
+  {
+    id: 'refresh-host',
+    label: 'Refresh',
+    icon: 'lucide:refresh-cw',
+    color: 'primary',
+    variant: 'solid',
+    order: 2,
+    onClick: refresh
+  }
+])
+</script>`,
+        notes: [
+          'Use PageHeader for the title strip; do not render a duplicate header inside extension body.',
+          'Back/navigation actions should be neutral ghost so they read as navigation, not a primary operation.',
+          'Visible secondary operations should be neutral outline; soft is only for low-emphasis chrome actions.',
+          'The main page action should be primary solid.',
+          'Do not choose soft only because it looks acceptable in dark mode; light mode must remain clear too.',
+        ],
+      },
+      {
         name: 'Debug menu or extension changes that do not appear in open eApp tabs',
         code: `// Server side: menu_definition and extension_definition are runtime UI definitions.
 // They must participate in partial reload, just like metadata/routes.
