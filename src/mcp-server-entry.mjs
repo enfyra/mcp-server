@@ -199,6 +199,31 @@ function summarizeRoutes(routesResult) {
   }));
 }
 
+function summarizeMetadata(metadata, { search, limit } = {}) {
+  const tables = normalizeTables(metadata);
+  const q = search ? search.toLowerCase() : null;
+  const summarized = tables.map((table) => ({
+    id: table.id ?? table._id,
+    name: table.name,
+    alias: table.alias,
+    primaryKey: getPrimaryColumn(table)?.name || null,
+    columnCount: (table.columns || []).length,
+    relationCount: (table.relations || []).length,
+    routeHint: `Use get_table_metadata({ tableName: "${table.name}" }) for fields and relations.`,
+  }));
+  const matched = q
+    ? summarized.filter((table) => JSON.stringify(table).toLowerCase().includes(q))
+    : summarized;
+  const outputLimit = limit || 30;
+  return {
+    tableCount: tables.length,
+    matchedTableCount: matched.length,
+    returnedTableCount: Math.min(matched.length, outputLimit),
+    search: search || null,
+    tables: matched.slice(0, outputLimit),
+  };
+}
+
 function unwrapData(result) {
   return Array.isArray(result?.data) ? result.data : [];
 }
@@ -250,6 +275,29 @@ function pickCodeSummary(record, fieldName) {
   };
 }
 
+function summarizeMutationResult(result, action, tableName) {
+  const record = firstDataRecord(result);
+  return {
+    action,
+    tableName,
+    id: getId(record),
+    statusCode: result?.statusCode,
+    success: result?.success,
+    detailHint: `Use find_one_record or query_table with explicit fields to inspect ${tableName}.`,
+  };
+}
+
+async function getTableSummary(tableName) {
+  const result = await fetchAPI(ENFYRA_API_URL, `/metadata/${tableName}`);
+  const table = result?.data?.table || result?.data || result?.table || result;
+  return summarizeTable(table);
+}
+
+async function getPrimaryFieldName(tableName) {
+  const table = await getTableSummary(tableName);
+  return table?.primaryKey || 'id';
+}
+
 async function fetchAll(path) {
   return unwrapData(await fetchAPI(ENFYRA_API_URL, path));
 }
@@ -290,16 +338,38 @@ const server = new McpServer(
 // METADATA TOOLS
 // ============================================================================
 
-server.tool('get_all_metadata', 'Get all metadata (tables, columns, relations, routes, hooks, etc.) from Enfyra', {}, async () => {
+server.tool('get_all_metadata', 'Get concise metadata summary for all tables. Use get_table_metadata or inspect_table for detail.', {
+  includeFull: z.boolean().optional().default(false).describe('Return full raw metadata. Default false to keep MCP context small.'),
+  search: z.string().optional().describe('Optional table-name/alias substring filter.'),
+  limit: z.number().optional().describe('Maximum tables returned after search. Default 30.'),
+}, async ({ includeFull, search, limit }) => {
   const result = await fetchAPI(ENFYRA_API_URL, '/metadata');
-  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  const payload = includeFull
+    ? result
+    : {
+        statusCode: result?.statusCode,
+        success: result?.success,
+        ...summarizeMetadata(result, { search, limit }),
+        detailHint: 'Default response is capped and minimal. Call get_table_metadata({ tableName }) or inspect_table({ tableName }) for columns, relations, and route context.',
+      };
+  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 });
 
-server.tool('get_table_metadata', 'Get metadata for a specific table by name', {
+server.tool('get_table_metadata', 'Get concise metadata for a specific table by name', {
   tableName: z.string().describe('Table name (e.g., "user_definition", "route_definition")'),
-}, async ({ tableName }) => {
+  includeFull: z.boolean().optional().default(false).describe('Return full raw table metadata. Default false to keep MCP context small.'),
+}, async ({ tableName, includeFull }) => {
   const result = await fetchAPI(ENFYRA_API_URL, `/metadata/${tableName}`);
-  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  const table = result?.data?.table || result?.data || result?.table || result;
+  const payload = includeFull
+    ? result
+    : {
+        statusCode: result?.statusCode,
+        success: result?.success,
+        table: summarizeTable(table),
+        queryHint: `Use query_table({ tableName: "${tableName}", fields: [...] }) for records. query_table without fields returns only the primary key.`,
+      };
+  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 });
 
 server.tool(
@@ -707,27 +777,41 @@ server.tool(
   },
 );
 
-server.tool('query_table', 'Query any table in Enfyra with filters, sorting, and pagination', {
+server.tool('query_table', 'Query any route-backed table. Default response is minimal; pass fields explicitly for detail.', {
   tableName: z.string().describe('Table name to query'),
   filter: z.string().optional().describe('Filter object as JSON string. Examples: \'{"status": {"_eq": "active"}}\''),
   sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
   page: z.number().optional().describe('Page number (default: 1)'),
-  limit: z.number().optional().describe('Items per page (default: 50, max: 500)'),
-  fields: z.array(z.string()).optional().describe('Fields to select'),
+  limit: z.number().optional().describe('Items per page. Default: 10. Use count_records for counts.'),
+  fields: z.array(z.string()).optional().describe('Fields to select. If omitted, MCP selects only the table primary key to avoid oversized responses.'),
 }, async ({ tableName, filter, sort, page, limit, fields }) => {
   validateTableName(tableName);
   validateFilter(filter);
 
   const queryParams = new URLSearchParams();
+  const selectedFields = fields && fields.length > 0 ? fields : [await getPrimaryFieldName(tableName)];
   if (filter) queryParams.set('filter', filter);
   if (sort) queryParams.set('sort', sort);
   if (page) queryParams.set('page', String(page));
-  if (limit) queryParams.set('limit', String(limit));
-  if (fields) queryParams.set('fields', fields.join(','));
+  queryParams.set('limit', String(limit || 10));
+  queryParams.set('fields', selectedFields.join(','));
 
   const query = queryParams.toString();
   const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}${query ? `?${query}` : ''}`);
-  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  const payload = {
+    statusCode: result?.statusCode,
+    success: result?.success,
+    tableName,
+    fields: selectedFields,
+    limit: limit || 10,
+    minimalDefaultApplied: !(fields && fields.length > 0),
+    meta: result?.meta,
+    data: result?.data || [],
+    detailHint: fields && fields.length > 0
+      ? undefined
+      : 'Only the primary key was returned because fields was omitted. Re-run query_table with explicit fields for details, or use inspect_table to find valid field names.',
+  };
+  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 });
 
 server.tool(
@@ -780,26 +864,50 @@ server.tool(
     tableName: z.string().describe('Table name'),
     id: z.string().optional().describe('Record ID'),
     filter: z.string().optional().describe('Filter as JSON string to find by'),
+    fields: z.array(z.string()).optional().describe('Fields to select. If omitted, returns only the primary key.'),
   },
-  async ({ tableName, id, filter }) => {
+  async ({ tableName, id, filter, fields }) => {
     validateTableName(tableName);
+    const primaryKey = await getPrimaryFieldName(tableName);
+    const selectedFields = fields && fields.length > 0 ? fields : [primaryKey];
     if (id) {
       // Enfyra route engine does not register GET /<table>/:id (only PATCH/DELETE use /:id). Use list + filter.
-      const filterObj = JSON.stringify({ id: { _eq: id } });
+      const filterObj = JSON.stringify({ [primaryKey]: { _eq: id } });
+      const queryParams = new URLSearchParams({
+        filter: filterObj,
+        limit: '1',
+        fields: selectedFields.join(','),
+      });
       const result = await fetchAPI(
         ENFYRA_API_URL,
-        `/${tableName}?filter=${encodeURIComponent(filterObj)}&limit=1`,
+        `/${tableName}?${queryParams.toString()}`,
       );
       const one = result.data?.[0] ?? null;
-      return { content: [{ type: 'text', text: JSON.stringify(one, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({
+        tableName,
+        primaryKey,
+        fields: selectedFields,
+        data: one,
+        detailHint: fields && fields.length > 0 ? undefined : 'Only the primary key was returned. Pass fields for details.',
+      }, null, 2) }] };
     }
     if (!filter) throw new Error('Provide id or filter');
     validateFilter(filter);
+    const queryParams = new URLSearchParams({
+      filter,
+      limit: '1',
+      fields: selectedFields.join(','),
+    });
     const result = await fetchAPI(
       ENFYRA_API_URL,
-      `/${tableName}?filter=${encodeURIComponent(filter)}&limit=1`,
+      `/${tableName}?${queryParams.toString()}`,
     );
-    return { content: [{ type: 'text', text: JSON.stringify(result.data?.[0] || null, null, 2) }] };
+    return { content: [{ type: 'text', text: JSON.stringify({
+      tableName,
+      fields: selectedFields,
+      data: result.data?.[0] || null,
+      detailHint: fields && fields.length > 0 ? undefined : 'Only the primary key was returned. Pass fields for details.',
+    }, null, 2) }] };
   },
 );
 
@@ -813,7 +921,7 @@ server.tool('create_record', 'Create a new record in any table', {
 }, async ({ tableName, data }) => {
   validateTableName(tableName);
   const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}`, { method: 'POST', body: data });
-  return { content: [{ type: 'text', text: `Record created:\n${JSON.stringify(result, null, 2)}` }] };
+  return { content: [{ type: 'text', text: JSON.stringify(summarizeMutationResult(result, 'created', tableName), null, 2) }] };
 });
 
 server.tool('update_record', 'Update an existing record by ID using PATCH', {
@@ -823,7 +931,7 @@ server.tool('update_record', 'Update an existing record by ID using PATCH', {
 }, async ({ tableName, id, data }) => {
   validateTableName(tableName);
   const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}/${id}`, { method: 'PATCH', body: data });
-  return { content: [{ type: 'text', text: `Record updated:\n${JSON.stringify(result, null, 2)}` }] };
+  return { content: [{ type: 'text', text: JSON.stringify(summarizeMutationResult(result, 'updated', tableName), null, 2) }] };
 });
 
 server.tool('delete_record', 'Delete a record by ID', {
@@ -832,7 +940,13 @@ server.tool('delete_record', 'Delete a record by ID', {
 }, async ({ tableName, id }) => {
   validateTableName(tableName);
   const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}/${id}`, { method: 'DELETE' });
-  return { content: [{ type: 'text', text: `Record deleted:\n${JSON.stringify(result, null, 2)}` }] };
+  return { content: [{ type: 'text', text: JSON.stringify({
+    action: 'deleted',
+    tableName,
+    id,
+    statusCode: result?.statusCode,
+    success: result?.success,
+  }, null, 2) }] };
 });
 
 server.tool(
@@ -987,7 +1101,7 @@ function enrichRoute(route, state) {
     .map((item) => pickCodeSummary({
       ...item,
       method: item.method ? { ...item.method, method: state.methodIdNameMap[String(getId(item.method))] || item.method.method || null } : item.method,
-    }, 'logic'));
+    }, 'sourceCode'));
   const routePreHooks = withMethodNames(
     state.preHooks.filter((item) => item.isGlobal || sameId(refId(item.route), routeId)),
     state.methodIdNameMap,
@@ -1138,7 +1252,7 @@ server.tool(
       relations: table.relations?.map((relation) => ({ propertyName: relation.propertyName, description: relation.description })),
     }));
     const routeMatches = state.routes.filter((route) => matchesText(route));
-    const handlerMatches = state.handlers.filter((handler) => matchesText(handler)).map((item) => pickCodeSummary(item, 'logic'));
+    const handlerMatches = state.handlers.filter((handler) => matchesText(handler)).map((item) => pickCodeSummary(item, 'sourceCode'));
     const preHookMatches = state.preHooks.filter((hook) => matchesText(hook)).map((item) => pickCodeSummary(item, 'code'));
     const postHookMatches = state.postHooks.filter((hook) => matchesText(hook)).map((item) => pickCodeSummary(item, 'code'));
     const guardMatches = state.guards.filter((guard) => matchesText(guard));
@@ -1234,12 +1348,40 @@ server.tool(
   },
 );
 
-server.tool('get_all_routes', 'List all route definitions (path, mainTable, handlers, hooks, permissions). Call before create_route to avoid duplicate paths and to pick routeId for hooks/handlers.', {
+server.tool('get_all_routes', 'List route definitions with minimal fields. Call inspect_route for handlers/hooks/permissions detail.', {
   includeDisabled: z.boolean().optional().default(false).describe('Include disabled routes'),
-}, async ({ includeDisabled }) => {
+  search: z.string().optional().describe('Optional path or table substring filter. Use this before creating a route to check duplicates.'),
+  limit: z.number().optional().describe('Maximum routes returned after search. Default 50 to keep response small.'),
+}, async ({ includeDisabled, search, limit }) => {
   const filter = includeDisabled ? {} : { isEnabled: { _eq: true } };
-  const result = await fetchAPI(ENFYRA_API_URL, `/route_definition?filter=${encodeURIComponent(JSON.stringify(filter))}&limit=500`);
-  return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  const queryParams = new URLSearchParams({
+    filter: JSON.stringify(filter),
+    fields: 'id,path,mainTable.name,availableMethods.*,publishedMethods.*,isEnabled',
+    limit: '1000',
+  });
+  const result = await fetchAPI(ENFYRA_API_URL, `/route_definition?${queryParams.toString()}`);
+  const routeLimit = limit || 50;
+  const q = search ? search.toLowerCase() : null;
+  const allRoutes = summarizeRoutes(result);
+  const matchedRoutes = q
+    ? allRoutes.filter((route) => JSON.stringify({
+        path: route.path,
+        mainTable: route.mainTable,
+      }).toLowerCase().includes(q))
+    : allRoutes;
+  const payload = {
+    statusCode: result?.statusCode,
+    success: result?.success,
+    totalRouteCount: allRoutes.length,
+    matchedRouteCount: matchedRoutes.length,
+    returnedRouteCount: Math.min(matchedRoutes.length, routeLimit),
+    search: search || null,
+    routes: matchedRoutes.slice(0, routeLimit),
+    detailHint: matchedRoutes.length > routeLimit
+      ? `Response truncated to ${routeLimit} routes. Re-run with search or a higher limit, then inspect_route({ path }) for details.`
+      : 'Use inspect_route({ path }) or inspect_route({ routeId }) for handlers, hooks, permissions, and guards.',
+  };
+  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 });
 
 server.tool(
@@ -1284,7 +1426,18 @@ server.tool(
     await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
 
     const created = firstDataRecord(result);
-    return { content: [{ type: 'text', text: `Route created (ID: ${getId(created)}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+    return { content: [{ type: 'text', text: JSON.stringify({
+      action: 'created',
+      route: {
+        id: getId(created),
+        path: created?.path,
+        mainTableId,
+        availableMethods: methods,
+        publishedMethods: publishedMethods || [],
+      },
+      routesReloaded: true,
+      next: `Use create_handler({ routeId: ${JSON.stringify(getId(created))}, method: "GET"|"POST"|"PATCH"|"DELETE", sourceCode }) for custom code.`,
+    }, null, 2) }] };
   },
 );
 
@@ -1293,38 +1446,56 @@ server.tool(
   [
     'Create a handler for a route+method. One handler per (route, method) pair.',
     'Attach to the route the user cares about (`get_all_routes`): typically a path from `create_route`, not a spurious table created only for handlers.',
+    'Use sourceCode, not logic/name. Enfyra compiles sourceCode into compiledCode; do not send compiledCode.',
     'Handler code runs inside a sandbox with $ctx. Use macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503, @SOCKET, @PKGS, @LOGS, @SHARE.',
     'Or use $ctx directly: $ctx.$body, $ctx.$repos.main.find(), $ctx.$helpers.$bcrypt.hash(), etc.',
     'require("pkg") works for installed Server packages. console.log() writes to $share.$logs.',
   ].join(' '),
   {
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE']))
-      .describe('Methods to create handlers for. Creates one handler per method.'),
-    logic: z.string().describe('Handler JavaScript code'),
+    method: z.enum(['GET', 'POST', 'PATCH', 'DELETE']).optional()
+      .describe('Single method to create. Prefer this for one handler.'),
+    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
+      .describe('Batch create multiple handlers. Use only when the same sourceCode applies to every method.'),
+    sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic.'),
+    scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
     timeout: z.number().optional().describe('Timeout in ms (default: system DEFAULT_HANDLER_TIMEOUT, usually 30000)'),
   },
-  async ({ routeId, methods, logic, timeout }) => {
+  async ({ routeId, method, methods, sourceCode, scriptLanguage, timeout }) => {
+    const methodNames = methods && methods.length > 0 ? methods : method ? [method] : [];
+    if (methodNames.length === 0) throw new Error('Provide method or methods');
     const methodMap = await getMethodMap();
     const results = [];
 
-    for (const method of methods) {
-      const methodId = methodMap[method.toUpperCase()];
-      if (!methodId) throw new Error(`Unknown method: ${method}. Valid: ${Object.keys(methodMap).join(', ')}`);
+    for (const methodName of methodNames) {
+      const methodId = methodMap[methodName.toUpperCase()];
+      if (!methodId) throw new Error(`Unknown method: ${methodName}. Valid: ${Object.keys(methodMap).join(', ')}`);
 
-      const body = { route: { id: routeId }, method: { id: methodId }, logic };
+      const body = { route: { id: routeId }, method: { id: methodId }, sourceCode, scriptLanguage };
       if (timeout) body.timeout = timeout;
 
       const result = await fetchAPI(ENFYRA_API_URL, '/route_handler_definition', {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      results.push(result);
+      const created = firstDataRecord(result);
+      results.push({
+        id: getId(created),
+        routeId,
+        method: methodName,
+        scriptLanguage,
+        timeout: created?.timeout ?? timeout ?? null,
+      });
     }
 
     await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
 
-    return { content: [{ type: 'text', text: `Handler(s) created for [${methods.join(', ')}]. Routes reloaded.\n${JSON.stringify(results, null, 2)}` }] };
+    return { content: [{ type: 'text', text: JSON.stringify({
+      action: 'created',
+      handlers: results,
+      routesReloaded: true,
+      detailHint: 'Use inspect_route with the same routeId/path to inspect saved handlers.',
+    }, null, 2) }] };
   },
 );
 

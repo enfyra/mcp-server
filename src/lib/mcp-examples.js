@@ -217,6 +217,20 @@ create_column({
     useWhen: 'Use when fetching records, filtering by relations, loading nested data, or counting efficiently.',
     examples: [
       {
+        name: 'Minimal MCP query then explicit detail query',
+        code: `query_table({
+  tableName: "user_definition",
+  fields: ["id", "email"],
+  filter: "{\\"email\\":{\\"_contains\\":\\"@example.com\\"}}",
+  limit: 10
+})`,
+        notes: [
+          'Always pass fields when you need more than ids; query_table without fields intentionally returns only the primary key.',
+          'Use inspect_table first when you do not know valid column names or relation propertyName values.',
+          'Use count_records when only the count is needed.',
+        ],
+      },
+      {
         name: 'List current user conversations through RLS',
         code: `GET /enfyra/chat_conversation?fields=id,kind,title,lastMessage.id,lastMessage.text,lastMessage.createdAt&limit=0`,
         notes: [
@@ -269,6 +283,23 @@ create_column({
     title: 'Custom handlers, pre-hooks, post-hooks, and script macros',
     useWhen: 'Use when writing Enfyra dynamic JavaScript for REST behavior.',
     examples: [
+      {
+        name: 'Create a route handler with current script fields',
+        code: `create_handler({
+  routeId: "<route_id>",
+  method: "POST",
+  scriptLanguage: "javascript",
+  sourceCode: \`const email = @BODY.email
+if (!email) @THROW400("Email is required")
+
+return { ok: true, email }\`
+})`,
+        notes: [
+          'Use sourceCode, not logic. The server generates compiledCode.',
+          'Use method for one handler, or methods only when the same sourceCode should be saved for multiple methods.',
+          'Do not pass name to route_handler_definition; one handler is identified by route + method.',
+        ],
+      },
       {
         name: 'Custom register handler',
         code: `const email = @BODY.email
