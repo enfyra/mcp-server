@@ -375,8 +375,8 @@ async function promptConfig(opts, existing) {
 
   const defaultApiToken = opts.apiToken ?? process.env.ENFYRA_API_TOKEN ?? existing.apiToken ?? '';
   if (apiToken === undefined) {
-    const hint = defaultApiToken ? '(Enter = keep current)' : '(recommended)';
-    const line = (await q(`ENFYRA_API_TOKEN ${hint}: `)).trim();
+    const hint = defaultApiToken ? ' (Enter = keep current)' : '';
+    const line = (await q(`ENFYRA_API_TOKEN${hint}: `)).trim();
     apiToken = line !== '' ? line : defaultApiToken;
   }
 
