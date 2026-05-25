@@ -84,9 +84,19 @@ function normalizeRelationForTablePatch(relation) {
   return normalized;
 }
 
+function getId(record) {
+  return record?.id ?? record?._id ?? null;
+}
+
 function normalizeColumnForTablePatch(column) {
   const { table, ...rest } = column;
   return rest;
+}
+
+function getPatchableColumns(columns) {
+  return (columns || [])
+    .filter((column) => getId(column) !== null)
+    .map(normalizeColumnForTablePatch);
 }
 
 function buildColumnDefinition({
@@ -127,7 +137,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       return { content: [{ type: 'text', text: `Error: Table with ID ${args.tableId} not found.` }] };
     }
 
-    const existingColumns = (tableData.columns || []).map(normalizeColumnForTablePatch);
+    const existingColumns = getPatchableColumns(tableData.columns);
     const newCol = buildColumnDefinition(args);
     const result = await patchTableAutoConfirm(ENFYRA_API_URL, args.tableId, { columns: [...existingColumns, newCol] });
 
@@ -161,7 +171,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     }
 
     const columns = (tableData.columns || [])
-      .filter(col => String(col.id) !== String(columnId))
+      .filter((col) => getId(col) !== null)
+      .filter(col => String(getId(col)) !== String(columnId))
       .map(normalizeColumnForTablePatch);
 
     const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns });
@@ -372,7 +383,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     [
       'Add a column to an existing table via PATCH /table_definition/{tableId}.',
       'Columns are managed through cascade with table_definition — there is NO direct /column_definition endpoint.',
-      'This tool fetches existing columns, appends the new one, and PATCHes the table.',
+      'This tool fetches existing columns, keeps only persisted column rows with id/_id, appends the new one, and PATCHes the table.',
+      'Generated metadata projections such as createdAt, updatedAt, or relation-derived FK display fields without id are not valid cascade rows and are skipped.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
     {
@@ -386,6 +398,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     [
       'Alias for create_column. Add a column to an existing table through the canonical table_definition cascade.',
       'Use this for schema additions, including hidden secret fields with isPublished=false.',
+      'Skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
     columnCreateSchema,
@@ -398,7 +411,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'update_column',
     [
       'Update an existing column on a table via PATCH /table_definition/{tableId}.',
-      'Fetches all columns, modifies the target column, and PATCHes the table.',
+      'Fetches table columns, keeps only persisted rows with id/_id, modifies the target column, and PATCHes the table.',
+      'Generated metadata projections such as createdAt, updatedAt, or relation-derived FK display fields without id are skipped.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
     {
@@ -418,9 +432,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
       }
 
-      const columns = (tableData.columns || []).map(col => {
+      const columns = (tableData.columns || []).filter((col) => getId(col) !== null).map(col => {
         const rest = normalizeColumnForTablePatch(col);
-        if (String(col.id) === String(columnId)) {
+        if (String(getId(col)) === String(columnId)) {
           if (name !== undefined) rest.name = name;
           if (type !== undefined) rest.type = type;
           if (isNullable !== undefined) rest.isNullable = isNullable;
@@ -446,7 +460,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'delete_column',
     [
       'Delete a column from a table via PATCH /table_definition/{tableId}.',
-      'Fetches all columns, removes the target, and PATCHes the table.',
+      'Fetches table columns, keeps only persisted rows with id/_id, removes the target, and PATCHes the table.',
       'The physical column is dropped from the database. System columns (id, createdAt, updatedAt) cannot be deleted.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
@@ -461,6 +475,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     [
       'Alias for delete_column. Remove a column through the canonical table_definition cascade.',
       'This drops the physical column. Confirm destructive schema changes before calling.',
+      'Skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
     columnDeleteSchema,

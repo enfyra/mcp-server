@@ -1283,7 +1283,8 @@ server.tool(
 
     await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
 
-    return { content: [{ type: 'text', text: `Route created (ID: ${result.id}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+    const created = firstDataRecord(result);
+    return { content: [{ type: 'text', text: `Route created (ID: ${getId(created)}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
   },
 );
 
@@ -1338,7 +1339,7 @@ server.tool(
   {
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
     name: z.string().describe('Hook name (unique per route)'),
-    code: z.string().describe('Hook JavaScript code'),
+    code: z.string().describe('Hook JavaScript sourceCode. MCP stores it as sourceCode and lets Enfyra compile compiledCode.'),
     methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
       .describe('Methods this hook applies to. Default: all REST methods.'),
     priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
@@ -1353,7 +1354,8 @@ server.tool(
       body: JSON.stringify({
         route: { id: routeId },
         name,
-        code,
+        sourceCode: code,
+        scriptLanguage: 'javascript',
         methods: resolveMethodIds(methodMap, methodNames),
         priority,
         isEnabled,
@@ -1362,7 +1364,8 @@ server.tool(
 
     await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
 
-    return { content: [{ type: 'text', text: `Pre-hook "${name}" created (ID: ${result.id}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+    const created = firstDataRecord(result);
+    return { content: [{ type: 'text', text: `Pre-hook "${name}" created (ID: ${getId(created)}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
   },
 );
 
@@ -1377,7 +1380,7 @@ server.tool(
   {
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
     name: z.string().describe('Hook name (unique per route)'),
-    code: z.string().describe('Hook JavaScript code'),
+    code: z.string().describe('Hook JavaScript sourceCode. MCP stores it as sourceCode and lets Enfyra compile compiledCode.'),
     methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
       .describe('Methods this hook applies to. Default: all REST methods.'),
     priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
@@ -1392,7 +1395,8 @@ server.tool(
       body: JSON.stringify({
         route: { id: routeId },
         name,
-        code,
+        sourceCode: code,
+        scriptLanguage: 'javascript',
         methods: resolveMethodIds(methodMap, methodNames),
         priority,
         isEnabled,
@@ -1401,7 +1405,8 @@ server.tool(
 
     await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
 
-    return { content: [{ type: 'text', text: `Post-hook "${name}" created (ID: ${result.id}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+    const created = firstDataRecord(result);
+    return { content: [{ type: 'text', text: `Post-hook "${name}" created (ID: ${getId(created)}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
   },
 );
 
@@ -1691,7 +1696,7 @@ server.tool('get_all_roles', 'Get all role definitions', {}, async () => {
 });
 
 server.tool('login', 'Force authentication to Enfyra and get a new access token', {
-  apiToken: z.string().optional().describe('API token; preferred for MCP and automation'),
+  apiToken: z.string().optional().describe('API token for MCP and automation'),
 }, async ({ apiToken }) => {
   const token = apiToken || ENFYRA_API_TOKEN;
   if (token) {
@@ -1825,7 +1830,8 @@ server.tool('create_menu', 'Create a menu item in the navigation', {
     body.path = '/' + body.path;
   }
   const result = await fetchAPI(ENFYRA_API_URL, '/menu_definition', { method: 'POST', body: JSON.stringify(body) });
-  return { content: [{ type: 'text', text: `Menu created (ID: ${result.id}):\n${JSON.stringify(result, null, 2)}` }] };
+  const created = firstDataRecord(result);
+  return { content: [{ type: 'text', text: `Menu created (ID: ${getId(created)}):\n${JSON.stringify(result, null, 2)}` }] };
 });
 
 server.tool(
@@ -1850,7 +1856,8 @@ server.tool(
       delete body.menuId;
     }
     const result = await fetchAPI(ENFYRA_API_URL, '/extension_definition', { method: 'POST', body: JSON.stringify(body) });
-    return { content: [{ type: 'text', text: `Extension created (ID: ${result.id}). Open eApp tabs should update through the realtime reload contract.\n${JSON.stringify(result, null, 2)}` }] };
+    const created = firstDataRecord(result);
+    return { content: [{ type: 'text', text: `Extension created (ID: ${getId(created)}). Open eApp tabs should update through the realtime reload contract.\n${JSON.stringify(result, null, 2)}` }] };
   },
 );
 

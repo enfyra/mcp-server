@@ -184,6 +184,32 @@ window.location.href = url.toString()`,
           'For chat-list UX, default to a boolean unread dot instead of exact counts.',
         ],
       },
+      {
+        name: 'Add server-owned user verification fields',
+        code: `create_column({
+  tableId: "<user_definition_table_id>",
+  name: "emailVerifiedAt",
+  type: "datetime",
+  isNullable: true,
+  isPublished: true,
+  description: "When the user's email address was verified."
+})
+
+create_column({
+  tableId: "<user_definition_table_id>",
+  name: "emailVerificationStatus",
+  type: "varchar",
+  isNullable: false,
+  defaultValue: "pending",
+  isPublished: true,
+  description: "Email verification state controlled by server hooks."
+})`,
+        notes: [
+          'Run schema-changing calls sequentially. Do not parallelize create_column calls.',
+          'create_column fetches table_definition and patches only real persisted columns with id/_id; generated metadata projections such as createdAt, updatedAt, or relation FK display fields are skipped.',
+          'Use hooks or field permissions to prevent clients from updating server-owned fields.',
+        ],
+      },
     ],
   },
   'queries-deep': {
@@ -289,19 +315,49 @@ const scope = {
       },
       {
         name: 'Pre-hook encrypted field normalization',
-        code: `const value = @BODY.api_token_encrypted
+        code: `create_pre_hook({
+  routeId: "<route_id>",
+  name: "encrypt_api_token",
+  methods: ["POST", "PATCH"],
+  priority: 0,
+  code: \`const value = @BODY.api_token_encrypted
 if (value && value.slice(0, 7) !== "enc:v1:") {
   @BODY.api_token_encrypted = @HELPERS.$encrypt.encrypt(value)
-}`,
+}\`
+})`,
         notes: [
+          'MCP create_pre_hook accepts code as the tool argument, then persists it to Enfyra as sourceCode with scriptLanguage.',
+          'Do not call raw create_record with a code field for pre_hook_definition or post_hook_definition; backend CRUD rejects code.',
           'Use Enfyra pre-hooks for request-body normalization before canonical CRUD persists the record.',
           'Do not implement encrypted field normalization as a Knex/database hook.',
           'Use $encrypt for encryption and $ssh.generateKeyPair for SSH key generation; do not use $secrets.',
         ],
       },
       {
+        name: 'Pre-hook strips protected body fields silently',
+        code: `create_pre_hook({
+  routeId: "<user_definition_patch_route_id>",
+  name: "strip_email_verification_fields",
+  methods: ["PATCH"],
+  priority: -10,
+  code: \`delete @BODY.emailVerifiedAt
+delete @BODY.emailVerificationStatus
+delete @BODY.emailVerificationSentAt\`
+})`,
+        notes: [
+          'Use this pattern when clients may send protected user fields through /me or user_definition PATCH.',
+          'Strip fields instead of throwing when the product wants a permissive client contract with server-owned fields.',
+          'Use native macros such as @BODY instead of raw $ctx when a macro exists.',
+        ],
+      },
+      {
         name: 'Post-hook response shaping',
-        code: `if (@ERROR) {
+        code: `create_post_hook({
+  routeId: "<route_id>",
+  name: "shape_display_title",
+  methods: ["GET"],
+  priority: 0,
+  code: \`if (@ERROR) {
   @LOGS("Request failed", @ERROR.message)
   return
 }
@@ -311,8 +367,10 @@ if (row) {
   row.displayTitle = row.title || row.email || String(row.id)
 }
 
-return @DATA`,
+return @DATA\`
+})`,
         notes: [
+          'MCP create_post_hook accepts code as the tool argument, then persists sourceCode/scriptLanguage to Enfyra.',
           'Post-hooks run after success and error paths.',
           'Return non-undefined only when replacing the response body.',
         ],
