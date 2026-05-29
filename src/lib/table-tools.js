@@ -4,13 +4,60 @@
 import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
 
+let schemaQueue = Promise.resolve();
+
+function withSchemaQueue(operation) {
+  const run = schemaQueue.then(operation, operation);
+  schemaQueue = run.catch(() => {});
+  return run;
+}
+
+const FORBIDDEN_RELATION_KEYS = [
+  'fkCol',
+  'fkColumn',
+  'foreignKeyColumn',
+  'sourceColumn',
+  'targetColumn',
+  'junctionSourceColumn',
+  'junctionTargetColumn',
+];
+
+export function normalizeTablesFromMetadata(metadata) {
+  const tablesSource = metadata?.data?.tables || metadata?.tables || metadata?.data || [];
+  return Array.isArray(tablesSource)
+    ? tablesSource
+    : Object.values(tablesSource || {});
+}
+
+export function resolveTableFromMetadata(metadata, tableId) {
+  return normalizeTablesFromMetadata(metadata)
+    .find((table) => String(getId(table)) === String(tableId)) || null;
+}
+
 /**
- * Helper: fetch table with columns and relations
+ * Helper: fetch table with full columns and relations.
+ * Dynamic table_definition relation fields can be paginated/truncated, so schema
+ * cascade tools must use /metadata as the complete source of columns/relations.
  */
-async function fetchTableWithDetails(ENFYRA_API_URL, tableId) {
+export async function fetchTableWithDetails(ENFYRA_API_URL, tableId) {
   const filter = encodeURIComponent(JSON.stringify({ id: { _eq: tableId } }));
-  const result = await fetchAPI(ENFYRA_API_URL, `/table_definition?filter=${filter}&limit=1&fields=*,columns.*,relations.*`);
-  return result?.data?.[0] || result?.[0] || null;
+  const [tableResult, metadata] = await Promise.all([
+    fetchAPI(ENFYRA_API_URL, `/table_definition?filter=${filter}&limit=1&fields=*`),
+    fetchAPI(ENFYRA_API_URL, '/metadata'),
+  ]);
+  const tableData = tableResult?.data?.[0] || tableResult?.[0] || null;
+  const metadataTable = resolveTableFromMetadata(metadata, tableId);
+  if (!metadataTable) {
+    throw new Error(`Full metadata for table ${tableId} was not found; refusing schema cascade patch.`);
+  }
+  if (!Array.isArray(metadataTable.columns)) {
+    throw new Error(`Full metadata for table ${tableId} did not include columns; refusing schema cascade patch.`);
+  }
+  return {
+    ...(tableData || metadataTable),
+    columns: metadataTable.columns,
+    relations: Array.isArray(metadataTable.relations) ? metadataTable.relations : [],
+  };
 }
 
 /**
@@ -52,7 +99,12 @@ function normalizeConstraintGroups(name, groups) {
   });
 }
 
-function normalizeRelationForTablePatch(relation) {
+export function normalizeRelationForTablePatch(relation) {
+  for (const key of FORBIDDEN_RELATION_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(relation, key)) {
+      throw new Error(`Relation schema must not include physical column field "${key}". Use propertyName/targetTable only; Enfyra derives FK and junction columns.`);
+    }
+  }
   const {
     sourceTable,
     targetTable,
@@ -99,6 +151,63 @@ function getPatchableColumns(columns) {
     .map(normalizeColumnForTablePatch);
 }
 
+function getMissingIds(beforeIds, afterIds, excludedIds = []) {
+  const afterSet = new Set(afterIds.map(String));
+  const excludedSet = new Set(excludedIds.map(String));
+  return beforeIds
+    .map(String)
+    .filter((id) => !excludedSet.has(id) && !afterSet.has(id));
+}
+
+async function verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
+  action,
+  columnId,
+  columnName,
+}) {
+  const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+  const afterColumns = getPatchableColumns(tableData.columns);
+  const afterIds = afterColumns.map((column) => String(getId(column)));
+  const excludedIds = action === 'delete' ? [columnId] : [];
+  const missingIds = getMissingIds(beforeIds, afterIds, excludedIds);
+  if (missingIds.length > 0) {
+    throw new Error(`Schema cascade verification failed: unrelated column ids disappeared: ${missingIds.join(', ')}`);
+  }
+
+  if (action === 'create' && !afterColumns.some((column) => column.name === columnName)) {
+    throw new Error(`Schema cascade verification failed: column "${columnName}" was not found after create.`);
+  }
+  if (action === 'delete' && afterIds.includes(String(columnId))) {
+    throw new Error(`Schema cascade verification failed: column ${columnId} still exists after delete.`);
+  }
+  if (action === 'update' && !afterIds.includes(String(columnId))) {
+    throw new Error(`Schema cascade verification failed: column ${columnId} was not found after update.`);
+  }
+
+  return afterColumns;
+}
+
+async function verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
+  action,
+  relationId,
+  propertyName,
+}) {
+  const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+  const afterRelations = (tableData.relations || []).map(normalizeRelationForTablePatch);
+  const afterIds = afterRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
+  const excludedIds = action === 'delete' ? [relationId] : [];
+  const missingIds = getMissingIds(beforeIds, afterIds, excludedIds);
+  if (missingIds.length > 0) {
+    throw new Error(`Schema cascade verification failed: unrelated relation ids disappeared: ${missingIds.join(', ')}`);
+  }
+  if (action === 'create' && !afterRelations.some((relation) => relation.propertyName === propertyName)) {
+    throw new Error(`Schema cascade verification failed: relation "${propertyName}" was not found after create.`);
+  }
+  if (action === 'delete' && afterIds.includes(String(relationId))) {
+    throw new Error(`Schema cascade verification failed: relation ${relationId} still exists after delete.`);
+  }
+  return afterRelations;
+}
+
 function buildColumnDefinition({
   name,
   type,
@@ -132,26 +241,35 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   const apiBase = ENFYRA_API_URL.replace(/\/$/, '');
 
   async function appendColumnToTable(args) {
+    return withSchemaQueue(async () => {
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, args.tableId);
     if (!tableData) {
       return { content: [{ type: 'text', text: `Error: Table with ID ${args.tableId} not found.` }] };
     }
 
     const existingColumns = getPatchableColumns(tableData.columns);
+    const beforeIds = existingColumns.map((column) => String(getId(column)));
     const newCol = buildColumnDefinition(args);
     const result = await patchTableAutoConfirm(ENFYRA_API_URL, args.tableId, { columns: [...existingColumns, newCol] });
+    await verifyColumnCascade(ENFYRA_API_URL, args.tableId, beforeIds, {
+      action: 'create',
+      columnName: args.name,
+    });
 
     return {
       content: [{ type: 'text', text: `Column "${args.name}" added to table ${args.tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
     };
+    });
   }
 
   async function appendRelationToTable({ sourceTableId, targetTableId, type, propertyName, inversePropertyName, mappedBy, isNullable, onDelete, description }) {
+    return withSchemaQueue(async () => {
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, sourceTableId);
     if (!tableData) {
       return { content: [{ type: 'text', text: `Error: Table with ID ${sourceTableId} not found.` }] };
     }
     const existingRelations = (tableData.relations || []).map(normalizeRelationForTablePatch);
+    const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
     const newRelation = { targetTable: targetTableId, type, propertyName };
     if (inversePropertyName !== undefined) newRelation.inversePropertyName = inversePropertyName || null;
     if (mappedBy !== undefined) newRelation.mappedBy = mappedBy;
@@ -159,44 +277,98 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     if (onDelete !== undefined) newRelation.onDelete = onDelete;
     if (description !== undefined) newRelation.description = description;
     const result = await patchTableAutoConfirm(ENFYRA_API_URL, sourceTableId, { relations: [...existingRelations, newRelation] });
+    await verifyRelationCascade(ENFYRA_API_URL, sourceTableId, beforeIds, {
+      action: 'create',
+      propertyName,
+    });
     return {
       content: [{ type: 'text', text: `Relation created: ${propertyName} (${type}) from table ${sourceTableId} → ${targetTableId}.\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
     };
+    });
   }
 
-  async function removeColumnFromTable({ tableId, columnId }) {
+  async function removeColumnFromTable({ tableId, columnId, confirm }) {
+    return withSchemaQueue(async () => {
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
     if (!tableData) {
       return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
     }
 
-    const columns = (tableData.columns || [])
-      .filter((col) => getId(col) !== null)
+    const existingColumns = getPatchableColumns(tableData.columns);
+    const beforeIds = existingColumns.map((column) => String(getId(column)));
+    if (!beforeIds.includes(String(columnId))) {
+      throw new Error(`Column ${columnId} was not found on table ${tableId}; refusing schema cascade patch.`);
+    }
+    if (!confirm) {
+      const target = existingColumns.find((column) => String(getId(column)) === String(columnId));
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          action: 'delete_column_preview',
+          tableId,
+          columnId,
+          targetColumn: target,
+          preservedColumnIds: beforeIds.filter((id) => id !== String(columnId)),
+          destructive: true,
+          next: 'Call delete_column/remove_column again with confirm=true to drop the physical column and metadata.',
+        }, null, 2) }],
+      };
+    }
+
+    const columns = existingColumns
       .filter(col => String(getId(col)) !== String(columnId))
-      .map(normalizeColumnForTablePatch);
 
     const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns });
+    await verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
+      action: 'delete',
+      columnId,
+    });
 
     return {
       content: [{ type: 'text', text: `Column ${columnId} deleted from table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
     };
+    });
   }
 
-  async function removeRelationFromTable({ tableId, relationId }) {
+  async function removeRelationFromTable({ tableId, relationId, confirm }) {
+    return withSchemaQueue(async () => {
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
     if (!tableData) {
       return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
     }
 
-    const relations = (tableData.relations || [])
-      .filter(rel => String(rel.id) !== String(relationId))
-      .map(normalizeRelationForTablePatch);
+    const existingRelations = (tableData.relations || []).map(normalizeRelationForTablePatch);
+    const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
+    if (!beforeIds.includes(String(relationId))) {
+      throw new Error(`Relation ${relationId} was not found on table ${tableId}; refusing schema cascade patch.`);
+    }
+    if (!confirm) {
+      const target = existingRelations.find((relation) => String(getId(relation)) === String(relationId));
+      return {
+        content: [{ type: 'text', text: JSON.stringify({
+          action: 'delete_relation_preview',
+          tableId,
+          relationId,
+          targetRelation: target,
+          preservedRelationIds: beforeIds.filter((id) => id !== String(relationId)),
+          destructive: true,
+          next: 'Call delete_relation/remove_relation again with confirm=true to drop relation metadata and any derived FK/junction structures.',
+        }, null, 2) }],
+      };
+    }
+
+    const relations = existingRelations
+      .filter(rel => String(getId(rel)) !== String(relationId))
 
     const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { relations });
+    await verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
+      action: 'delete',
+      relationId,
+    });
 
     return {
       content: [{ type: 'text', text: `Relation ${relationId} deleted from table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
     };
+    });
   }
 
   const columnCreateSchema = {
@@ -229,11 +401,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   const columnDeleteSchema = {
     tableId: z.string().describe('Table definition ID.'),
     columnId: z.string().describe('Column definition ID to delete.'),
+    confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
   };
 
   const relationDeleteSchema = {
     tableId: z.string().describe('Table definition ID (source table of the relation).'),
     relationId: z.string().describe('Relation definition ID to delete.'),
+    confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
   };
 
   // ─── READ ───
@@ -256,7 +430,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'create_table',
     [
       'Create a new table definition with an auto-included `id` primary key column.',
-      '**Not** for adding a custom API path or handler only — for that use **`create_route`** with an existing `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
+      '**Not** for adding a custom API path or handler only — for that use **`create_route`** without `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
       'PREFERRED: pass `columns` and `relations` params as JSON arrays to create a table WITH columns and relations in one call (cascade). Only use create_column/create_relation separately when adding to an existing table later.',
       'Indexes and uniques are first-class table metadata. Use `indexes` for query performance and `uniques` for data integrity. Each entry is a logical field group such as [["member","isRead","conversation"]] or [{"value":["message","member"]}]. Relation property names are allowed; Enfyra resolves them to physical FK columns.',
       'Relations are supported in this same create_table call when the target table already exists. Each relation uses { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete? }; targetTable may be a table id or {id}.',
@@ -279,7 +453,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       indexes: z.string().optional().describe('JSON array of logical index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Example: [["member","isRead","conversation"],["conversation","member","isRead"]]'),
       uniques: z.string().optional().describe('JSON array of logical unique field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Example: [["message","member"]]'),
     },
-    async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson, indexes: indexesJson, uniques: uniquesJson }) => {
+    async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson, indexes: indexesJson, uniques: uniquesJson }) => withSchemaQueue(async () => {
       const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
       const userColumns = parseJsonArrayParam('columns', columnsJson);
       const userRelations = parseJsonArrayParam('relations', relationsJson).map(normalizeRelationForTablePatch);
@@ -314,7 +488,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       return {
         content: [{ type: 'text', text: `${colHint}\n${relHint}${constraintHint ? `\n${constraintHint}` : ''}\n${restHint}\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
       };
-    }
+    })
   );
 
   // ─── UPDATE TABLE ───
@@ -337,7 +511,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       indexes: z.string().optional().describe('Complete JSON array of logical index field groups to store on table_definition.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear.'),
       uniques: z.string().optional().describe('Complete JSON array of logical unique field groups to store on table_definition.uniques. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current uniques; pass [] to clear.'),
     },
-    async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled, indexes: indexesJson, uniques: uniquesJson }) => {
+    async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled, indexes: indexesJson, uniques: uniquesJson }) => withSchemaQueue(async () => {
       const body = {};
       if (name !== undefined) body.name = name;
       if (alias !== undefined) body.alias = alias;
@@ -351,7 +525,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       return {
         content: [{ type: 'text', text: `Table ${tableId} updated.\n\n${JSON.stringify(result, null, 2)}` }],
       };
-    }
+    })
   );
 
   // ─── DELETE TABLE ───
@@ -365,15 +539,30 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     ].join(' '),
     {
       tableId: z.string().describe('Table definition ID to delete.'),
+      confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
     },
-    async ({ tableId }) => {
+    async ({ tableId, confirm }) => withSchemaQueue(async () => {
+      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+      if (!confirm) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({
+            action: 'delete_table_preview',
+            tableId,
+            tableName: tableData.name,
+            columnCount: (tableData.columns || []).length,
+            relationCount: (tableData.relations || []).length,
+            destructive: true,
+            next: 'Call delete_table again with confirm=true to delete metadata, routes, derived FK/junction structures, the physical table, and all table data.',
+          }, null, 2) }],
+        };
+      }
       const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
         method: 'DELETE',
       });
       return {
         content: [{ type: 'text', text: `Table ${tableId} deleted.\n\n${JSON.stringify(result, null, 2)}` }],
       };
-    }
+    })
   );
 
   // ─── CREATE COLUMN ───
@@ -383,7 +572,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     [
       'Add a column to an existing table via PATCH /table_definition/{tableId}.',
       'Columns are managed through cascade with table_definition — there is NO direct /column_definition endpoint.',
-      'This tool fetches existing columns, keeps only persisted column rows with id/_id, appends the new one, and PATCHes the table.',
+      'This tool reads full table metadata, keeps only persisted column rows with id/_id, appends the new one, PATCHes the table, and verifies unrelated columns survived.',
       'Generated metadata projections such as createdAt, updatedAt, or relation-derived FK display fields without id are not valid cascade rows and are skipped.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
@@ -398,7 +587,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     [
       'Alias for create_column. Add a column to an existing table through the canonical table_definition cascade.',
       'Use this for schema additions, including hidden secret fields with isPublished=false.',
-      'Skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
+      'Reads full table metadata and skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
     columnCreateSchema,
@@ -411,7 +600,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'update_column',
     [
       'Update an existing column on a table via PATCH /table_definition/{tableId}.',
-      'Fetches table columns, keeps only persisted rows with id/_id, modifies the target column, and PATCHes the table.',
+      'Reads full table metadata, keeps only persisted rows with id/_id, modifies the target column, PATCHes the table, and verifies unrelated columns survived.',
       'Generated metadata projections such as createdAt, updatedAt, or relation-derived FK display fields without id are skipped.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
@@ -426,13 +615,19 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('New description.'),
       options: z.string().optional().describe('New options as JSON string.'),
     },
-    async ({ tableId, columnId, name, type, isNullable, isPublished, defaultValue, description, options }) => {
+    async ({ tableId, columnId, name, type, isNullable, isPublished, defaultValue, description, options }) => withSchemaQueue(async () => {
       const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
       if (!tableData) {
         return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
       }
 
-      const columns = (tableData.columns || []).filter((col) => getId(col) !== null).map(col => {
+      const existingColumns = getPatchableColumns(tableData.columns);
+      const beforeIds = existingColumns.map((column) => String(getId(column)));
+      if (!beforeIds.includes(String(columnId))) {
+        throw new Error(`Column ${columnId} was not found on table ${tableId}; refusing schema cascade patch.`);
+      }
+
+      const columns = existingColumns.map(col => {
         const rest = normalizeColumnForTablePatch(col);
         if (String(getId(col)) === String(columnId)) {
           if (name !== undefined) rest.name = name;
@@ -447,11 +642,15 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       });
 
       const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns });
+      await verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
+        action: 'update',
+        columnId,
+      });
 
       return {
         content: [{ type: 'text', text: `Column ${columnId} updated on table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
       };
-    }
+    })
   );
 
   // ─── DELETE COLUMN ───
@@ -460,7 +659,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'delete_column',
     [
       'Delete a column from a table via PATCH /table_definition/{tableId}.',
-      'Fetches table columns, keeps only persisted rows with id/_id, removes the target, and PATCHes the table.',
+      'Reads full table metadata, keeps only persisted rows with id/_id, removes the target, PATCHes the table, and verifies unrelated columns survived.',
       'The physical column is dropped from the database. System columns (id, createdAt, updatedAt) cannot be deleted.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
@@ -475,7 +674,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     [
       'Alias for delete_column. Remove a column through the canonical table_definition cascade.',
       'This drops the physical column. Confirm destructive schema changes before calling.',
-      'Skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
+      'Reads full table metadata and skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
     columnDeleteSchema,

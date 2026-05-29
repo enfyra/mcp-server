@@ -3,7 +3,7 @@
  * Handles API requests with auth, timeout, and error handling
  */
 
-import { getValidToken } from './auth.js';
+import { getValidToken, hasApiToken, resetTokens } from './auth.js';
 
 // Timeout configuration
 const FETCH_TIMEOUT = 30000; // 30 seconds
@@ -17,49 +17,57 @@ const FETCH_TIMEOUT = 30000; // 30 seconds
  */
 export async function fetchAPI(apiUrl, path, options = {}) {
   const url = `${apiUrl}${path}`;
-  const token = await getValidToken();
 
-  const headersList = [
-    ['Content-Type', 'application/json'],
-    ['Authorization', `Bearer ${token}`],
-  ];
+  async function requestWithCurrentToken() {
+    const token = await getValidToken(apiUrl);
+    const headersList = [
+      ['Content-Type', 'application/json'],
+      ['Authorization', `Bearer ${token}`],
+    ];
 
-  if (options.headers) {
-    const optHeaders = options.headers;
-    for (const key of Object.keys(optHeaders)) {
-      const existingIdx = headersList.findIndex(h => h[0] === key);
-      if (existingIdx >= 0) {
-        headersList[existingIdx] = [key, optHeaders[key]];
-      } else {
-        headersList.push([key, optHeaders[key]]);
+    if (options.headers) {
+      const optHeaders = options.headers;
+      for (const key of Object.keys(optHeaders)) {
+        const existingIdx = headersList.findIndex(h => h[0] === key);
+        if (existingIdx >= 0) {
+          headersList[existingIdx] = [key, optHeaders[key]];
+        } else {
+          headersList.push([key, optHeaders[key]]);
+        }
       }
     }
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    try {
+      const res = await fetch(url, {
+        ...options,
+        headers: headersList,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      return res;
+    } catch (error) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error(`Request timeout after ${FETCH_TIMEOUT}ms`);
+      }
+      throw error;
+    }
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
-
-  try {
-    const res = await fetch(url, {
-      ...options,
-      headers: headersList,
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
-
-    if (!res.ok) {
-      const error = await res.text().catch(() => res.statusText);
-      throw new Error(`API error (${res.status}): ${error}`);
-    }
-
-    return res.json();
-  } catch (error) {
-    clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
-      throw new Error(`Request timeout after ${FETCH_TIMEOUT}ms`);
-    }
-    throw error;
+  let res = await requestWithCurrentToken();
+  if ((res.status === 401 || res.status === 403) && hasApiToken()) {
+    resetTokens();
+    res = await requestWithCurrentToken();
   }
+
+  if (!res.ok) {
+    const error = await res.text().catch(() => res.statusText);
+    throw new Error(`API error (${res.status}): ${error}`);
+  }
+
+  return res.json();
 }
 
 /**

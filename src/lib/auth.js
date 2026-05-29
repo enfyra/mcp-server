@@ -41,6 +41,10 @@ export function getAccessToken() {
   return accessToken;
 }
 
+export function hasApiToken() {
+  return !!API_TOKEN;
+}
+
 /**
  * Get token expiry time
  */

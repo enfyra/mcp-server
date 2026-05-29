@@ -182,6 +182,12 @@ Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env 
 | `ENFYRA_API_URL` | Base for REST + GraphQL + auth through the Nuxt/app proxy | `http://localhost:3000/api` |
 | `ENFYRA_API_TOKEN` | Programmatic token from eApp `/me`. MCP exchanges it through `/auth/token/exchange` for an access token. | — |
 
+`ENFYRA_API_TOKEN` is a long-lived programmatic token, not a JWT. MCP must never send it directly as `Authorization: Bearer <token>` to REST tools. The MCP client first calls `POST {ENFYRA_API_URL}/auth/token/exchange` with `{ "apiToken": ENFYRA_API_TOKEN }`, caches the returned `accessToken`, and uses that JWT as the Bearer token for subsequent requests.
+
+Schema and script tools include safety guards for LLM callers: generic record mutations validate request fields against live metadata, script-backed records must validate `sourceCode` before save through `/admin/script/validate` and fail closed if validation is unavailable, relation metadata rejects physical FK/junction inputs, custom routes reject `mainTableId` unless the path is the canonical table route, schema tools serialize table/column/relation changes, and destructive deletes require `confirm=true` after returning a preview.
+
+For route contracts that intentionally keep workflow fields out of request bodies, generic `create_record`, `update_record`, and `delete_record` accept optional `queryParams` as a JSON object string. For example, Cloud admin project creation can keep `expired_at=YYYY-MM-DD` in the URL query while `validateBody` remains enabled for the table body.
+
 ### `ENFYRA_API_URL` — use the app proxy
 
 For normal apps and demos, set `ENFYRA_API_URL` to the Nuxt/app proxy:

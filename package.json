@@ -1,6 +1,6 @@
 {
   "name": "@enfyra/mcp-server",
-  "version": "0.0.53",
+  "version": "0.0.56",
   "description": "MCP server for Enfyra - manage your Enfyra instance via Claude Code",
   "type": "module",
   "license": "MIT",
@@ -16,7 +16,8 @@
   "scripts": {
     "start": "node src/index.mjs",
     "dev": "node --watch src/index.mjs",
-    "mcp:config": "node src/index.mjs config"
+    "mcp:config": "node src/index.mjs config",
+    "test": "node --test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",

@@ -19,6 +19,8 @@ import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
 import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instructions.js';
 import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
 import { registerTableTools } from './lib/table-tools.js';
+import { prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
+import { validateMainTableRoutePath } from './lib/route-guards.js';
 
 // Initialize auth module
 initAuth(ENFYRA_API_URL, ENFYRA_API_TOKEN);
@@ -32,7 +34,7 @@ const CAPABILITY_AREAS = [
   {
     area: 'Dynamic REST API',
     tables: ['route_definition', 'route_handler_definition', 'pre_hook_definition', 'post_hook_definition', 'route_permission_definition', 'method_definition'],
-    workflow: 'Create paths with create_route on an existing main table, then add handlers/hooks. REST methods are GET/POST/PATCH/DELETE.',
+    workflow: 'Create custom paths with create_route without mainTableId, then add handlers/hooks. mainTableId is only for canonical table routes like /table_name. REST methods are GET/POST/PATCH/DELETE.',
   },
   {
     area: 'Auth, roles, sessions, OAuth',
@@ -323,6 +325,35 @@ function resolveFieldOrThrow(table, fieldName, kind = 'column') {
   return field;
 }
 
+async function prepareGenericMutation(tableName, data) {
+  const { tables } = await getMetadataTables();
+  return prepareRecordMutation({
+    fetchAPI,
+    apiUrl: ENFYRA_API_URL,
+    tables,
+    tableName,
+    data,
+  });
+}
+
+function parseQueryParamsArg(queryParams) {
+  const parsed = parseJsonArg(queryParams, {});
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('queryParams must be a JSON object string.');
+  }
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(parsed)) {
+    if (value === undefined || value === null) continue;
+    params.set(key, String(value));
+  }
+  return params.toString();
+}
+
+function appendQuery(path, queryParams) {
+  if (!queryParams) return path;
+  return `${path}${path.includes('?') ? '&' : '?'}${queryParams}`;
+}
+
 // Create MCP server — `instructions` is sent to the host (e.g. Claude Code) for the LLM; not README
 const server = new McpServer(
   {
@@ -431,7 +462,7 @@ server.tool(
         routeTables: routeTableList,
         noRouteTables,
         canonicalCrudTools: 'query_table/create_record/update_record/delete_record use dynamic REST routes and only work for route-backed tables.',
-        customRouteWorkflow: 'For a new endpoint use create_route against an existing table, then create_handler/create_pre_hook/create_post_hook. Do not create a table just to get a path.',
+        customRouteWorkflow: 'For a new endpoint use create_route without mainTableId, then create_handler/create_pre_hook/create_post_hook. Do not create a table just to get a path.',
       },
       schemaManagement: {
         createTable: 'POST /table_definition supports isSingleRecord at create time and supports columns and relations arrays in the same cascade call. MCP create_table exposes isSingleRecord, columns, and relations directly. It does not accept alias at create time; table name drives the default route/schema behavior.',
@@ -915,31 +946,65 @@ server.tool(
 // CRUD TOOLS
 // ============================================================================
 
-server.tool('create_record', 'Create a new record in any table', {
+server.tool('create_record', 'Create a new record in any route-backed table. The tool validates body keys against live metadata and validates sourceCode before saving script-backed records.', {
   tableName: z.string().describe('Table name to insert into'),
   data: z.string().describe('Record data as JSON string'),
-}, async ({ tableName, data }) => {
+  queryParams: z.string().optional().describe('Optional query params as JSON object string, e.g. {"expired_at":"2026-09-20"}. Use for route contracts that intentionally keep workflow fields out of the validated body.'),
+}, async ({ tableName, data, queryParams }) => {
   validateTableName(tableName);
-  const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}`, { method: 'POST', body: data });
-  return { content: [{ type: 'text', text: JSON.stringify(summarizeMutationResult(result, 'created', tableName), null, 2) }] };
+  const prepared = await prepareGenericMutation(tableName, data);
+  const query = parseQueryParamsArg(queryParams);
+  const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}`, query), { method: 'POST', body: JSON.stringify(prepared.payload) });
+  return { content: [{ type: 'text', text: JSON.stringify({
+    ...summarizeMutationResult(result, 'created', tableName),
+    scriptValidation: prepared.scriptValidation,
+  }, null, 2) }] };
 });
 
-server.tool('update_record', 'Update an existing record by ID using PATCH', {
+server.tool('update_record', 'Update an existing record by ID using PATCH. The tool validates body keys against live metadata and validates sourceCode before saving script-backed records.', {
   tableName: z.string().describe('Table name'),
   id: z.string().describe('Record ID to update'),
   data: z.string().describe('Fields to update as JSON string'),
-}, async ({ tableName, id, data }) => {
+  queryParams: z.string().optional().describe('Optional query params as JSON object string for route contracts that intentionally keep workflow fields out of the validated body.'),
+}, async ({ tableName, id, data, queryParams }) => {
   validateTableName(tableName);
-  const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}/${id}`, { method: 'PATCH', body: data });
-  return { content: [{ type: 'text', text: JSON.stringify(summarizeMutationResult(result, 'updated', tableName), null, 2) }] };
+  const prepared = await prepareGenericMutation(tableName, data);
+  const query = parseQueryParamsArg(queryParams);
+  const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${id}`, query), { method: 'PATCH', body: JSON.stringify(prepared.payload) });
+  return { content: [{ type: 'text', text: JSON.stringify({
+    ...summarizeMutationResult(result, 'updated', tableName),
+    scriptValidation: prepared.scriptValidation,
+  }, null, 2) }] };
 });
 
 server.tool('delete_record', 'Delete a record by ID', {
   tableName: z.string().describe('Table name'),
   id: z.string().describe('Record ID to delete'),
-}, async ({ tableName, id }) => {
+  queryParams: z.string().optional().describe('Optional query params as JSON object string for route-specific confirmation contracts.'),
+  confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
+}, async ({ tableName, id, queryParams, confirm }) => {
   validateTableName(tableName);
-  const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}/${id}`, { method: 'DELETE' });
+  const primaryKey = await getPrimaryFieldName(tableName);
+  if (!confirm) {
+    const query = new URLSearchParams({
+      filter: JSON.stringify({ [primaryKey]: { _eq: id } }),
+      limit: '1',
+      fields: primaryKey,
+    });
+    const preview = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${query.toString()}`).catch((error) => ({ error: String(error?.message || error) }));
+    return { content: [{ type: 'text', text: JSON.stringify({
+      action: 'delete_record_preview',
+      tableName,
+      id,
+      primaryKey,
+      preview: preview?.data?.[0] || null,
+      previewError: preview?.error,
+      destructive: true,
+      next: 'Call delete_record again with confirm=true to delete this route-backed record.',
+    }, null, 2) }] };
+  }
+  const query = parseQueryParamsArg(queryParams);
+  const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${id}`, query), { method: 'DELETE' });
   return { content: [{ type: 'text', text: JSON.stringify({
     action: 'deleted',
     tableName,
@@ -1387,15 +1452,16 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Call 
 server.tool(
   'create_route',
   [
-    '**Use this when the user wants a new REST API route or path** — not `create_table`. A route links a URL path to an existing table (`mainTableId`) and sets HTTP methods.',
-    'Do NOT create a new table_definition only to expose an endpoint; pick `mainTableId` from existing metadata unless the user explicitly needs new tables/columns.',
+    '**Use this when the user wants a new REST API route or path** — not `create_table`. Custom routes must omit `mainTableId`.',
+    '`mainTableId` is only a marker for canonical table routes such as `/orders`; do not set it for `/orders/stats`, `/cloud/admin/hosts`, `/auth/login`, or any custom path.',
+    'Do NOT create a new table_definition only to expose an endpoint; create a route without `mainTableId`, then have the handler/hook query explicit repos such as `$ctx.$repos.orders`.',
     'availableMethods = which REST verbs the route responds to. publishedMethods = which REST verbs are public (no auth). GraphQL is enabled separately through gql_definition/update_table graphqlEnabled.',
     'After creation the tool auto-reloads routes. Then create handlers for specific methods via create_handler on this route id.',
-    'Flow: resolve table id → create_route → create_handler (per method) → optionally create_pre_hook / create_post_hook → test via HTTP or admin test APIs (see server instructions).',
+    'Flow: create_route → create_handler (per method) → optionally create_pre_hook / create_post_hook → test via HTTP or admin test APIs (see server instructions).',
   ].join(' '),
   {
     path: z.string().describe('URL path, must start with / (e.g., "/my-endpoint")'),
-    mainTableId: z.union([z.string(), z.number()]).describe('ID of the table_definition this route operates on. The route\'s $repos.main will query this table.'),
+    mainTableId: z.union([z.string(), z.number()]).optional().describe('Only set for the canonical table route `/<table_name>`. Omit for every custom route.'),
     methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE']))
       .describe('HTTP methods this route supports (availableMethods). Common: ["GET","POST","PATCH","DELETE"]'),
     publishedMethods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
@@ -1405,14 +1471,20 @@ server.tool(
   },
   async ({ path: routePath, mainTableId, methods, publishedMethods, isEnabled, description }) => {
     const methodMap = await getMethodMap();
+    const normalizedPath = normalizeRestPath(routePath);
 
     const body = {
-      path: routePath.startsWith('/') ? routePath : '/' + routePath,
-      mainTable: { id: mainTableId },
+      path: normalizedPath,
       isEnabled,
       description,
       availableMethods: resolveMethodIds(methodMap, methods),
     };
+
+    if (mainTableId !== undefined && mainTableId !== null) {
+      const { tables } = await getMetadataTables();
+      validateMainTableRoutePath(tables, mainTableId, normalizedPath);
+      body.mainTable = { id: mainTableId };
+    }
 
     if (publishedMethods && publishedMethods.length > 0) {
       body.publishedMethods = resolveMethodIds(methodMap, publishedMethods);
@@ -1431,7 +1503,7 @@ server.tool(
       route: {
         id: getId(created),
         path: created?.path,
-        mainTableId,
+        mainTableId: mainTableId ?? null,
         availableMethods: methods,
         publishedMethods: publishedMethods || [],
       },
@@ -1466,6 +1538,10 @@ server.tool(
     if (methodNames.length === 0) throw new Error('Provide method or methods');
     const methodMap = await getMethodMap();
     const results = [];
+    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'route_handler_definition', {
+      sourceCode,
+      scriptLanguage,
+    });
 
     for (const methodName of methodNames) {
       const methodId = methodMap[methodName.toUpperCase()];
@@ -1493,6 +1569,7 @@ server.tool(
     return { content: [{ type: 'text', text: JSON.stringify({
       action: 'created',
       handlers: results,
+      scriptValidation,
       routesReloaded: true,
       detailHint: 'Use inspect_route with the same routeId/path to inspect saved handlers.',
     }, null, 2) }] };
@@ -1511,14 +1588,19 @@ server.tool(
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
     name: z.string().describe('Hook name (unique per route)'),
     code: z.string().describe('Hook JavaScript sourceCode. MCP stores it as sourceCode and lets Enfyra compile compiledCode.'),
+    scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
     methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
       .describe('Methods this hook applies to. Default: all REST methods.'),
     priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
     isEnabled: z.boolean().optional().default(true).describe('Enable hook immediately'),
   },
-  async ({ routeId, name, code, methods, priority, isEnabled }) => {
+  async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled }) => {
     const methodMap = await getMethodMap();
     const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
+    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'pre_hook_definition', {
+      sourceCode: code,
+      scriptLanguage,
+    });
 
     const result = await fetchAPI(ENFYRA_API_URL, '/pre_hook_definition', {
       method: 'POST',
@@ -1526,7 +1608,7 @@ server.tool(
         route: { id: routeId },
         name,
         sourceCode: code,
-        scriptLanguage: 'javascript',
+        scriptLanguage,
         methods: resolveMethodIds(methodMap, methodNames),
         priority,
         isEnabled,
@@ -1536,7 +1618,15 @@ server.tool(
     await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
 
     const created = firstDataRecord(result);
-    return { content: [{ type: 'text', text: `Pre-hook "${name}" created (ID: ${getId(created)}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+    return { content: [{ type: 'text', text: JSON.stringify({
+      action: 'created',
+      kind: 'pre_hook',
+      id: getId(created),
+      name,
+      routeId,
+      scriptValidation,
+      routesReloaded: true,
+    }, null, 2) }] };
   },
 );
 
@@ -1552,14 +1642,19 @@ server.tool(
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
     name: z.string().describe('Hook name (unique per route)'),
     code: z.string().describe('Hook JavaScript sourceCode. MCP stores it as sourceCode and lets Enfyra compile compiledCode.'),
+    scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
     methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
       .describe('Methods this hook applies to. Default: all REST methods.'),
     priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
     isEnabled: z.boolean().optional().default(true).describe('Enable hook immediately'),
   },
-  async ({ routeId, name, code, methods, priority, isEnabled }) => {
+  async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled }) => {
     const methodMap = await getMethodMap();
     const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
+    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'post_hook_definition', {
+      sourceCode: code,
+      scriptLanguage,
+    });
 
     const result = await fetchAPI(ENFYRA_API_URL, '/post_hook_definition', {
       method: 'POST',
@@ -1567,7 +1662,7 @@ server.tool(
         route: { id: routeId },
         name,
         sourceCode: code,
-        scriptLanguage: 'javascript',
+        scriptLanguage,
         methods: resolveMethodIds(methodMap, methodNames),
         priority,
         isEnabled,
@@ -1577,7 +1672,15 @@ server.tool(
     await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
 
     const created = firstDataRecord(result);
-    return { content: [{ type: 'text', text: `Post-hook "${name}" created (ID: ${getId(created)}). Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+    return { content: [{ type: 'text', text: JSON.stringify({
+      action: 'created',
+      kind: 'post_hook',
+      id: getId(created),
+      name,
+      routeId,
+      scriptValidation,
+      routesReloaded: true,
+    }, null, 2) }] };
   },
 );
 
