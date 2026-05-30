@@ -208,12 +208,14 @@ async function verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
   return afterRelations;
 }
 
-function buildColumnDefinition({
+export function buildColumnDefinition({
   name,
   type,
   isNullable,
   isUnique,
   isPublished,
+  isUpdatable,
+  isEncrypted,
   isPrimary,
   isGenerated,
   isSystem,
@@ -225,6 +227,8 @@ function buildColumnDefinition({
   if (isNullable !== undefined) column.isNullable = isNullable;
   if (isUnique !== undefined) column.isUnique = isUnique;
   if (isPublished !== undefined) column.isPublished = isPublished;
+  if (isUpdatable !== undefined) column.isUpdatable = isUpdatable;
+  if (isEncrypted !== undefined) column.isEncrypted = isEncrypted;
   if (isPrimary !== undefined) column.isPrimary = isPrimary;
   if (isGenerated !== undefined) column.isGenerated = isGenerated;
   if (isSystem !== undefined) column.isSystem = isSystem;
@@ -373,11 +377,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 
   const columnCreateSchema = {
     tableId: z.string().describe('Table definition ID (from get_all_tables or create_table).'),
-    name: z.string().describe('Column name (e.g., "title", "payment_confirm_secret_encrypted"). Lowercase with underscores.'),
+    name: z.string().describe('Column name (e.g., "title", "webhook_secret"). Lowercase with underscores.'),
     type: z.string().describe('Column type: varchar, int, text, boolean, datetime, json, decimal, timestamp, uuid, bigint, float, longtext, richtext, simple-json, code, enum, array-select, date.'),
     isNullable: z.boolean().optional().default(true).describe('Set to false if column cannot be null.'),
     isUnique: z.boolean().optional().default(false).describe('Set to true for unique constraint.'),
     isPublished: z.boolean().optional().describe('Set column visibility baseline. Use false for secrets and internal fields.'),
+    isUpdatable: z.boolean().optional().describe('Set false for immutable fields that cannot be updated after creation. Independent from isEncrypted.'),
+    isEncrypted: z.boolean().optional().describe('Set true to encrypt this column at the Enfyra database-query layer. This does not change isUpdatable. Encrypted fields cannot be filtered or sorted.'),
     isPrimary: z.boolean().optional().describe('Set true only for primary key columns; normally only create_table auto id uses this.'),
     isGenerated: z.boolean().optional().describe('Set true only for generated columns such as auto id.'),
     isSystem: z.boolean().optional().describe('Set true only for system-managed columns. Avoid for normal app fields.'),
@@ -438,7 +444,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
       'Enfyra auto-creates a default REST route at path `/<table_name>` (same segment as `name`, not alias).',
       'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
-      'There is NO `GET /<table>/:id`. To fetch one row by id, use GET `/<table>?filter={"id":{"_eq":"<id>"}}&limit=1` or tool query_table / find_one_record.',
+      'There is NO `GET /<table>/:id`. To fetch one row by id, use find_one_record or inspect metadata first and call GET `/<table>?filter={"<primaryKeyFromMetadata>":{"_eq":"<id>"}}&limit=1`.',
       'Set `isSingleRecord: true` directly in create_table for settings/config tables that should keep only one record.',
       `Full URLs: ${apiBase}/<table_name> (example table post: ${apiBase}/post).`,
       'GraphQL is enabled separately per table through `gql_definition` or `update_table` with `graphqlEnabled`; it is not controlled by route availableMethods.',
@@ -448,7 +454,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       name: z.string().describe('Table name (e.g., "user_definition", "my_custom_table"). Must be unique, lowercase with underscores.'),
       description: z.string().optional().describe('Description of what this table stores.'),
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record tables such as settings/config. This is passed directly to table_definition create.'),
-      columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, defaultValue?, description?, options? }. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"status","type":"enum","options":["draft","published"]}]'),
+      columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, defaultValue?, description?, options? }. Set isEncrypted=true for values encrypted at rest; set isUpdatable=false separately only when the field should be immutable. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"api_key","type":"varchar","isEncrypted":true,"isPublished":false}]'),
       relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id or {"id": <id>}. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Example: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
       indexes: z.string().optional().describe('JSON array of logical index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Example: [["member","isRead","conversation"],["conversation","member","isRead"]]'),
       uniques: z.string().optional().describe('JSON array of logical unique field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Example: [["message","member"]]'),
@@ -611,11 +617,12 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       type: z.string().optional().describe('New column type.'),
       isNullable: z.boolean().optional().describe('Set nullable.'),
       isPublished: z.boolean().optional().describe('Set column visibility baseline. false = unpublished (omitted from response unless allowed by field permission rules).'),
+      isUpdatable: z.boolean().optional().describe('Set false for immutable fields that should be stripped from update payloads.'),
       defaultValue: z.string().optional().describe('New default value as JSON string.'),
       description: z.string().optional().describe('New description.'),
       options: z.string().optional().describe('New options as JSON string.'),
     },
-    async ({ tableId, columnId, name, type, isNullable, isPublished, defaultValue, description, options }) => withSchemaQueue(async () => {
+    async ({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options }) => withSchemaQueue(async () => {
       const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
       if (!tableData) {
         return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
@@ -634,6 +641,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           if (type !== undefined) rest.type = type;
           if (isNullable !== undefined) rest.isNullable = isNullable;
           if (isPublished !== undefined) rest.isPublished = isPublished;
+          if (isUpdatable !== undefined) rest.isUpdatable = isUpdatable;
           if (defaultValue !== undefined) rest.defaultValue = defaultValue;
           if (description !== undefined) rest.description = description;
           if (options !== undefined) rest.options = JSON.parse(options);

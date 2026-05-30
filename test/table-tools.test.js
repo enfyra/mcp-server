@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 
 import { initAuth, resetTokens } from '../src/lib/auth.js';
 import { fetchAPI } from '../src/lib/fetch.js';
-import { fetchTableWithDetails, normalizeRelationForTablePatch, resolveTableFromMetadata } from '../src/lib/table-tools.js';
+import {
+  buildColumnDefinition,
+  fetchTableWithDetails,
+  normalizeRelationForTablePatch,
+  resolveTableFromMetadata,
+} from '../src/lib/table-tools.js';
 import { prepareRecordMutation } from '../src/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../src/lib/route-guards.js';
 
@@ -71,6 +76,40 @@ test('fetchTableWithDetails reads full columns from metadata instead of table_de
 test('resolveTableFromMetadata supports array and keyed metadata shapes', () => {
   assert.equal(resolveTableFromMetadata({ data: { tables: [{ id: 1, name: 'a' }] } }, '1')?.name, 'a');
   assert.equal(resolveTableFromMetadata({ tables: { b: { id: 2, name: 'b' } } }, 2)?.name, 'b');
+});
+
+test('encrypted column definitions preserve explicit updatable contract', () => {
+  assert.deepEqual(
+    buildColumnDefinition({
+      name: 'api_key',
+      type: 'varchar',
+      isEncrypted: true,
+      isUpdatable: true,
+      isPublished: false,
+    }),
+    {
+      name: 'api_key',
+      type: 'varchar',
+      isPublished: false,
+      isUpdatable: true,
+      isEncrypted: true,
+    }
+  );
+
+  assert.deepEqual(
+    buildColumnDefinition({
+      name: 'secret_key',
+      type: 'varchar',
+      isEncrypted: true,
+      isUpdatable: false,
+    }),
+    {
+      name: 'secret_key',
+      type: 'varchar',
+      isEncrypted: true,
+      isUpdatable: false,
+    }
+  );
 });
 
 test('fetchAPI exchanges ENFYRA_API_TOKEN before authenticated requests', async () => {

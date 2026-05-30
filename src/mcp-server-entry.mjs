@@ -175,6 +175,8 @@ function summarizeTable(table) {
       isPrimary: !!column.isPrimary,
       isNullable: column.isNullable,
       isPublished: column.isPublished,
+      isUpdatable: column.isUpdatable !== false,
+      isEncrypted: column.isEncrypted === true,
     })),
     relations: (table.relations || []).map((relation) => ({
       id: relation.id ?? relation._id,
@@ -702,12 +704,16 @@ server.tool(
           keyRule: 'Do not include NODE_NAME, user_cache:, or Redis namespace prefixes in scripts. Prefer TTL-based set(key, value, ttlMs); setNoExpire may still be evicted by the user-cache soft allocation.',
         },
         throws: '@THROW400 through @THROW503 and @THROW map to $ctx.$throw helpers.',
+        helpers: {
+          crypto: '$ctx.$helpers.$crypto exposes bounded runtime crypto helpers: randomUUID(), randomBytes(size, encoding), sha256(value, encoding), hmacSha256(value, secret, encoding), and generateSshKeyPair(comment). Use generateSshKeyPair for SSH key material. Do not use legacy $ctx.$helpers.$ssh.',
+        },
+        env: '$ctx.$env exposes a sanitized process env snapshot with exact sensitive keys removed: DB_URI, DB_REPLICA_URIS, REDIS_URI, SECRET_KEY, and ADMIN_PASSWORD. Store app secrets in unpublished isEncrypted fields instead of reading them from $env.',
       },
       contexts: {
         preHook: {
           runs: 'Before handler.',
           data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@CACHE', '@HELPERS', '@THROW*', '@SOCKET emit helpers'],
-          queryContract: '@QUERY.filter is initialized as an object. When adding RLS or tenant filters in pre-hooks, merge directly with _and; do not add defensive type checks around @QUERY.filter.',
+          queryContract: '@QUERY.filter is initialized as an object. When adding RLS/scope filters in pre-hooks, merge directly with _and; do not add defensive type checks around @QUERY.filter.',
           rlsPattern: 'For relation-scoped reads, mutate @QUERY.filter instead of returning data. Example: const incomingFilter = @QUERY.filter; const scope = { memberships: { member: { id: { _eq: @USER.id } } } }; @QUERY.filter = Object.keys(incomingFilter).length ? { _and: [incomingFilter, scope] } : scope;',
           returnBehavior: 'Returning a non-undefined value skips handler and becomes response data.',
         },
@@ -794,7 +800,7 @@ server.tool(
       examples: {
         listOrCreate: `${base}/<table_name>`,
         updateOrDelete: `${base}/<table_name>/<id>`,
-        oneRowById: `${base}/<table_name>?filter={"id":{"_eq":"<id>"}}&limit=1`,
+        oneRowById: `${base}/<table_name>?filter={"<primaryKeyFromMetadata>":{"_eq":"<id>"}}&limit=1`,
       },
       auth: {
         publishedMethods: 'If the HTTP method is published for that route, no Bearer required; else Bearer JWT and routePermissions apply.',
@@ -1453,7 +1459,7 @@ server.tool(
   'create_route',
   [
     '**Use this when the user wants a new REST API route or path** — not `create_table`. Custom routes must omit `mainTableId`.',
-    '`mainTableId` is only a marker for canonical table routes such as `/orders`; do not set it for `/orders/stats`, `/cloud/admin/hosts`, `/auth/login`, or any custom path.',
+    '`mainTableId` is only a marker for canonical table routes such as `/orders`; do not set it for `/orders/stats`, `/reports/summary`, `/auth/login`, or any custom path.',
     'Do NOT create a new table_definition only to expose an endpoint; create a route without `mainTableId`, then have the handler/hook query explicit repos such as `$ctx.$repos.orders`.',
     'availableMethods = which REST verbs the route responds to. publishedMethods = which REST verbs are public (no auth). GraphQL is enabled separately through gql_definition/update_table graphqlEnabled.',
     'After creation the tool auto-reloads routes. Then create handlers for specific methods via create_handler on this route id.',
@@ -2089,17 +2095,24 @@ server.tool(
 // MENU & EXTENSION TOOLS
 // ============================================================================
 
-server.tool('create_menu', 'Create a menu item in the navigation', {
+server.tool('create_menu', 'Create a menu item in the navigation. Use permission JSON for sensitive menu visibility; successful writes should trigger the app menu reload contract.', {
   label: z.string().describe('Menu label'),
   type: z.enum(['Menu', 'Dropdown Menu']).default('Menu').describe('Menu type: "Menu" for leaf items, "Dropdown Menu" for items with children'),
   icon: z.string().optional().describe('Lucide icon name'),
-  path: z.string().optional().describe('Route path for type=route'),
-  externalUrl: z.string().optional().describe('External URL for type=link'),
+  path: z.string().optional().describe('App route path for a clickable menu item, e.g. "/reports".'),
+  externalUrl: z.string().optional().describe('External URL for a menu item when the backend supports external links.'),
   order: z.number().optional().default(0).describe('Display order'),
   isEnabled: z.boolean().optional().default(true).describe('Enable menu'),
   description: z.string().optional().describe('Menu description'),
+  permission: z.string().optional().describe('Optional menu visibility permission JSON object string, e.g. {"or":[{"route":"/reports","methods":["GET"]}]}'),
 }, async (data) => {
   const body = { ...data };
+  if (body.permission !== undefined) {
+    body.permission = parseJsonArg(body.permission);
+    if (!body.permission || typeof body.permission !== 'object' || Array.isArray(body.permission)) {
+      throw new Error('permission must be a JSON object string.');
+    }
+  }
   if (body.path && !body.path.startsWith('/')) {
     body.path = '/' + body.path;
   }

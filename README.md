@@ -186,7 +186,7 @@ Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env 
 
 Schema and script tools include safety guards for LLM callers: generic record mutations validate request fields against live metadata, script-backed records must validate `sourceCode` before save through `/admin/script/validate` and fail closed if validation is unavailable, relation metadata rejects physical FK/junction inputs, custom routes reject `mainTableId` unless the path is the canonical table route, schema tools serialize table/column/relation changes, and destructive deletes require `confirm=true` after returning a preview.
 
-For route contracts that intentionally keep workflow fields out of request bodies, generic `create_record`, `update_record`, and `delete_record` accept optional `queryParams` as a JSON object string. For example, Cloud admin project creation can keep `expired_at=YYYY-MM-DD` in the URL query while `validateBody` remains enabled for the table body.
+For route contracts that intentionally keep workflow fields out of request bodies, generic `create_record`, `update_record`, and `delete_record` accept optional `queryParams` as a JSON object string. For example, a renewal workflow can keep `expires_at=YYYY-MM-DD` in the URL query while `validateBody` remains enabled for the table body.
 
 ### `ENFYRA_API_URL` — use the app proxy
 
@@ -200,7 +200,7 @@ The Enfyra backend is private infrastructure. MCP, browser code, SSR routes, Gra
 
 ### SSR app auth pattern
 
-When an LLM builds a Nuxt, Next, or other SSR frontend for Enfyra, follow the Enfyra Cloud pattern:
+When an LLM builds a Nuxt, Next, or other SSR frontend for Enfyra, follow the same-origin proxy pattern:
 
 - Browser code calls a same-origin proxy such as `{{ appOrigin }}/enfyra/**`, never the raw Enfyra backend URL.
 - Nuxt can proxy it with `routeRules: { "/enfyra/**": { proxy: { to: `${API_URL}/**`, fetchOptions: { redirect: "manual" } } } }`. Keep redirects manual so OAuth set-cookie redirects reach the browser as real HTTP redirects with `Set-Cookie`.

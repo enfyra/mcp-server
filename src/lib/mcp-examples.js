@@ -203,11 +203,46 @@ create_column({
   defaultValue: "pending",
   isPublished: true,
   description: "Email verification state controlled by server hooks."
+})
+
+create_column({
+  tableId: "<integration_secret_table_id>",
+  name: "value",
+  type: "text",
+  isNullable: false,
+  isPublished: false,
+  isEncrypted: true,
+  description: "Encrypted secret value."
 })`,
         notes: [
           'Run schema-changing calls sequentially. Do not parallelize create_column calls.',
           'create_column fetches table_definition and patches only real persisted columns with id/_id; generated metadata projections such as createdAt, updatedAt, or relation FK display fields are skipped.',
+          'Use isEncrypted=true for encryption at rest. Add isUpdatable=false separately only when the field should be immutable.',
           'Use hooks or field permissions to prevent clients from updating server-owned fields.',
+        ],
+      },
+      {
+        name: 'Patch table schema from metadata only',
+        code: `// Safe schema patch process used by create_column/update_column/delete_column:
+// 1. Read GET /metadata and find the target table.
+// 2. Keep only persisted column rows with id/_id.
+// 3. Add, change, or remove the intended column.
+// 4. PATCH /table_definition/:id with the full preserved columns array.
+// 5. If the backend returns requiredConfirmHash, resend with ?schemaConfirmHash=<hash>.
+// 6. Re-read metadata and verify unrelated column ids still exist.
+
+create_column({
+  tableId: "<table_id>",
+  name: "api_secret",
+  type: "text",
+  isPublished: false,
+  isEncrypted: true
+})`,
+        notes: [
+          'Do not rebuild schema cascade payloads from table_definition?fields=columns.*; nested fields can be truncated or relation-derived.',
+          'Generated projections such as createdAt, updatedAt, and relation FK display fields without id/_id are not valid column_definition rows.',
+          'Never delete or omit unrelated persisted columns when adding one field.',
+          'Run schema-changing calls sequentially; migration locks are backend-owned.',
         ],
       },
     ],
@@ -242,10 +277,18 @@ create_column({
       },
       {
         name: 'Fetch one record by id',
-        code: `GET /enfyra/post?filter={"id":{"_eq":123}}&limit=1`,
+        code: `find_one_record({
+  tableName: "post",
+  id: "123",
+  fields: ["id", "title", "createdAt"]
+})
+
+// REST equivalent after inspecting metadata primary key:
+GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
         notes: [
           'There is no dynamic GET /<table>/<id> route.',
-          'Use filter + limit=1 or MCP find_one_record.',
+          'Prefer MCP find_one_record because it resolves the primary key from live metadata.',
+          'If writing raw REST, inspect metadata first and use the real primary key field; do not assume id on every backend.',
         ],
       },
       {
@@ -275,6 +318,38 @@ create_column({
           'deep keys must be relation property names.',
           'Allowed deep options are fields, filter, sort, limit, page, and deep.',
           'Do not invent deep keys like members unless members is a relation on that table.',
+        ],
+      },
+      {
+        name: 'Encrypted fields are not lookup fields',
+        code: `// Bad: api_token is isEncrypted=true, so filter/sort cannot use it.
+GET /enfyra/integrations?filter={"api_token":{"_eq":"plaintext-token"}}
+
+// Good: store a separate non-secret lookup hash if lookup is needed.
+create_column({
+  tableId: "<integrations_table_id>",
+  name: "api_token_lookup_sha256",
+  type: "varchar",
+  isNullable: false,
+  isPublished: false
+})
+
+// In the create/update handler or pre-hook, hash plaintext before it is encrypted.
+if (@BODY.api_token) {
+  @BODY.api_token_lookup_sha256 = @HELPERS.$crypto.sha256(@BODY.api_token)
+}
+
+// Lookup by the hash, never by the encrypted field.
+const lookup = @HELPERS.$crypto.sha256(@BODY.api_token)
+const found = await #integrations.find({
+  filter: { api_token_lookup_sha256: { _eq: lookup } },
+  limit: 1
+})`,
+        notes: [
+          'isEncrypted values are encrypted at rest and decrypted after select.',
+          'Do not filter, sort, or deep-filter by encrypted fields.',
+          'Use a separate deterministic non-secret hash/lookup column when the product needs secret-derived lookup.',
+          'Do not ask clients to submit enc:v1: ciphertext.',
         ],
       },
     ],
@@ -345,23 +420,27 @@ const scope = {
         ],
       },
       {
-        name: 'Pre-hook encrypted field normalization',
-        code: `create_pre_hook({
-  routeId: "<route_id>",
-  name: "encrypt_api_token",
-  methods: ["POST", "PATCH"],
-  priority: 0,
-  code: \`const value = @BODY.api_token_encrypted
-if (value && value.slice(0, 7) !== "enc:v1:") {
-  @BODY.api_token_encrypted = @HELPERS.$encrypt.encrypt(value)
-}\`
+        name: 'Encrypted field table definition',
+        code: `create_table({
+  name: "integrations",
+  columns: JSON.stringify([
+    { name: "name", type: "varchar", isNullable: false },
+    {
+      name: "api_token",
+      type: "varchar",
+      isNullable: false,
+      isPublished: false,
+      isEncrypted: true
+    }
+  ])
 })`,
         notes: [
-          'MCP create_pre_hook accepts code as the tool argument, then persists it to Enfyra as sourceCode with scriptLanguage.',
-          'Do not call raw create_record with a code field for pre_hook_definition or post_hook_definition; backend CRUD rejects code.',
-          'Use Enfyra pre-hooks for request-body normalization before canonical CRUD persists the record.',
-          'Do not implement encrypted field normalization as a Knex/database hook.',
-          'Use $encrypt for encryption and $ssh.generateKeyPair for SSH key generation; do not use $secrets.',
+          'Use isEncrypted=true for values that must be encrypted at rest.',
+          'Scripts and REST callers read and write plaintext values; Enfyra encrypts on write and decrypts after select.',
+          'Set isPublished=false for secret fields that should not be exposed by default.',
+          'isEncrypted does not imply immutability; add isUpdatable=false separately only when the value must not change.',
+          'Do not generate manual $encrypt hooks or accept caller-supplied enc:v1: ciphertext for normal app data.',
+          'Encrypted fields cannot be filtered or sorted.',
         ],
       },
       {
@@ -460,35 +539,35 @@ return @DATA\`
         name: 'Admin menu and extension permission gates',
         code: `<template>
   <section class="space-y-4">
-    <PermissionGate :condition="canReadCloudProjects">
+    <PermissionGate :condition="canReadReports">
       <template #default>
         <div class="flex items-center justify-between gap-3">
-          <h2 class="text-lg font-semibold">Cloud projects</h2>
+          <h2 class="text-lg font-semibold">Reports</h2>
 
-          <PermissionGate :condition="canCreateCloudProject">
-            <UButton icon="i-lucide-plus" label="Create project" @click="openCreate = true" />
+          <PermissionGate :condition="canCreateReport">
+            <UButton icon="i-lucide-plus" label="Create report" @click="openCreate = true" />
           </PermissionGate>
         </div>
 
-        <div v-for="project in projects" :key="project.id" class="rounded-lg border p-4">
-          <NuxtLink :to="\`/cloud/projects/\${project.id}\`" class="font-medium">
-            {{ project.name }}
+        <div v-for="report in reports" :key="report.id" class="rounded-lg border p-4">
+          <NuxtLink :to="\`/reports/\${report.id}\`" class="font-medium">
+            {{ report.title }}
           </NuxtLink>
 
           <div class="mt-3 flex gap-2">
-            <PermissionGate :condition="canUpdateCloudProject">
-              <UButton icon="i-lucide-pause" variant="soft" label="Disable" @click="openDisable(project)" />
+            <PermissionGate :condition="canUpdateReport">
+              <UButton icon="i-lucide-pencil" variant="outline" label="Edit" @click="openEdit(report)" />
             </PermissionGate>
 
-            <PermissionGate :condition="canDeleteCloudProject">
-              <UButton icon="i-lucide-trash-2" color="error" variant="soft" label="Delete" @click="openDelete(project)" />
+            <PermissionGate :condition="canDeleteReport">
+              <UButton icon="i-lucide-trash-2" color="error" variant="outline" label="Delete" @click="openDelete(report)" />
             </PermissionGate>
           </div>
         </div>
       </template>
 
       <template #fallback>
-        <EmptyState title="No access" description="You do not have permission to view Cloud projects." />
+        <EmptyState title="No access" description="You do not have permission to view reports." />
       </template>
     </PermissionGate>
   </section>
@@ -497,28 +576,28 @@ return @DATA\`
 <script setup>
 const { checkPermissionCondition } = usePermissions()
 
-const canReadCloudProjects = computed(() => checkPermissionCondition({
+const canReadReports = computed(() => checkPermissionCondition({
   or: [
-    { route: '/cloud/projects', methods: ['GET'] },
-    { route: '/cloud_projects', methods: ['GET'] }
+    { route: '/reports', methods: ['GET'] },
+    { route: '/report_definition', methods: ['GET'] }
   ]
 }))
 
-const canCreateCloudProject = computed(() => checkPermissionCondition({
-  or: [{ route: '/cloud_projects', methods: ['POST'] }]
+const canCreateReport = computed(() => checkPermissionCondition({
+  or: [{ route: '/report_definition', methods: ['POST'] }]
 }))
 
-const canUpdateCloudProject = computed(() => checkPermissionCondition({
-  or: [{ route: '/cloud_projects', methods: ['PATCH'] }]
+const canUpdateReport = computed(() => checkPermissionCondition({
+  or: [{ route: '/report_definition', methods: ['PATCH'] }]
 }))
 
-const canDeleteCloudProject = computed(() => checkPermissionCondition({
-  or: [{ route: '/cloud_projects', methods: ['DELETE'] }]
+const canDeleteReport = computed(() => checkPermissionCondition({
+  or: [{ route: '/report_definition', methods: ['DELETE'] }]
 }))
 </script>`,
         notes: [
           'This is menu/extension visibility, not row-level RLS.',
-          'Set menu_definition.permission on every sensitive admin menu. Example for /cloud/hosts: { or: [{ route: "/cloud/admin/hosts", methods: ["GET"] }, { route: "/cloud_servers", methods: ["GET"] }] }.',
+          'Set menu_definition.permission on every sensitive admin menu. Example for /reports: { or: [{ route: "/reports", methods: ["GET"] }, { route: "/report_definition", methods: ["GET"] }] }.',
           'Admin pages are sensitive. Use permission gates by default, not as an optional polish step.',
           'Menus should only be visible when the user has at least GET permission for the page route or backing data route.',
           'Inside the extension, gate each action by its own route/method: GET for page visibility, POST for create/flow-trigger buttons, PATCH for normal record edits, DELETE for native delete routes.',
@@ -714,7 +793,13 @@ return {
   path: "/reports",
   icon: "lucide:bar-chart-3",
   order: 20,
-  isEnabled: true
+  isEnabled: true,
+  permission: JSON.stringify({
+    or: [
+      { route: "/reports", methods: ["GET"] },
+      { route: "/report_definition", methods: ["GET"] }
+    ]
+  })
 })
 
 // Read the created menu id from the tool response, then:
@@ -723,12 +808,13 @@ create_extension({
   name: "ReportsPage",
   description: "Reports dashboard",
   menuId: "<created-menu-id>",
-  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-3\\"><UCard><p class=\\"text-sm text-muted\\">Total</p><p class=\\"mt-2 text-2xl font-semibold\\">0</p></UCard></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); useHeaderActionRegistry({ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', onClick: () => {}, order: 0 })</script>",
+  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-3\\"><UCard><p class=\\"text-sm text-muted\\">Total</p><p class=\\"mt-2 text-2xl font-semibold\\">0</p></UCard></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); useHeaderActionRegistry([{ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', onClick: () => {}, order: 0 }])</script>",
   isEnabled: true
 })`,
         notes: [
           'Menu provides navigation; extension provides content.',
           'Use menu_definition.label, not title.',
+          'Sensitive admin menus should include a permission condition at creation time.',
           'For page extensions, create the menu first and pass menuId to create_extension.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',
           'Use variant: "minimal" for operational pages unless a larger header is intentionally needed.',
@@ -745,35 +831,35 @@ create_extension({
 const { registerPageHeader } = usePageHeaderRegistry()
 
 registerPageHeader({
-  title: 'Host detail',
-  description: 'Provider state, capacity, projects, and reconciliation status.',
-  leadingIcon: 'lucide:server',
+  title: 'Report detail',
+  description: 'Review status, schedule, and delivery history.',
+  leadingIcon: 'lucide:file-text',
   gradient: 'cyan',
   variant: 'minimal'
 })
 
 useHeaderActionRegistry([
   {
-    id: 'back-to-hosts',
-    label: 'Hosts',
+    id: 'back-to-reports',
+    label: 'Reports',
     icon: 'lucide:arrow-left',
     color: 'neutral',
     variant: 'ghost',
     order: 0,
-    onClick: () => navigateTo('/cloud/hosts')
+    onClick: () => navigateTo('/reports')
   },
   {
-    id: 'run-host-check',
-    label: 'Run check',
-    icon: 'lucide:scan-search',
+    id: 'send-test-report',
+    label: 'Send test',
+    icon: 'lucide:send',
     color: 'neutral',
     variant: 'outline',
     order: 1,
-    permission: { or: [{ route: '/cloud/admin/hosts/reconcile', methods: ['POST'] }] },
-    onClick: runCheck
+    permission: { or: [{ route: '/reports/send-test', methods: ['POST'] }] },
+    onClick: sendTest
   },
   {
-    id: 'refresh-host',
+    id: 'refresh-report',
     label: 'Refresh',
     icon: 'lucide:refresh-cw',
     color: 'primary',
@@ -821,33 +907,39 @@ useHeaderActionRegistry([
         ],
       },
       {
-        name: 'Plan a Cloud admin dashboard as multiple pages',
+        name: 'Plan an admin dashboard as multiple pages',
         code: `// Recommended menu shape for an operations surface:
 create_menu({
   type: "Dropdown Menu",
-  label: "Cloud",
-  path: "/cloud",
-  icon: "lucide:cloud",
+  label: "Operations",
+  path: "/operations",
+  icon: "lucide:layout-dashboard",
   order: 2,
-  isEnabled: true
+  isEnabled: true,
+  permission: JSON.stringify({
+    or: [
+      { route: "/operations/jobs", methods: ["GET"] },
+      { route: "/flow_execution_definition", methods: ["GET"] }
+    ]
+  })
 })
 
 // Child page extensions should be focused:
 // /dashboard            compact summary/routing hub: KPIs, current signal, attention queue, navigation cards
-// /cloud/projects      project status and drill-downs
-// /cloud/provisioning  project/run grouped provisioning status, current step, meaning, next action
-// /cloud/billing       orders/subscriptions/refunds
-// /cloud/infrastructure hosts/capacity/plans/system credential readiness
-// /cloud/readiness     legal/Paddle/landing launch checklist
+// /operations/jobs      background jobs, current step, meaning, next action
+// /operations/orders    order/payment status and drill-downs
+// /operations/reports   report configuration and delivery history
+// /operations/settings  system readiness and configuration
 // Use UTabs inside large pages instead of placing every section in one dashboard.
-// For admin record management, link to /data/<table>, e.g. /data/landing_terms, not public landing paths.`,
+// For admin record management, link to /data/<table>, e.g. /data/report_definition, not public website paths.`,
         notes: [
           'Design the menu/page split before generating dashboard code.',
+          'Permission-gate sensitive parent dropdown menus too, using any child page route or backing route that represents read access.',
           'Keep /dashboard as a summary and distribution page, not a detailed operations table.',
           'Use focused pages for operational domains.',
           'Each page extension must use usePageHeaderRegistry for the app-shell title strip and should not render a duplicate top header in the body.',
           'PageHeader.stats is reserved for deliberate overview headers; operational KPIs belong in body cards/tables.',
-          'Provisioning pages should not show raw history rows as the primary UI; group by project/run and translate step keys into operator-facing labels.',
+          'Operational history pages should not show raw event rows as the primary UI; group by entity/run and translate step keys into operator-facing labels.',
           'Operational lists should use pagination plus search/filter controls; do not rely on arbitrary fixed limits such as limit=50.',
           'UTabs is available in eApp extension runtime for page-level sections.',
           'Admin links for editing or inspecting records should point to /data/<table> routes.',
@@ -877,19 +969,90 @@ onMounted(() => fetchOrders())
         ],
       },
       {
+        name: 'Modal and drawer buttons do not submit accidentally',
+        code: `<template>
+  <CommonModal v-model:open="open">
+    <template #header>
+      <h3 class="text-lg font-semibold">Update version</h3>
+    </template>
+
+    <template #body>
+      <UInput v-model="version" />
+      <UButton
+        type="button"
+        icon="i-lucide-refresh-cw"
+        label="Check version"
+        @click.stop.prevent="checkVersion"
+      />
+    </template>
+
+    <template #footer>
+      <UButton
+        type="button"
+        color="neutral"
+        variant="ghost"
+        label="Cancel"
+        @click.stop.prevent="open = false"
+      />
+      <UButton
+        type="button"
+        color="primary"
+        label="Update version"
+        :disabled="!canSubmit"
+        @click.stop.prevent="submit"
+      />
+    </template>
+  </CommonModal>
+</template>`,
+        notes: [
+          'Every trigger/footer/action button inside CommonModal, CommonDrawer, or UModal should use type="button" unless it intentionally submits a form.',
+          'Use @click.stop.prevent on modal/drawer action buttons so clicks do not bubble to row/page triggers.',
+          'Open modal/drawer shells immediately, then load content inside them; do not close and reopen after an API call.',
+          'Keep destructive final actions disabled until all confirmation inputs are valid.',
+        ],
+      },
+      {
         name: 'Extension can use modern browser APIs',
         code: `<script setup lang="ts">
 const statuses = ['active', 'ready']
 const ok = statuses.includes('active')
-const requiredTerms = new Set(['cloud-terms', 'privacy-policy', 'refund-policy'])
+const requiredTerms = new Set(['terms', 'privacy'])
 const loaded = await Promise.all([Promise.resolve(1), Promise.resolve(2)])
 const label = String('pending_payment').replace(/_/g, ' ')
 const date = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(new Date())
-console.log(ok, requiredTerms.has('cloud-terms'), loaded, label, date)
+console.log(ok, requiredTerms.has('terms'), loaded, label, date)
 </script>`,
         notes: [
           'Do not rewrite extension code to ES5 when tooling rejects modern APIs.',
           'If diagnostics complain about these APIs, fix eApp extension TypeScript lib/runtime contract.',
+        ],
+      },
+      {
+        name: 'Install and use an app package in an extension',
+        code: `install_package({
+  name: "dayjs",
+  type: "App"
+})
+
+// Then in extension code:
+<script setup>
+const formatted = ref('')
+
+onMounted(async () => {
+  const pkgs = await getPackages(['dayjs'])
+  const dayjs = pkgs.dayjs
+  formatted.value = dayjs().format('YYYY-MM-DD')
+})
+</script>
+
+<template>
+  <span>{{ formatted }}</span>
+</template>`,
+        notes: [
+          'Install browser-side extension dependencies as type: "App".',
+          'Do not use static import statements in extension_definition.code.',
+          'Load app packages with getPackages([...]) inside the extension runtime.',
+          'Use onMounted or an explicit action for package loading when the UI can render a loading state.',
         ],
       },
       {
@@ -918,7 +1081,7 @@ const flowStats = useApi('/flow_execution_definition', {
   }))
 })
 
-const orderStats = useApi('/cloud_payment_orders', {
+const orderStats = useApi('/order_definition', {
   query: computed(() => ({
     fields: 'id',
     limit: 1,
