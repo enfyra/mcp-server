@@ -34,7 +34,7 @@ const CAPABILITY_AREAS = [
   {
     area: 'Dynamic REST API',
     tables: ['route_definition', 'route_handler_definition', 'pre_hook_definition', 'post_hook_definition', 'route_permission_definition', 'method_definition'],
-    workflow: 'Create custom paths with create_route without mainTableId, then add handlers/hooks. mainTableId is only for canonical table routes like /table_name. REST methods are GET/POST/PATCH/DELETE.',
+    workflow: 'Create custom paths with create_route without mainTableId, then add handlers/hooks. mainTableId is only for canonical table routes like /table_name. Query method_definition before assigning route methods.',
   },
   {
     area: 'Auth, roles, sessions, OAuth',
@@ -197,8 +197,8 @@ function summarizeRoutes(routesResult) {
     id: route.id ?? route._id,
     path: route.path,
     mainTable: route.mainTable?.name || route.mainTableName || null,
-    availableMethods: (route.availableMethods || []).map((method) => method.method).filter(Boolean),
-    publishedMethods: (route.publishedMethods || []).map((method) => method.method).filter(Boolean),
+    availableMethods: (route.availableMethods || []).map((method) => method.name).filter(Boolean),
+    publishedMethods: (route.publishedMethods || []).map((method) => method.name).filter(Boolean),
     isEnabled: route.isEnabled,
   }));
 }
@@ -376,8 +376,8 @@ function normalizeHexColorInput(value, fieldName) {
 }
 
 async function findMethodRecordByName(method) {
-  const filter = encodeURIComponent(JSON.stringify({ method: { _eq: method } }));
-  const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,method,buttonColor,textColor,isSystem`);
+  const filter = encodeURIComponent(JSON.stringify({ name: { _eq: method } }));
+  const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
   return unwrapData(result)[0] || null;
 }
 
@@ -476,7 +476,7 @@ server.tool(
         routes: routes.length,
         methods: methodsResult?.data?.length || 0,
       },
-      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, method: method.method })),
+      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, name: method.name, method: method.name })),
       capabilityAreas: CAPABILITY_AREAS.map((item) => ({
         ...item,
         presentTables: item.tables.filter((table) => tableNames.includes(table)),
@@ -579,7 +579,7 @@ server.tool(
         storageConfigs: storageResult?.data?.length || 0,
         settings: settingsResult?.data?.length || 0,
       },
-      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, method: method.method })),
+      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, name: method.name, method: method.name })),
       routeRuntime: {
         routePattern: 'GET/POST /<route-path>; PATCH/DELETE /<route-path>/:id; no dynamic GET /<route-path>/:id.',
         adminRoutes: adminRoutes.map((route) => route.path).sort(),
@@ -1050,10 +1050,11 @@ server.tool(
   'List method_definition records with their UI colors. Use this before creating route methods or method-colored UI.',
   {},
   async () => {
-    const result = await fetchAPI(ENFYRA_API_URL, '/method_definition?fields=id,_id,method,buttonColor,textColor,isSystem&sort=method&limit=0');
+    const result = await fetchAPI(ENFYRA_API_URL, '/method_definition?fields=id,_id,name,buttonColor,textColor,isSystem&sort=name&limit=0');
     const methods = unwrapData(result).map((method) => ({
       id: getId(method),
-      method: method.method,
+      name: method.name,
+      method: method.name,
       buttonColor: method.buttonColor,
       textColor: method.textColor,
       isSystem: method.isSystem === true,
@@ -1082,7 +1083,7 @@ server.tool(
       throw new Error(`Method ${normalizedMethod} already exists with id ${getId(existing)}. Use update_method to change colors.`);
     }
     const body = {
-      method: normalizedMethod,
+      name: normalizedMethod,
       buttonColor: normalizeHexColorInput(buttonColor, 'buttonColor'),
       textColor: normalizeHexColorInput(textColor, 'textColor'),
       isSystem: isSystem === true,
@@ -1094,6 +1095,7 @@ server.tool(
     _methodMap = null;
     return { content: [{ type: 'text', text: JSON.stringify({
       ...summarizeMutationResult(result, 'created', 'method_definition'),
+      name: normalizedMethod,
       method: normalizedMethod,
       appUi: '/settings/methods',
     }, null, 2) }] };
@@ -1128,7 +1130,7 @@ server.tool(
       body.textColor = normalizeHexColorInput(textColor, 'textColor');
     }
     if (method !== undefined && id) {
-      body.method = normalizeMethodNameInput(method);
+      body.name = normalizeMethodNameInput(method);
     }
     if (Object.keys(body).length === 0) {
       throw new Error('Provide buttonColor, textColor, or a new method name.');
@@ -1168,13 +1170,14 @@ server.tool(
       if (!target) {
         const primaryKey = await getPrimaryFieldName('method_definition');
         const filter = encodeURIComponent(JSON.stringify({ [primaryKey]: { _eq: targetId } }));
-        const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,method,buttonColor,textColor,isSystem`);
+        const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
         target = unwrapData(result)[0] || null;
       }
       return { content: [{ type: 'text', text: JSON.stringify({
         action: 'delete_method_preview',
         id: targetId,
-        method: target?.method,
+        name: target?.name,
+        method: target?.name,
         isSystem: target?.isSystem === true,
         destructive: true,
         warning: 'Only delete unused custom methods. Deleting a method can affect route method relations.',
@@ -1265,7 +1268,7 @@ async function getMethodMap() {
   const result = await fetchAPI(ENFYRA_API_URL, '/method_definition?limit=0');
   _methodMap = {};
   for (const m of result.data) {
-    _methodMap[m.method] = m.id || m._id;
+    _methodMap[m.name] = m.id || m._id;
   }
   return _methodMap;
 }
@@ -1289,7 +1292,8 @@ function withMethodNames(records, methodIdNameMap, field = 'methods') {
     [field]: Array.isArray(record?.[field])
       ? record[field].map((item) => ({
           ...item,
-          method: item.method || methodIdNameMap[String(getId(item))] || null,
+          name: item.name || methodIdNameMap[String(getId(item))] || null,
+          method: item.name || methodIdNameMap[String(getId(item))] || null,
         }))
       : record?.[field],
   }));
@@ -1344,7 +1348,11 @@ function enrichRoute(route, state) {
     .filter((item) => sameId(refId(item.route), routeId))
     .map((item) => pickCodeSummary({
       ...item,
-      method: item.method ? { ...item.method, method: state.methodIdNameMap[String(getId(item.method))] || item.method.method || null } : item.method,
+      method: item.method ? {
+        ...item.method,
+        name: state.methodIdNameMap[String(getId(item.method))] || item.method.name || null,
+        method: state.methodIdNameMap[String(getId(item.method))] || item.method.name || null,
+      } : item.method,
     }, 'sourceCode'));
   const routePreHooks = withMethodNames(
     state.preHooks.filter((item) => item.isGlobal || sameId(refId(item.route), routeId)),
@@ -1369,13 +1377,25 @@ function enrichRoute(route, state) {
   return {
     ...route,
     availableMethods: Array.isArray(route.availableMethods)
-      ? route.availableMethods.map((method) => ({ ...method, method: method.method || state.methodIdNameMap[String(getId(method))] || null }))
+      ? route.availableMethods.map((method) => ({
+          ...method,
+          name: method.name || state.methodIdNameMap[String(getId(method))] || null,
+          method: method.name || state.methodIdNameMap[String(getId(method))] || null,
+        }))
       : route.availableMethods,
     publishedMethods: Array.isArray(route.publishedMethods)
-      ? route.publishedMethods.map((method) => ({ ...method, method: method.method || state.methodIdNameMap[String(getId(method))] || null }))
+      ? route.publishedMethods.map((method) => ({
+          ...method,
+          name: method.name || state.methodIdNameMap[String(getId(method))] || null,
+          method: method.name || state.methodIdNameMap[String(getId(method))] || null,
+        }))
       : route.publishedMethods,
     skipRoleGuardMethods: Array.isArray(route.skipRoleGuardMethods)
-      ? route.skipRoleGuardMethods.map((method) => ({ ...method, method: method.method || state.methodIdNameMap[String(getId(method))] || null }))
+      ? route.skipRoleGuardMethods.map((method) => ({
+          ...method,
+          name: method.name || state.methodIdNameMap[String(getId(method))] || null,
+          method: method.name || state.methodIdNameMap[String(getId(method))] || null,
+        }))
       : route.skipRoleGuardMethods,
     handlers: routeHandlers,
     preHooks: routePreHooks,
@@ -1536,7 +1556,7 @@ server.tool(
     'Use this after inspecting a route or changing handlers/hooks/guards. Pass paths like /table_definition?limit=1, not external URLs.',
   ].join(' '),
   {
-    method: z.enum(['GET', 'POST', 'PATCH', 'DELETE']).default('GET').describe('HTTP method'),
+    method: z.string().optional().default('GET').describe('HTTP method name. Must exist in method_definition.name for Enfyra route-backed calls.'),
     path: z.string().describe('Enfyra API path, e.g. /route_definition?limit=1'),
     query: z.string().optional().describe('Optional query params JSON object, merged onto path query string'),
     body: z.string().optional().describe('Optional JSON request body string'),
@@ -1544,6 +1564,7 @@ server.tool(
     useAuth: z.boolean().optional().default(true).describe('Attach MCP admin Bearer token. Set false to test published/public access.'),
   },
   async ({ method, path, query, body, headers, useAuth }) => {
+    const httpMethod = normalizeMethodNameInput(method || 'GET');
     const restPath = normalizeRestPath(path);
     const url = new URL(`${ENFYRA_API_URL.replace(/\/$/, '')}${restPath}`);
     const queryObj = parseJsonArg(query, {});
@@ -1561,9 +1582,9 @@ server.tool(
 
     const started = Date.now();
     const response = await fetch(url, {
-      method,
+      method: httpMethod,
       headers: requestHeaders,
-      ...(body !== undefined && body !== null && method !== 'GET' ? { body } : {}),
+      ...(body !== undefined && body !== null && httpMethod !== 'GET' ? { body } : {}),
     });
     const contentType = response.headers.get('content-type') || '';
     const responseText = await response.text();
@@ -1574,7 +1595,7 @@ server.tool(
 
     const payload = {
       request: {
-        method,
+        method: httpMethod,
         url: url.toString(),
         authenticated: !!useAuth,
       },
@@ -1641,9 +1662,9 @@ server.tool(
   {
     path: z.string().describe('URL path, must start with / (e.g., "/my-endpoint")'),
     mainTableId: z.union([z.string(), z.number()]).optional().describe('Only set for the canonical table route `/<table_name>`. Omit for every custom route.'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE']))
-      .describe('HTTP methods this route supports (availableMethods). Common: ["GET","POST","PATCH","DELETE"]'),
-    publishedMethods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
+    methods: z.array(z.string())
+      .describe('HTTP method names this route supports (availableMethods). Each value must exist in method_definition.name. Common: ["GET","POST","PATCH","DELETE"].'),
+    publishedMethods: z.array(z.string()).optional()
       .describe('Methods accessible WITHOUT auth token. Omit = all methods require auth.'),
     isEnabled: z.boolean().optional().default(true).describe('Enable route immediately'),
     description: z.string().optional().describe('Route description'),
@@ -1687,7 +1708,7 @@ server.tool(
         publishedMethods: publishedMethods || [],
       },
       routesReloaded: true,
-      next: `Use create_handler({ routeId: ${JSON.stringify(getId(created))}, method: "GET"|"POST"|"PATCH"|"DELETE", sourceCode }) for custom code.`,
+      next: `Use create_handler({ routeId: ${JSON.stringify(getId(created))}, method: "GET", sourceCode }) for custom code. Create extra method_definition.name rows first for custom methods such as PUT.`,
     }, null, 2) }] };
   },
 );
@@ -1704,9 +1725,9 @@ server.tool(
   ].join(' '),
   {
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
-    method: z.enum(['GET', 'POST', 'PATCH', 'DELETE']).optional()
-      .describe('Single method to create. Prefer this for one handler.'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
+    method: z.string().optional()
+      .describe('Single method_definition.name to create. Prefer this for one handler.'),
+    methods: z.array(z.string()).optional()
       .describe('Batch create multiple handlers. Use only when the same sourceCode applies to every method.'),
     sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic.'),
     scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
@@ -1768,8 +1789,8 @@ server.tool(
     name: z.string().describe('Hook name (unique per route)'),
     code: z.string().describe('Hook JavaScript sourceCode. MCP stores it as sourceCode and lets Enfyra compile compiledCode.'),
     scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
-      .describe('Methods this hook applies to. Default: all REST methods.'),
+    methods: z.array(z.string()).optional()
+      .describe('Method names this hook applies to. Default: built-in REST methods GET, POST, PATCH, DELETE.'),
     priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
     isEnabled: z.boolean().optional().default(true).describe('Enable hook immediately'),
   },
@@ -1822,8 +1843,8 @@ server.tool(
     name: z.string().describe('Hook name (unique per route)'),
     code: z.string().describe('Hook JavaScript sourceCode. MCP stores it as sourceCode and lets Enfyra compile compiledCode.'),
     scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional()
-      .describe('Methods this hook applies to. Default: all REST methods.'),
+    methods: z.array(z.string()).optional()
+      .describe('Method names this hook applies to. Default: built-in REST methods GET, POST, PATCH, DELETE.'),
     priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
     isEnabled: z.boolean().optional().default(true).describe('Enable hook immediately'),
   },
@@ -1954,7 +1975,7 @@ server.tool(
   {
     path: z.string().optional().describe('Route path, e.g. /user_definition'),
     routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).describe('REST methods this permission allows'),
+    methods: z.array(z.string()).describe('REST method names this permission allows. Each value must exist in method_definition.name.'),
     roleId: z.union([z.string(), z.number()]).optional().describe('Role id scope'),
     allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Specific user ids scope'),
     description: z.string().optional().describe('Admin note'),
@@ -1999,7 +2020,7 @@ server.tool(
     position: z.enum(['pre_auth', 'post_auth']).default('pre_auth').describe('Execution position for root guard'),
     routeId: z.union([z.string(), z.number()]).optional().describe('Optional route id'),
     path: z.string().optional().describe('Optional route path'),
-    methods: z.array(z.enum(['GET', 'POST', 'PATCH', 'DELETE'])).optional().describe('Methods this guard applies to. Empty means all configured behavior for route/global.'),
+    methods: z.array(z.string()).optional().describe('Method names this guard applies to. Empty means all configured behavior for route/global.'),
     combinator: z.enum(['and', 'or']).default('and').describe('How child guards/rules combine'),
     priority: z.number().optional().default(0).describe('Lower runs first'),
     isGlobal: z.boolean().optional().default(false).describe('Apply globally instead of one route'),

@@ -497,11 +497,11 @@ return @DATA\`
   tableName: "route_definition",
   id: "<route_id>",
   data: {
-    publishedMethods: [{ id: 1 }]
+    publishedMethods: [{ id: "<GET_method_id_from_list_methods>" }]
   }
 })`,
         notes: [
-          'Method id 1 is GET. Use method_definition if you need to confirm method ids.',
+          'Method ids are instance data. Use list_methods or inspect_route output to resolve the GET method id first.',
           'publishedMethods controls anonymous route access. Route permissions are not for public access.',
           'Route permissions apply when the method is not public.',
         ],
@@ -802,6 +802,7 @@ update_method({
 })`,
         notes: [
           'Use dedicated method tools instead of generic CRUD on method_definition.',
+          'The backend stores the method label in method_definition.name; do not send or filter a method_definition.method field.',
           'buttonColor is the badge background and textColor is the badge text color.',
           'The eApp management UI is /settings/methods.',
           'delete_method is preview-first and should only be used for unused custom methods.',
