@@ -786,6 +786,28 @@ return {
     useWhen: 'Use when adding custom UI pages to the Enfyra app.',
     examples: [
       {
+        name: 'Create or update HTTP method colors',
+        code: `list_methods()
+
+create_method({
+  method: "PUT",
+  buttonColor: "#e0e7ff",
+  textColor: "#4338ca"
+})
+
+update_method({
+  method: "PATCH",
+  buttonColor: "#fef3c7",
+  textColor: "#b45309"
+})`,
+        notes: [
+          'Use dedicated method tools instead of generic CRUD on method_definition.',
+          'buttonColor is the badge background and textColor is the badge text color.',
+          'The eApp management UI is /settings/methods.',
+          'delete_method is preview-first and should only be used for unused custom methods.',
+        ],
+      },
+      {
         name: 'Create menu then extension',
         code: `create_menu({
   label: "Reports",

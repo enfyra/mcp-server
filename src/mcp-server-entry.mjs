@@ -356,6 +356,31 @@ function appendQuery(path, queryParams) {
   return `${path}${path.includes('?') ? '&' : '?'}${queryParams}`;
 }
 
+const METHOD_NAME_RE = /^[A-Z][A-Z0-9_]*$/;
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+
+function normalizeMethodNameInput(method) {
+  const value = String(method || '').trim().toUpperCase();
+  if (!METHOD_NAME_RE.test(value)) {
+    throw new Error('Method must start with A-Z and contain only uppercase letters, numbers, or underscore.');
+  }
+  return value;
+}
+
+function normalizeHexColorInput(value, fieldName) {
+  const color = String(value || '').trim().toLowerCase();
+  if (!HEX_COLOR_RE.test(color)) {
+    throw new Error(`${fieldName} must be a full hex color such as #1d4ed8.`);
+  }
+  return color;
+}
+
+async function findMethodRecordByName(method) {
+  const filter = encodeURIComponent(JSON.stringify({ method: { _eq: method } }));
+  const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,method,buttonColor,textColor,isSystem`);
+  return unwrapData(result)[0] || null;
+}
+
 // Create MCP server — `instructions` is sent to the host (e.g. Claude Code) for the LLM; not README
 const server = new McpServer(
   {
@@ -1019,6 +1044,154 @@ server.tool('delete_record', 'Delete a record by ID', {
     success: result?.success,
   }, null, 2) }] };
 });
+
+server.tool(
+  'list_methods',
+  'List method_definition records with their UI colors. Use this before creating route methods or method-colored UI.',
+  {},
+  async () => {
+    const result = await fetchAPI(ENFYRA_API_URL, '/method_definition?fields=id,_id,method,buttonColor,textColor,isSystem&sort=method&limit=0');
+    const methods = unwrapData(result).map((method) => ({
+      id: getId(method),
+      method: method.method,
+      buttonColor: method.buttonColor,
+      textColor: method.textColor,
+      isSystem: method.isSystem === true,
+    }));
+    return { content: [{ type: 'text', text: JSON.stringify({
+      tableName: 'method_definition',
+      methods,
+      appUi: '/settings/methods',
+    }, null, 2) }] };
+  },
+);
+
+server.tool(
+  'create_method',
+  'Create a method_definition record with app badge colors. Prefer this over generic create_record for method_definition.',
+  {
+    method: z.string().describe('Uppercase method name, e.g. GET, POST, PUT, CUSTOM_METHOD. Must start with A-Z and contain only A-Z, 0-9, or underscore.'),
+    buttonColor: z.string().describe('Badge background color as full hex, e.g. #dbeafe.'),
+    textColor: z.string().describe('Badge text color as full hex, e.g. #1d4ed8.'),
+    isSystem: z.boolean().optional().default(false).describe('Set true only for built-in/runtime-owned methods. Normal app methods should leave this false.'),
+  },
+  async ({ method, buttonColor, textColor, isSystem }) => {
+    const normalizedMethod = normalizeMethodNameInput(method);
+    const existing = await findMethodRecordByName(normalizedMethod);
+    if (existing) {
+      throw new Error(`Method ${normalizedMethod} already exists with id ${getId(existing)}. Use update_method to change colors.`);
+    }
+    const body = {
+      method: normalizedMethod,
+      buttonColor: normalizeHexColorInput(buttonColor, 'buttonColor'),
+      textColor: normalizeHexColorInput(textColor, 'textColor'),
+      isSystem: isSystem === true,
+    };
+    const result = await fetchAPI(ENFYRA_API_URL, '/method_definition', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    _methodMap = null;
+    return { content: [{ type: 'text', text: JSON.stringify({
+      ...summarizeMutationResult(result, 'created', 'method_definition'),
+      method: normalizedMethod,
+      appUi: '/settings/methods',
+    }, null, 2) }] };
+  },
+);
+
+server.tool(
+  'update_method',
+  'Update a method_definition record color pair, and optionally rename non-system methods. Prefer this over generic update_record for method_definition.',
+  {
+    id: z.string().optional().describe('Method record id. If omitted, method is used to find the record.'),
+    method: z.string().optional().describe('Existing method name to find, or new name when id is provided.'),
+    buttonColor: z.string().optional().describe('Badge background color as full hex, e.g. #dbeafe.'),
+    textColor: z.string().optional().describe('Badge text color as full hex, e.g. #1d4ed8.'),
+  },
+  async ({ id, method, buttonColor, textColor }) => {
+    let targetId = id;
+    let existing = null;
+    if (!targetId) {
+      if (!method) throw new Error('Provide id or method.');
+      const normalizedMethod = normalizeMethodNameInput(method);
+      existing = await findMethodRecordByName(normalizedMethod);
+      if (!existing) throw new Error(`Method ${normalizedMethod} was not found.`);
+      targetId = getId(existing);
+    }
+
+    const body = {};
+    if (buttonColor !== undefined) {
+      body.buttonColor = normalizeHexColorInput(buttonColor, 'buttonColor');
+    }
+    if (textColor !== undefined) {
+      body.textColor = normalizeHexColorInput(textColor, 'textColor');
+    }
+    if (method !== undefined && id) {
+      body.method = normalizeMethodNameInput(method);
+    }
+    if (Object.keys(body).length === 0) {
+      throw new Error('Provide buttonColor, textColor, or a new method name.');
+    }
+
+    const result = await fetchAPI(ENFYRA_API_URL, `/method_definition/${encodeURIComponent(String(targetId))}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+    _methodMap = null;
+    return { content: [{ type: 'text', text: JSON.stringify({
+      ...summarizeMutationResult(result, 'updated', 'method_definition'),
+      id: targetId,
+      appUi: '/settings/methods',
+    }, null, 2) }] };
+  },
+);
+
+server.tool(
+  'delete_method',
+  'Preview or delete a method_definition record. Only delete unused custom methods; system/default methods should be kept.',
+  {
+    id: z.string().optional().describe('Method record id. If omitted, method is used to find the record.'),
+    method: z.string().optional().describe('Method name to find when id is omitted.'),
+    confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
+  },
+  async ({ id, method, confirm }) => {
+    let targetId = id;
+    let target = null;
+    if (!targetId) {
+      if (!method) throw new Error('Provide id or method.');
+      target = await findMethodRecordByName(normalizeMethodNameInput(method));
+      if (!target) throw new Error(`Method ${method} was not found.`);
+      targetId = getId(target);
+    }
+    if (!confirm) {
+      if (!target) {
+        const primaryKey = await getPrimaryFieldName('method_definition');
+        const filter = encodeURIComponent(JSON.stringify({ [primaryKey]: { _eq: targetId } }));
+        const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,method,buttonColor,textColor,isSystem`);
+        target = unwrapData(result)[0] || null;
+      }
+      return { content: [{ type: 'text', text: JSON.stringify({
+        action: 'delete_method_preview',
+        id: targetId,
+        method: target?.method,
+        isSystem: target?.isSystem === true,
+        destructive: true,
+        warning: 'Only delete unused custom methods. Deleting a method can affect route method relations.',
+        next: 'Call delete_method again with confirm=true to delete.',
+      }, null, 2) }] };
+    }
+    const result = await fetchAPI(ENFYRA_API_URL, `/method_definition/${encodeURIComponent(String(targetId))}`, { method: 'DELETE' });
+    _methodMap = null;
+    return { content: [{ type: 'text', text: JSON.stringify({
+      action: 'deleted',
+      tableName: 'method_definition',
+      id: targetId,
+      statusCode: result?.statusCode,
+      success: result?.success,
+    }, null, 2) }] };
+  },
+);
 
 server.tool(
   'run_admin_test',

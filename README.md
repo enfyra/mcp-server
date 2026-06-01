@@ -215,7 +215,7 @@ When an LLM builds a Nuxt, Next, or other SSR frontend for Enfyra, follow the sa
 
 ## Tools (summary)
 
-Metadata, examples, query/CRUD, route/handler/hook, tables/columns, reload cache, logs, user/roles, login, menu/extension, `get_enfyra_api_context`. For full tool list and behavior, see the app after enabling MCP or the source in `src/mcp-server-entry.mjs`.
+Metadata, examples, query/CRUD, method management, route/handler/hook, tables/columns, reload cache, logs, user/roles, login, menu/extension, `get_enfyra_api_context`. For full tool list and behavior, see the app after enabling MCP or the source in `src/mcp-server-entry.mjs`.
 
 Use `get_enfyra_examples` when asking an LLM to generate concrete Enfyra implementation patterns. It returns categorized examples for SSR app auth/OAuth/proxy setup, schema/relations, queries/deep, handlers/hooks, permissions/RLS, websocket, flows, files, and extensions.
 
