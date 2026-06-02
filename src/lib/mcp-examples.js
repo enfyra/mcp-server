@@ -249,7 +249,7 @@ create_column({
   },
   'queries-deep': {
     title: 'REST queries, filters, meta counts, and deep relation fetches',
-    useWhen: 'Use when fetching records, filtering by relations, loading nested data, or counting efficiently.',
+    useWhen: 'Use when fetching records, filtering by relations, loading nested relation data in the same request, or counting efficiently.',
     examples: [
       {
         name: 'Minimal MCP query then explicit detail query',
@@ -310,14 +310,33 @@ GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
         ],
       },
       {
-        name: 'Deep relation query',
+        name: 'Relation fields without deep',
         code: `query_table({
   tableName: "order",
-  fields: ["id", "total", "customer"],
+  fields: [
+    "id",
+    "total",
+    "customer.id",
+    "customer.email",
+    "customer.displayName"
+  ],
+  limit: 20
+})`,
+        notes: [
+          'Use fields with dotted relation paths when you only need scalar fields from related records.',
+          'This is enough for simple many-to-one or one-to-one relation display such as owner.email, customer.name, or lastMessage.text.',
+          'Do not add deep when fields alone can express the relation data you need.',
+        ],
+      },
+      {
+        name: 'Deep relation query options',
+        code: `query_table({
+  tableName: "order",
+  fields: ["id", "total"],
   deep: JSON.stringify({
-    customer: { fields: "id,email,displayName" },
     items: {
       fields: "id,quantity,product",
+      sort: "-createdAt",
       limit: 20,
       deep: {
         product: { fields: "id,name,price" }
@@ -326,6 +345,11 @@ GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
   })
 })`,
         notes: [
+          'Use deep when relation loading needs query options such as filter, sort, limit, page, or nested deep.',
+          'Deep is mainly useful for controlled child collections or nested relation fetches, not for basic related-field display.',
+          'Do not use deep just to filter by a relation id; use a normal relation filter instead.',
+          'Do not use deep for counts; use count_records or meta=filterCount/totalCount.',
+          'Do not deep-load large child collections without an explicit limit/page. For heavy screens, fetch the parent list first, then load the selected child collection separately with pagination.',
           'Use query_table deep for normal MCP reads; use test_rest_endpoint only when you need a custom raw URL or route behavior test.',
           'deep keys must be relation property names.',
           'Allowed deep options are fields, filter, sort, limit, page, and deep.',

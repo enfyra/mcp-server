@@ -310,6 +310,16 @@ test('column rule examples use the current value contract', () => {
   assert.doesNotMatch(examples, /ruleConfig: JSON\.stringify/);
 });
 
+test('query examples distinguish relation fields from deep relation query options', () => {
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  assert.match(examples, /Use fields with dotted relation paths when you only need scalar fields from related records/);
+  assert.match(examples, /Use deep when relation loading needs query options such as filter, sort, limit, page, or nested deep/);
+  assert.match(examples, /Do not use deep just to filter by a relation id/);
+  assert.match(instructions, /Use dotted relation fields such as `owner\.email`/);
+  assert.match(instructions, /Use `deep` when relation loading needs query options/);
+});
+
 test('normalizeRelationForTablePatch rejects physical FK column inputs', () => {
   assert.throws(
     () => normalizeRelationForTablePatch({
