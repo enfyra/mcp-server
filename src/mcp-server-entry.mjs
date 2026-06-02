@@ -258,6 +258,23 @@ function parseJsonArg(value, fallback = undefined) {
   return JSON.parse(value);
 }
 
+async function reloadRoutesResult() {
+  try {
+    const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' });
+    return {
+      attempted: true,
+      succeeded: true,
+      result,
+    };
+  } catch (error) {
+    return {
+      attempted: true,
+      succeeded: false,
+      error: error?.message || String(error),
+    };
+  }
+}
+
 function normalizeRestPath(path) {
   if (!path) return '/';
   if (/^https?:\/\//i.test(path)) {
@@ -698,15 +715,17 @@ server.tool(
     const payload = {
       transformer: {
         rule: 'Dynamic server scripts are transformed before sandbox execution. Macros expand to $ctx paths; comments are not transformed.',
-        preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use @BODY/@QUERY/@PARAMS/@USER/@REPOS/@CACHE/@HELPERS/@SOCKET/@TRIGGER/@DATA/@ERROR/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
+        preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use @BODY/@QUERY/@PARAMS/@USER/@REPOS/@CACHE/@HELPERS/@STORAGE/@SOCKET/@TRIGGER/@DATA/@ERROR/@ENV/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
         coreMacros: {
           '@BODY': '$ctx.$body',
           '@QUERY': '$ctx.$query',
           '@PARAMS': '$ctx.$params',
           '@USER': '$ctx.$user',
+          '@ENV': '$ctx.$env',
           '@REPOS': '$ctx.$repos',
           '@CACHE': '$ctx.$cache',
           '@HELPERS': '$ctx.$helpers',
+          '@STORAGE': '$ctx.$storage',
           '@SOCKET': '$ctx.$socket',
           '@DATA': '$ctx.$data',
           '@STATUS': '$ctx.$statusCode',
@@ -731,20 +750,21 @@ server.tool(
         throws: '@THROW400 through @THROW503 and @THROW map to $ctx.$throw helpers.',
         helpers: {
           crypto: '$ctx.$helpers.$crypto exposes bounded runtime crypto helpers: randomUUID(), randomBytes(size, encoding), sha256(value, encoding), hmacSha256(value, secret, encoding), and generateSshKeyPair(comment). Use generateSshKeyPair for SSH key material. Do not use legacy $ctx.$helpers.$ssh.',
+          files: '$ctx.$storage.$upload and $ctx.$storage.$update accept file: @UPLOADED_FILE for request uploads and stream from the server temp file path. $ctx.$storage.$registerFile creates a file_definition record for an object that already exists in storage without uploading bytes. Use buffer only for small generated/transformed files; do not use @UPLOADED_FILE.buffer.',
         },
         env: '$ctx.$env exposes a sanitized process env snapshot with exact sensitive keys removed: DB_URI, DB_REPLICA_URIS, REDIS_URI, SECRET_KEY, and ADMIN_PASSWORD. Store app secrets in unpublished isEncrypted fields instead of reading them from $env.',
       },
       contexts: {
         preHook: {
           runs: 'Before handler.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@CACHE', '@HELPERS', '@THROW*', '@SOCKET emit helpers'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@CACHE', '@HELPERS', '@STORAGE', '@THROW*', '@SOCKET emit helpers'],
           queryContract: '@QUERY.filter is initialized as an object. When adding RLS/scope filters in pre-hooks, merge directly with _and; do not add defensive type checks around @QUERY.filter.',
           rlsPattern: 'For relation-scoped reads, mutate @QUERY.filter instead of returning data. Example: const incomingFilter = @QUERY.filter; const scope = { memberships: { member: { id: { _eq: @USER.id } } } }; @QUERY.filter = Object.keys(incomingFilter).length ? { _and: [incomingFilter, scope] } : scope;',
           returnBehavior: 'Returning a non-undefined value skips handler and becomes response data.',
         },
         handler: {
           runs: 'Main route logic, or canonical CRUD if no handler overrides.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS.main', '@REPOS.secure', '@CACHE', '@HELPERS', '@PKGS', '@SOCKET emit helpers', '@TRIGGER'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main', '@REPOS.secure', '@CACHE', '@HELPERS', '@STORAGE', '@PKGS', '@SOCKET emit helpers', '@TRIGGER'],
           returnBehavior: 'Return value becomes response body unless post-hook changes it.',
         },
         postHook: {
@@ -754,7 +774,7 @@ server.tool(
         },
         flowStep: {
           runs: 'Inside flow execution or admin flow step test.',
-          data: ['@FLOW_PAYLOAD', '@FLOW_LAST', '@FLOW', '@FLOW_META', '#table_name', '@CACHE', '@HELPERS', '@SOCKET', '@TRIGGER'],
+          data: ['@FLOW_PAYLOAD', '@FLOW_LAST', '@FLOW', '@FLOW_META', '#table_name', '@CACHE', '@HELPERS', '@STORAGE', '@SOCKET', '@TRIGGER'],
           resultBehavior: 'Step return value is injected into @FLOW.<step.key> and @FLOW_LAST.',
           branching: 'Condition steps use JavaScript truthy/falsy result; child branch is true/false.',
         },
@@ -788,7 +808,7 @@ server.tool(
         },
         socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast, but cannot reply/join/leave/disconnect because there is no bound socket.',
         packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
-        files: 'Upload helpers are on $helpers; raw create_record on file_definition is not equivalent to multipart upload/storage rollback.',
+        files: 'Upload helpers are on $storage; raw create_record on file_definition is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the file_definition record without uploading bytes. Use buffer only for small generated files.',
       },
       adminTesting: {
         flowStep: 'Use test_flow_step or run_admin_test(kind=flow_step).',
@@ -846,15 +866,23 @@ server.tool('query_table', 'Query any route-backed table. Default response is mi
   page: z.number().optional().describe('Page number (default: 1)'),
   limit: z.number().optional().describe('Items per page. Default: 10. Use count_records for counts.'),
   fields: z.array(z.string()).optional().describe('Fields to select. If omitted, MCP selects only the table primary key to avoid oversized responses.'),
-}, async ({ tableName, filter, sort, page, limit, fields }) => {
+  meta: z.string().optional().describe('Optional REST meta request, e.g. "totalCount", "filterCount", or aggregate modes supported by the route. Use count_records for simple counts.'),
+  deep: z.string().optional().describe('Optional deep relation fetch object as JSON string. Keys must be relation propertyName values.'),
+  aggregate: z.string().optional().describe('Optional aggregate object as JSON string, keyed by real fields/relations. Results are returned in response.meta.aggregate when supported.'),
+}, async ({ tableName, filter, sort, page, limit, fields, meta, deep, aggregate }) => {
   validateTableName(tableName);
   validateFilter(filter);
+  parseJsonArg(deep, undefined);
+  parseJsonArg(aggregate, undefined);
 
   const queryParams = new URLSearchParams();
   const selectedFields = fields && fields.length > 0 ? fields : [await getPrimaryFieldName(tableName)];
   if (filter) queryParams.set('filter', filter);
   if (sort) queryParams.set('sort', sort);
   if (page) queryParams.set('page', String(page));
+  if (meta) queryParams.set('meta', meta);
+  if (deep) queryParams.set('deep', deep);
+  if (aggregate) queryParams.set('aggregate', aggregate);
   queryParams.set('limit', String(limit || 10));
   queryParams.set('fields', selectedFields.join(','));
 
@@ -866,6 +894,11 @@ server.tool('query_table', 'Query any route-backed table. Default response is mi
     tableName,
     fields: selectedFields,
     limit: limit || 10,
+    queryOptions: {
+      meta: meta || null,
+      deep: deep ? parseJsonArg(deep, null) : null,
+      aggregate: aggregate ? parseJsonArg(aggregate, null) : null,
+    },
     minimalDefaultApplied: !(fields && fields.length > 0),
     meta: result?.meta,
     data: result?.data || [],
@@ -1007,6 +1040,49 @@ server.tool('update_record', 'Update an existing record by ID using PATCH. The t
     scriptValidation: prepared.scriptValidation,
   }, null, 2) }] };
 });
+
+server.tool(
+  'update_script_source',
+  [
+    'Update sourceCode on a script-backed record without forcing the caller to JSON-escape long code.',
+    'Use this for flow_step_definition, route_handler_definition, pre_hook_definition, post_hook_definition, websocket_event_definition, websocket_definition, gql_definition, and bootstrap_script_definition.',
+    'The tool validates sourceCode through /admin/script/validate before saving and never accepts compiledCode.',
+  ].join(' '),
+  {
+    tableName: z.enum([
+      'route_handler_definition',
+      'pre_hook_definition',
+      'post_hook_definition',
+      'flow_step_definition',
+      'websocket_event_definition',
+      'websocket_definition',
+      'gql_definition',
+      'bootstrap_script_definition',
+    ]).describe('Script-backed table to update'),
+    id: z.string().describe('Record ID to update'),
+    sourceCode: z.string().describe('Editable script sourceCode. Pass the raw code string; do not JSON-escape it yourself.'),
+    scriptLanguage: z.string().optional().default('javascript').describe('Script language, usually javascript or typescript'),
+  },
+  async ({ tableName, id, sourceCode, scriptLanguage }) => {
+    validateTableName(tableName);
+    const prepared = await prepareGenericMutation(
+      tableName,
+      JSON.stringify({ sourceCode, scriptLanguage }),
+    );
+    const result = await fetchAPI(
+      ENFYRA_API_URL,
+      `/${tableName}/${encodeURIComponent(String(id))}`,
+      { method: 'PATCH', body: JSON.stringify(prepared.payload) },
+    );
+    return { content: [{ type: 'text', text: JSON.stringify({
+      ...summarizeMutationResult(result, 'updated_script_source', tableName),
+      id,
+      sourceLength: sourceCode.length,
+      scriptLanguage,
+      scriptValidation: prepared.scriptValidation,
+    }, null, 2) }] };
+  },
+);
 
 server.tool('delete_record', 'Delete a record by ID', {
   tableName: z.string().describe('Table name'),
@@ -1695,7 +1771,7 @@ server.tool(
       body: JSON.stringify(body),
     });
 
-    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+    const routeReload = await reloadRoutesResult();
 
     const created = firstDataRecord(result);
     return { content: [{ type: 'text', text: JSON.stringify({
@@ -1707,7 +1783,7 @@ server.tool(
         availableMethods: methods,
         publishedMethods: publishedMethods || [],
       },
-      routesReloaded: true,
+      routeReload,
       next: `Use create_handler({ routeId: ${JSON.stringify(getId(created))}, method: "GET", sourceCode }) for custom code. Create extra method_definition.name rows first for custom methods such as PUT.`,
     }, null, 2) }] };
   },
@@ -1764,13 +1840,13 @@ server.tool(
       });
     }
 
-    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+    const routeReload = await reloadRoutesResult();
 
     return { content: [{ type: 'text', text: JSON.stringify({
       action: 'created',
       handlers: results,
       scriptValidation,
-      routesReloaded: true,
+      routeReload,
       detailHint: 'Use inspect_route with the same routeId/path to inspect saved handlers.',
     }, null, 2) }] };
   },
@@ -1815,7 +1891,7 @@ server.tool(
       }),
     });
 
-    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+    const routeReload = await reloadRoutesResult();
 
     const created = firstDataRecord(result);
     return { content: [{ type: 'text', text: JSON.stringify({
@@ -1825,7 +1901,7 @@ server.tool(
       name,
       routeId,
       scriptValidation,
-      routesReloaded: true,
+      routeReload,
     }, null, 2) }] };
   },
 );
@@ -1869,7 +1945,7 @@ server.tool(
       }),
     });
 
-    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
+    const routeReload = await reloadRoutesResult();
 
     const created = firstDataRecord(result);
     return { content: [{ type: 'text', text: JSON.stringify({
@@ -1879,7 +1955,7 @@ server.tool(
       name,
       routeId,
       scriptValidation,
-      routesReloaded: true,
+      routeReload,
     }, null, 2) }] };
   },
 );
@@ -2004,8 +2080,14 @@ server.tool(
       method: 'POST',
       body: JSON.stringify(body),
     });
-    await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
-    return { content: [{ type: 'text', text: `Route permission created for ${route.path}. Routes reloaded.\n${JSON.stringify(result, null, 2)}` }] };
+    const routeReload = await reloadRoutesResult();
+    return { content: [{ type: 'text', text: JSON.stringify({
+      action: 'created',
+      kind: 'route_permission',
+      route: route.path,
+      routeReload,
+      result,
+    }, null, 2) }] };
   },
 );
 
@@ -2142,7 +2224,10 @@ server.tool('search_logs', 'Search for ERROR or WARN logs across recent log file
 }, async ({ level, keyword, limit }) => {
   const logFilesResult = await fetchAPI(ENFYRA_API_URL, '/logs');
   const logFiles = logFilesResult.files || [];
-  const recentFiles = logFiles.filter(f => f.name.includes('app-') || f.name.includes('error-'));
+  const recentFiles = logFiles.filter((file) => {
+    const name = file?.name || '';
+    return /^app[.-]/.test(name) || /^error[.-]/.test(name);
+  });
   const results = [];
   for (const file of recentFiles.slice(0, 3)) {
     try {

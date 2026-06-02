@@ -293,28 +293,40 @@ GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
       },
       {
         name: 'Count without loading all rows',
-        code: `GET /enfyra/chat_message_read?fields=id&limit=1&meta=filterCount&filter={
-  "member": { "id": { "_eq": "<currentUserId>" } },
-  "isRead": { "_eq": false }
-}`,
+        code: `query_table({
+  tableName: "chat_message_read",
+  fields: ["id"],
+  limit: 1,
+  meta: "filterCount",
+  filter: JSON.stringify({
+    member: { id: { _eq: "<currentUserId>" } },
+    isRead: { _eq: false }
+  })
+})`,
         notes: [
           'Use meta=totalCount with no filter and meta=filterCount with a filter.',
+          'MCP count_records wraps this pattern for simple counts.',
           'Do not fetch all rows only to count them.',
         ],
       },
       {
         name: 'Deep relation query',
-        code: `GET /enfyra/order?fields=id,total,customer&deep={
-  "customer": { "fields": "id,email,displayName" },
-  "items": {
-    "fields": "id,quantity,product",
-    "limit": 20,
-    "deep": {
-      "product": { "fields": "id,name,price" }
+        code: `query_table({
+  tableName: "order",
+  fields: ["id", "total", "customer"],
+  deep: JSON.stringify({
+    customer: { fields: "id,email,displayName" },
+    items: {
+      fields: "id,quantity,product",
+      limit: 20,
+      deep: {
+        product: { fields: "id,name,price" }
+      }
     }
-  }
-}`,
+  })
+})`,
         notes: [
+          'Use query_table deep for normal MCP reads; use test_rest_endpoint only when you need a custom raw URL or route behavior test.',
           'deep keys must be relation property names.',
           'Allowed deep options are fields, filter, sort, limit, page, and deep.',
           'Do not invent deep keys like members unless members is a relation on that table.',
@@ -512,11 +524,12 @@ return @DATA\`
   tableName: "user_definition",
   columnName: "email",
   ruleType: "format",
-  ruleConfig: JSON.stringify({ format: "email" }),
+  value: JSON.stringify({ v: "email" }),
   message: "Please enter a valid email address"
 })`,
         notes: [
           'Column rules validate canonical POST/PATCH body payloads.',
+          'The rule value payload uses the { v: ... } shape; do not pass ruleConfig.',
           'Use column rules before writing custom validation code when the rule is simple.',
         ],
       },
@@ -767,16 +780,24 @@ const uploaded = await fetch("/enfyra/files/upload", {
       },
       {
         name: 'Use uploaded file in handler',
-        code: `const file = $ctx.$uploadedFile
+        code: `const file = @UPLOADED_FILE
 if (!file) @THROW400("File is required")
 
-return {
-  filename: file.originalname,
-  mimetype: file.mimetype,
-  size: file.size
-}`,
+const saved = await @STORAGE.$upload({
+  file,
+  storageConfig: @BODY.storageConfig,
+  folder: @BODY.folder,
+  title: @BODY.title,
+  description: @BODY.description
+})
+
+return saved`,
         notes: [
           'Use file-specific context only in upload-capable routes.',
+          'For request uploads, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from the temp file path.',
+          'Use @STORAGE.$registerFile when an external process already uploaded the object and the script only needs to create the file_definition record.',
+          'Do not read @UPLOADED_FILE.path into a Buffer and do not generate examples using @UPLOADED_FILE.buffer.',
+          'Use buffer only for small generated or transformed files, such as image thumbnails.',
         ],
       },
     ],

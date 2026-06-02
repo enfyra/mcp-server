@@ -3,7 +3,7 @@
 MCP server for managing Enfyra instances from **Codex**, **Claude Code**, **Cursor**, and other MCP-compatible clients. All operations go through Enfyra's REST API.
 
 
-**LLM rules (REST, GraphQL, auth, URL, mutation `create_{tableName}`, etc.):** not in this README — see **`src/lib/mcp-instructions.js`** (content sent via MCP `instructions`), **`src/lib/mcp-examples.js`** (concrete examples loaded through `get_enfyra_examples`), and tool descriptions in **`src/index.mjs`**. This README only covers **MCP installation and configuration** for users/devs.
+**LLM rules (REST, GraphQL, auth, URL, mutation `create_{tableName}`, etc.):** not in this README — see **`src/lib/mcp-instructions.js`** (content sent via MCP `instructions`), **`src/lib/mcp-examples.js`** (concrete examples loaded through `get_enfyra_examples`), and tool descriptions in **`src/mcp-server-entry.mjs`**. This README only covers **MCP installation and configuration** for users/devs.
 
 **Official docs:** [Claude Code MCP](https://docs.anthropic.com/en/docs/claude-code/mcp) · [Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings) · [Cursor MCP (`mcp.json`)](https://cursor.com/docs/context/mcp)
 
@@ -185,6 +185,10 @@ Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env 
 `ENFYRA_API_TOKEN` is a long-lived programmatic token, not a JWT. MCP must never send it directly as `Authorization: Bearer <token>` to REST tools. The MCP client first calls `POST {ENFYRA_API_URL}/auth/token/exchange` with `{ "apiToken": ENFYRA_API_TOKEN }`, caches the returned `accessToken`, and uses that JWT as the Bearer token for subsequent requests.
 
 Schema and script tools include safety guards for LLM callers: generic record mutations validate request fields against live metadata, script-backed records must validate `sourceCode` before save through `/admin/script/validate` and fail closed if validation is unavailable, relation metadata rejects physical FK/junction inputs, custom routes reject `mainTableId` unless the path is the canonical table route, schema tools serialize table/column/relation changes, and destructive deletes require `confirm=true` after returning a preview.
+
+Quick checklist for a new LLM using Enfyra MCP: discover the live system first, inspect the specific table/route, load the matching example category, mutate with explicit fields and relation property names, validate or test scripts/routes before relying on them, re-read the saved row when mutation output is summarized, and preview destructive operations before confirming.
+
+Use `update_script_source` when updating existing long script-backed records such as `flow_step_definition`, `route_handler_definition`, hook tables, websocket scripts, GraphQL scripts, or bootstrap scripts. It accepts raw `sourceCode` directly, validates the source, and saves `sourceCode`/`scriptLanguage` without requiring the caller to manually JSON-escape the full script. Use generic `update_record` for small record patches or patches that include non-script metadata fields.
 
 For route contracts that intentionally keep workflow fields out of request bodies, generic `create_record`, `update_record`, and `delete_record` accept optional `queryParams` as a JSON object string. For example, a renewal workflow can keep `expires_at=YYYY-MM-DD` in the URL query while `validateBody` remains enabled for the table body.
 

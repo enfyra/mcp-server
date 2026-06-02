@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import { initAuth, resetTokens } from '../src/lib/auth.js';
 import { fetchAPI } from '../src/lib/fetch.js';
@@ -272,6 +273,41 @@ test('prepareRecordMutation fails closed when script validation endpoint is unav
     }),
     /Script validation failed before save/
   );
+});
+
+test('mcp server exposes update_script_source for raw source updates', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  assert.match(entry, /server\.tool\(\s*['"]update_script_source['"]/);
+  assert.match(entry, /JSON\.stringify\(\{ sourceCode, scriptLanguage \}\)/);
+  assert.match(entry, /updated_script_source/);
+});
+
+test('mcp log search matches dashed and dotted app log filenames', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  assert.match(entry, /\^app\[\.-\]/);
+  assert.match(entry, /\^error\[\.-\]/);
+});
+
+test('query_table supports deep meta and aggregate query options', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  assert.match(entry, /meta: z\.string\(\)\.optional\(\)/);
+  assert.match(entry, /deep: z\.string\(\)\.optional\(\)/);
+  assert.match(entry, /aggregate: z\.string\(\)\.optional\(\)/);
+  assert.match(entry, /queryParams\.set\('deep', deep\)/);
+  assert.match(entry, /queryParams\.set\('aggregate', aggregate\)/);
+});
+
+test('route creation tools report real route reload status instead of a hardcoded success flag', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  assert.match(entry, /async function reloadRoutesResult\(\)/);
+  assert.match(entry, /routeReload/);
+  assert.doesNotMatch(entry, /routesReloaded:\s*true/);
+});
+
+test('column rule examples use the current value contract', () => {
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  assert.match(examples, /value: JSON\.stringify\(\{ v: "email" \}\)/);
+  assert.doesNotMatch(examples, /ruleConfig: JSON\.stringify/);
 });
 
 test('normalizeRelationForTablePatch rejects physical FK column inputs', () => {
