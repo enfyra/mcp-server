@@ -654,7 +654,7 @@ server.tool(
       queryParams: {
         fields: 'Comma-separated scalar/relation fields. Relations use relation propertyName, not physical FK column names.',
         filter: 'JSON object using operators above. Relation filters use nested relation propertyName objects.',
-        sort: 'Field name or -field. Dotted relation sort is constrained by relation type and deep validation.',
+        sort: 'Local field or -field. For direct one-to-many/many-to-many parent ordering, use _count(relation), _max(relation.field), or _min(relation.field); raw dotted to-many sort is invalid.',
         page: '1-based page.',
         limit: 'Page size.',
         meta: 'Request metadata/counts where supported.',
@@ -668,6 +668,7 @@ server.tool(
           'Unknown deep entry keys are invalid.',
           'limit on many-to-one/one-to-one relations is invalid.',
           'Dotted sort through one-to-many/many-to-many is invalid.',
+          'Deep sort orders rows inside the related collection only; use root aggregate sort helpers when parent rows must be ordered by child values.',
           'Nested deep is recursively validated.',
           'Field permissions may rewrite filters/sorts and sanitize post-query results.',
         ],

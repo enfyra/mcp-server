@@ -65,6 +65,95 @@ const me = await fetch("/enfyra/me", {
         ],
       },
       {
+        name: 'Nuxt client plugin for authenticated realtime',
+        code: `// composables/useRealtime.ts
+import { io, type Socket } from "socket.io-client"
+import { readonly, ref, shallowRef } from "vue"
+
+const socket = shallowRef<Socket | null>(null)
+const isConnected = ref(false)
+
+export function useRealtime() {
+  function connect() {
+    if (import.meta.server) return null
+    if (socket.value) return socket.value
+
+    const nextSocket = io("/chat", {
+      path: "/socket.io",
+      withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 30000
+    })
+
+    nextSocket.on("connect", () => {
+      isConnected.value = true
+    })
+    nextSocket.on("disconnect", () => {
+      isConnected.value = false
+    })
+
+    socket.value = nextSocket
+    return nextSocket
+  }
+
+  function disconnect() {
+    if (!socket.value) return
+    socket.value.disconnect()
+    socket.value = null
+    isConnected.value = false
+  }
+
+  function onMessage(handler) {
+    const activeSocket = socket.value ?? connect()
+    if (!activeSocket) return () => {}
+    activeSocket.on("chat:message", handler)
+    return () => activeSocket.off("chat:message", handler)
+  }
+
+  return { socket, isConnected: readonly(isConnected), connect, disconnect, onMessage }
+}
+
+// plugins/realtime.client.ts
+import { watch } from "vue"
+
+export default defineNuxtPlugin(() => {
+  const { me } = useAuth()
+  const realtime = useRealtime()
+
+  watch(
+    me,
+    user => {
+      if (user) realtime.connect()
+      else realtime.disconnect()
+    },
+    { immediate: true }
+  )
+})
+
+// pages/chat.vue
+const realtime = useRealtime()
+let stopRealtime = () => {}
+
+onMounted(() => {
+  stopRealtime = realtime.onMessage(event => {
+    // Update local UI state, then debounce REST refresh if full state is needed.
+  })
+})
+
+onUnmounted(() => {
+  stopRealtime()
+})`,
+        notes: [
+          'Create the socket once in a client-only plugin after auth has resolved; pages should not own the initial connection lifecycle.',
+          'Use the websocket namespace path from live metadata, such as /chat, and keep the transport path as /socket.io.',
+          'Proxy /socket.io/** to the Enfyra app bridge /ws/socket.io/** so cookies are same-origin.',
+          'Route components add event listeners and remove them on unmount; they can optimistically update local state and debounce REST refreshes.',
+          'Disconnect the singleton socket when the current user/session clears.',
+        ],
+      },
+      {
         name: 'Google OAuth button',
         code: `const redirect = new URL("/chat", window.location.origin)
 const url = new URL("/enfyra/auth/google", window.location.origin)
@@ -354,6 +443,39 @@ GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
           'deep keys must be relation property names.',
           'Allowed deep options are fields, filter, sort, limit, page, and deep.',
           'Do not invent deep keys like members unless members is a relation on that table.',
+        ],
+      },
+      {
+        name: 'Sort parent rows by child relation aggregates',
+        code: `query_table({
+  tableName: "cloud_support_tickets",
+  fields: [
+    "id",
+    "subject",
+    "status",
+    "project.id",
+    "project.name"
+  ],
+  sort: "-_max(messages.createdAt),-createdAt",
+  limit: 25,
+  deep: JSON.stringify({
+    messages: {
+      fields: "id,authorKind,body,createdAt",
+      sort: "-createdAt",
+      limit: 3
+    }
+  })
+})
+
+// Other parent aggregate sorts:
+// sort=-_count(messages)
+// sort=_min(messages.createdAt)`,
+        notes: [
+          'Use _max(relation.field) for latest-child ordering, _min(relation.field) for earliest-child ordering, and _count(relation) for child-count ordering.',
+          'Aggregate sort helpers only work on direct one-to-many or many-to-many list relations.',
+          'The aggregate field must be a real non-encrypted scalar field on the related table.',
+          'Do not use raw sort=-messages.createdAt for parent ordering; it is ambiguous and rejected.',
+          'deep.messages.sort only orders the loaded message rows inside each ticket, so keep parent sort and child pagination as separate concerns.',
         ],
       },
       {
@@ -891,6 +1013,66 @@ create_extension({
           'Page extensions should be full-bleed by default and responsive from the first version.',
           'The extension root is already inside eApp main; do not add root-level page padding.',
           'After saving, open eApp tabs should update through the server/eApp realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',
+        ],
+      },
+      {
+        name: 'Compose page extensions from widgets',
+        code: `// Create reusable/bulky sections as widget extension records first.
+const reportStatusWidgetCode = \`
+<template>
+  <section class="rounded-xl border border-default bg-default p-4">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <p class="text-sm text-muted">Total reports</p>
+        <p class="mt-2 text-2xl font-semibold">{{ total }}</p>
+        <p class="mt-1 text-xs text-muted">{{ latestLabel }}</p>
+      </div>
+      <UButton type="button" color="neutral" variant="outline" @click.stop.prevent="emit('refresh')">Refresh</UButton>
+    </div>
+    <UButton v-if="hasLatest" type="button" class="mt-3" color="primary" variant="soft" @click.stop.prevent="openLatest">Open latest</UButton>
+  </section>
+</template>
+
+<script setup>
+const props = defineProps({
+  total: { type: Number, default: 0 },
+  rows: { type: Array, default: () => [] },
+  openDetails: { type: Function, default: null }
+})
+const emit = defineEmits(['refresh'])
+const hasLatest = computed(() => props.rows.length > 0)
+const latestLabel = computed(() => hasLatest.value ? 'Latest: ' + (props.rows[0]?.title || props.rows[0]?.id || 'Untitled') : 'No reports yet')
+function openLatest() {
+  if (typeof props.openDetails === 'function' && props.rows[0]) props.openDetails(props.rows[0])
+}
+</script>
+\`
+
+create_extension({
+  type: "widget",
+  name: "ReportStatusWidget",
+  description: "Report status summary cards",
+  code: reportStatusWidgetCode,
+  isEnabled: true
+})
+
+// Read the created widget record id, then embed it from the page extension.
+create_extension({
+  type: "page",
+  name: "ReportsPage",
+  menuId: "<reports-menu-id>",
+  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><Widget :id=\\"<report-status-widget-id>\\" :total=\\"totalReports\\" :rows=\\"reportRows\\" :open-details=\\"openReportDetails\\" @refresh=\\"refresh\\" /><Widget :id=\\"<report-table-widget-id>\\" :rows=\\"reportRows\\" @refresh=\\"refresh\\" /></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); const totalReports = ref(0); const reportRows = ref([]); function refresh() {} function openReportDetails(row) { navigateTo('/data/report_definition?filter=' + encodeURIComponent(JSON.stringify({ id: { _eq: row.id } }))) }</script>",
+  isEnabled: true
+})`,
+        notes: [
+          'Use widgets for bulky or reusable sections such as operation panels, timelines, tables, sidebars, and status cards.',
+          'Embed widgets by their numeric extension_definition id, not by extensionId/name.',
+          'Props and listeners pass through the Widget wrapper. Widget defineProps values update reactively when the parent refs/computed values change.',
+          'Use kebab-case in the parent template for camelCase widget props, for example :open-details maps to openDetails.',
+          'Do not mutate widget props. Use computed for derived display state, and use watch only when mirroring a prop into local editable draft state.',
+          'Prefer defineEmits for child-to-parent requests such as refresh. Use callback props only for parent-owned modal/drawer openers or imperative navigation.',
+          'Keep PermissionGate and type="button" plus @click.stop.prevent inside action widgets; server permissions still enforce the real boundary.',
+          'eApp batch-fetches widget metadata requested in the same tick and caches loaded widgets, so render Widget components directly instead of manually fetching widget code.',
         ],
       },
       {
