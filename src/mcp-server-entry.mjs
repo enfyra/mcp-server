@@ -513,6 +513,8 @@ function scriptRecordLabel(tableName, record) {
   const method = record.method?.name || record.method?.method || null;
   const route = record.route?.path || null;
   const flow = record.flow?.name || null;
+  const gateway = record.gateway?.path || null;
+  const gqlTable = record.table?.name || null;
   return {
     tableName,
     id: getId(record),
@@ -520,7 +522,24 @@ function scriptRecordLabel(tableName, record) {
     route,
     method,
     flow,
+    gateway,
+    gqlTable,
   };
+}
+
+function scriptTraceFields(tableName) {
+  const common = 'id,_id,name,key,eventName,sourceCode,handlerScript,connectionHandlerScript,code,scriptLanguage';
+  const byTable = {
+    route_handler_definition: `${common},route.id,route.path,method.id,method.name`,
+    pre_hook_definition: `${common},route.id,route.path,methods.id,methods.name,isGlobal`,
+    post_hook_definition: `${common},route.id,route.path,methods.id,methods.name,isGlobal`,
+    flow_step_definition: `${common},flow.id,flow.name`,
+    websocket_event_definition: `${common},gateway.id,gateway.path`,
+    websocket_definition: `${common},path`,
+    gql_definition: `${common},table.id,table.name`,
+    bootstrap_script_definition: common,
+  };
+  return byTable[tableName] || '*';
 }
 
 async function findMethodRecordByName(method) {
@@ -1874,7 +1893,11 @@ server.tool(
     const sourceContains = (record) => getRecordSource(record).sourceCode.toLowerCase().includes(lower);
 
     const scriptTableResults = await Promise.all(SCRIPT_BACKED_TABLES.map(async (tableName) => {
-      const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}?limit=1000&fields=*`).catch((error) => ({ error }));
+      const fields = scriptTraceFields(tableName);
+      let result = await fetchAPI(ENFYRA_API_URL, `/${tableName}?limit=1000&fields=${encodeURIComponent(fields)}`).catch((error) => ({ error }));
+      if (result?.error && fields !== '*') {
+        result = await fetchAPI(ENFYRA_API_URL, `/${tableName}?limit=1000&fields=*`).catch((error) => ({ error }));
+      }
       return { tableName, records: unwrapData(result), error: result?.error?.message || null };
     }));
     const scriptMatches = [];

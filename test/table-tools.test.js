@@ -459,6 +459,9 @@ test('mcp server exposes metadata usage tracing for production script edits', ()
   assert.match(entry, /server\.tool\(\s*['"]trace_metadata_usage['"]/);
   assert.match(entry, /scriptReadErrors/);
   assert.match(entry, /get_script_source/);
+  assert.match(entry, /route\.path/);
+  assert.match(entry, /flow\.name/);
+  assert.match(entry, /gateway\.path/);
 });
 
 test('test_flow_step uses unified admin test runner', () => {
