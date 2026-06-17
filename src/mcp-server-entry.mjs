@@ -8,6 +8,7 @@ config();
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 
 // Configuration
 const ENFYRA_API_URL = process.env.ENFYRA_API_URL || 'http://localhost:3000/api';
@@ -21,6 +22,17 @@ import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
 import { registerTableTools } from './lib/table-tools.js';
 import { prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
 import { validateMainTableRoutePath } from './lib/route-guards.js';
+import {
+  findRoutePermission,
+  mergeMethodNames,
+  normalizeMethodNames,
+  resolveRoleByNameOrId,
+  routeAvailableMethodNames,
+  routePublicMethodNames,
+  summarizeRouteAccess,
+  summarizeRoutePermission,
+  validateMethodsForRoute,
+} from './lib/route-permission-tools.js';
 
 // Initialize auth module
 initAuth(ENFYRA_API_URL, ENFYRA_API_TOKEN);
@@ -64,7 +76,7 @@ const CAPABILITY_AREAS = [
   {
     area: 'Flows',
     tables: ['flow_definition', 'flow_step_definition', 'flow_execution_definition'],
-    workflow: 'Create flows and steps via CRUD, test steps with test_flow_step/run_admin_test, trigger with trigger_flow.',
+    workflow: 'Create flows as small operation-sized steps via CRUD, test steps with test_flow_step/run_admin_test, trigger with trigger_flow. Split oversized scripts instead of adding more work to one step.',
   },
   {
     area: 'Extensions, menus, packages',
@@ -114,6 +126,24 @@ const FIELD_PERMISSION_CONDITION_OPERATORS = [
   '_and',
   '_or',
   '_not',
+];
+
+const SCRIPT_BACKED_TABLES = [
+  'route_handler_definition',
+  'pre_hook_definition',
+  'post_hook_definition',
+  'flow_step_definition',
+  'websocket_event_definition',
+  'websocket_definition',
+  'gql_definition',
+  'bootstrap_script_definition',
+];
+
+const SCRIPT_SOURCE_FIELDS = [
+  'sourceCode',
+  'handlerScript',
+  'connectionHandlerScript',
+  'code',
 ];
 
 function normalizeTables(metadata) {
@@ -198,7 +228,7 @@ function summarizeRoutes(routesResult) {
     path: route.path,
     mainTable: route.mainTable?.name || route.mainTableName || null,
     availableMethods: (route.availableMethods || []).map((method) => method.name).filter(Boolean),
-    publishedMethods: (route.publishedMethods || []).map((method) => method.name).filter(Boolean),
+    publicMethods: (route.publicMethods || []).map((method) => method.name).filter(Boolean),
     isEnabled: route.isEnabled,
   }));
 }
@@ -392,6 +422,107 @@ function normalizeHexColorInput(value, fieldName) {
   return color;
 }
 
+function sha256(value) {
+  return createHash('sha256').update(String(value), 'utf8').digest('hex');
+}
+
+function getScriptSourceField(record) {
+  for (const field of SCRIPT_SOURCE_FIELDS) {
+    if (typeof record?.[field] === 'string') return field;
+  }
+  if (record?.config && typeof record.config === 'object' && typeof record.config.code === 'string') {
+    return 'config.code';
+  }
+  return null;
+}
+
+function getRecordSource(record) {
+  const field = getScriptSourceField(record);
+  if (!field) return { field: null, sourceCode: '' };
+  if (field === 'config.code') return { field, sourceCode: record.config.code };
+  return { field, sourceCode: record[field] };
+}
+
+async function fetchRecordByPrimaryKey(tableName, id, fields = '*') {
+  const primaryKey = await getPrimaryFieldName(tableName);
+  const query = new URLSearchParams({
+    filter: JSON.stringify({ [primaryKey]: { _eq: id } }),
+    limit: '1',
+    fields,
+  });
+  const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${query.toString()}`);
+  const record = unwrapData(result)[0] || null;
+  if (!record) throw new Error(`${tableName} record ${id} was not found.`);
+  return { primaryKey, record };
+}
+
+async function fetchScriptRecord(tableName, id) {
+  validateTableName(tableName);
+  if (!SCRIPT_BACKED_TABLES.includes(tableName)) {
+    throw new Error(`Unsupported script-backed table "${tableName}". Supported: ${SCRIPT_BACKED_TABLES.join(', ')}`);
+  }
+  const { primaryKey, record } = await fetchRecordByPrimaryKey(tableName, id, '*');
+  const { field, sourceCode } = getRecordSource(record);
+  if (!field) {
+    throw new Error(`${tableName} record ${id} does not expose a known editable source field.`);
+  }
+  return { primaryKey, record, sourceField: field, sourceCode };
+}
+
+function countOccurrences(source, needle) {
+  if (!needle) return 0;
+  let count = 0;
+  let index = 0;
+  while (true) {
+    index = source.indexOf(needle, index);
+    if (index === -1) return count;
+    count += 1;
+    index += needle.length;
+  }
+}
+
+function replaceOccurrence(source, oldText, newText, mode) {
+  const occurrences = countOccurrences(source, oldText);
+  if (occurrences === 0) {
+    throw new Error('oldText was not found in the current source.');
+  }
+  if (mode === 'first') {
+    return {
+      occurrences,
+      patched: source.replace(oldText, newText),
+      replaced: 1,
+    };
+  }
+  return {
+    occurrences,
+    patched: source.split(oldText).join(newText),
+    replaced: occurrences,
+  };
+}
+
+function sourcePreview(source, aroundText) {
+  if (!aroundText) return source.slice(0, 1200);
+  const index = source.indexOf(aroundText);
+  if (index === -1) return source.slice(0, 1200);
+  const start = Math.max(0, index - 500);
+  const end = Math.min(source.length, index + aroundText.length + 500);
+  return `${start > 0 ? '...' : ''}${source.slice(start, end)}${end < source.length ? '...' : ''}`;
+}
+
+function scriptRecordLabel(tableName, record) {
+  const method = record.method?.name || record.method?.method || null;
+  const route = record.route?.path || null;
+  const flow = record.flow?.name || null;
+  return {
+    tableName,
+    id: getId(record),
+    key: record.key || record.name || record.eventName || null,
+    route,
+    method,
+    flow,
+  };
+}
+
 async function findMethodRecordByName(method) {
   const filter = encodeURIComponent(JSON.stringify({ name: { _eq: method } }));
   const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
@@ -472,7 +603,7 @@ server.tool(
   async () => {
     const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
     const [routesResult, methodsResult] = await Promise.all([
-      fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publishedMethods.*&limit=1000'),
+      fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publicMethods.*&limit=1000'),
       fetchAPI(ENFYRA_API_URL, '/method_definition?limit=100'),
     ]);
 
@@ -502,7 +633,7 @@ server.tool(
       })),
       rest: {
         routePattern: 'Dynamic REST routes expose GET/POST at /<route-path> and PATCH/DELETE at /<route-path>/:id; there is no GET /<route-path>/:id.',
-        publicAccess: 'publishedMethods controls anonymous REST access per route/method; otherwise Bearer JWT + routePermissions apply.',
+        publicAccess: 'publicMethods controls anonymous REST access per route/method; otherwise Bearer JWT + routePermissions apply.',
         routeTables: routeTableList,
         noRouteTables,
         canonicalCrudTools: 'query_table/create_record/update_record/delete_record use dynamic REST routes and only work for route-backed tables.',
@@ -521,14 +652,14 @@ server.tool(
       },
       adminTesting: {
         runAdminTest: 'run_admin_test wraps POST /admin/test/run for flow_step, websocket_event, and websocket_connection scripts.',
-        testFlowStep: 'test_flow_step wraps POST /admin/flow/test-step.',
+        testFlowStep: 'test_flow_step also wraps POST /admin/test/run with kind=flow_step.',
         triggerFlow: 'trigger_flow wraps POST /admin/flow/trigger/:id and enqueues a flow execution.',
       },
       graphql: {
         endpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`,
         schemaEndpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql-schema`,
         enablement: 'A table appears in GraphQL when gql_definition has an enabled row for that table. REST route availableMethods does not enable GraphQL.',
-        auth: 'GraphQL currently requires Authorization: Bearer <accessToken>; REST publishedMethods does not make GraphQL anonymous.',
+        auth: 'GraphQL currently requires Authorization: Bearer <accessToken>; REST publicMethods does not make GraphQL anonymous.',
         management: routeTables.has('gql_definition')
           ? 'Use update_table graphqlEnabled or create/update records on gql_definition, then reload_graphql if needed.'
           : 'Use update_table graphqlEnabled, then reload_graphql if needed.',
@@ -561,7 +692,7 @@ server.tool(
       settingsResult,
       meResult,
     ] = await Promise.all([
-      fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publishedMethods.*,isEnabled&limit=1000'),
+      fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000'),
       fetchAPI(ENFYRA_API_URL, '/method_definition?limit=100'),
       fetchAPI(ENFYRA_API_URL, '/gql_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
       fetchAPI(ENFYRA_API_URL, '/flow_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
@@ -575,7 +706,7 @@ server.tool(
     const routes = summarizeRoutes(routesResult);
     const routeTables = new Set(routes.map((route) => route.mainTable).filter(Boolean));
     const adminRoutes = routes.filter((route) => route.path?.startsWith('/admin'));
-    const publicRoutes = routes.filter((route) => route.publishedMethods?.length);
+    const publicRoutes = routes.filter((route) => route.publicMethods?.length);
 
     const payload = {
       apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
@@ -603,7 +734,7 @@ server.tool(
         publicRoutes: publicRoutes.map((route) => ({
           path: route.path,
           mainTable: route.mainTable,
-          publishedMethods: route.publishedMethods,
+          publicMethods: route.publicMethods,
         })),
       },
       cacheAndCluster: {
@@ -636,7 +767,7 @@ server.tool(
   },
   async ({ tableName }) => {
     const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
-    const routesResult = await fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publishedMethods.*,isEnabled&limit=1000');
+    const routesResult = await fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000');
     const tables = normalizeTables(metadata);
     const routes = summarizeRoutes(routesResult);
     const table = tableName ? tables.find((item) => item.name === tableName) : null;
@@ -760,12 +891,14 @@ server.tool(
           runs: 'Before handler.',
           data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@CACHE', '@HELPERS', '@STORAGE', '@THROW*', '@SOCKET emit helpers'],
           queryContract: '@QUERY.filter is initialized as an object. When adding RLS/scope filters in pre-hooks, merge directly with _and; do not add defensive type checks around @QUERY.filter.',
+          projectionContract: 'For canonical table reads, preserve client-controlled query shape. Do not override @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, @QUERY.aggregate, or debugMode. RLS should only merge security constraints into @QUERY.filter.',
           rlsPattern: 'For relation-scoped reads, mutate @QUERY.filter instead of returning data. Example: const incomingFilter = @QUERY.filter; const scope = { memberships: { member: { id: { _eq: @USER.id } } } }; @QUERY.filter = Object.keys(incomingFilter).length ? { _and: [incomingFilter, scope] } : scope;',
           returnBehavior: 'Returning a non-undefined value skips handler and becomes response data.',
         },
         handler: {
           runs: 'Main route logic, or canonical CRUD if no handler overrides.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main', '@REPOS.secure', '@CACHE', '@HELPERS', '@STORAGE', '@PKGS', '@SOCKET emit helpers', '@TRIGGER'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main', '@REPOS.<table>', '@CACHE', '@HELPERS', '@STORAGE', '@PKGS', '@SOCKET emit helpers', '@TRIGGER'],
+          queryContract: 'When a handler wraps a canonical table read, pass through client fields/deep/sort/page/limit/meta/aggregate/debugMode unless the route is a clearly custom summary or workflow endpoint.',
           returnBehavior: 'Return value becomes response body unless post-hook changes it.',
         },
         postHook: {
@@ -791,7 +924,7 @@ server.tool(
         graphqlResolver: {
           runs: 'Generated GraphQL resolver delegates to dynamic repo/query services.',
           data: ['GraphQL request context', 'Bearer auth user', 'dynamic repositories'],
-          caveat: 'REST publishedMethods do not make GraphQL anonymous.',
+          caveat: 'REST publicMethods do not make GraphQL anonymous.',
         },
         extensionVueSfc: {
           runs: 'Frontend extension code, not server sandbox.',
@@ -801,13 +934,13 @@ server.tool(
       },
       helpers: {
         repos: {
-          scopes: '$repos.main enforces route main table behavior; $repos.secure.<table> enforces field permissions; $repos.<table> is trusted/internal.',
+          scopes: '$repos.main is the canonical repository for the route main table and preserves normal route query behavior. $repos.<table> is an explicit internal repository for table-specific logic. Do not generate $repos.secure.<table>; current runtime does not expose table methods there.',
           mutationReturnShape: '$repos.<table>.create({ data }) and $repos.<table>.update({ id, data }) return a collection-shaped result: { data: [...], count? }. data is always an array for create/update, even for one created/updated record. If a script needs the single record object, it must read result.data[0] or result.data?.[0] ?? null.',
           preferredExample: 'const result = await @REPOS.main.create({ data: @BODY }); const record = result.data?.[0] ?? null; return record;',
           wrongSingleRecordAccess: 'Do not use result.data.id, do not return result.data when one object is expected, and do not assume create/update returns the bare row object.',
           countPattern: 'To count records in custom code, do not fetch full rows. Use const result = await @REPOS.main.find({ fields: "id", limit: 1, meta: filter ? "filterCount" : "totalCount", ...(filter ? { filter } : {}) }); then read result.meta.filterCount or result.meta.totalCount.',
         },
-        socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast, but cannot reply/join/leave/disconnect because there is no bound socket.',
+        socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast, but cannot reply/join/leave/disconnect/emitToCurrentRoom/broadcastToRoom because there is no bound socket. emitToRoom requires an explicit gateway path: emitToRoom(path, room, event, data).',
         packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
         files: 'Upload helpers are on $storage; raw create_record on file_definition is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the file_definition record without uploading bytes. Use buffer only for small generated files.',
       },
@@ -830,7 +963,7 @@ server.tool(
   [
     'Returns the resolved API base URL for this MCP session (env ENFYRA_API_URL).',
     'Use when the user asks which HTTP endpoint or full URL applies: combine enfyraApiUrl with paths from server instructions (GET/POST /{table}, PATCH/DELETE /{table}/{id}, no GET /{table}/{id}).',
-    'Auth: publishedMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
+    'Auth: publicMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
     'If path might differ from table name, use get_all_routes before asserting a URL.',
     'Same mapping as MCP tool → HTTP: query_table=GET /table?..., create_record=POST /table, update_record=PATCH /table/id, delete_record=DELETE /table/id.',
     'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via gql_definition/update_table graphqlEnabled and send Bearer auth.',
@@ -849,8 +982,8 @@ server.tool(
         oneRowById: `${base}/<table_name>?filter={"<primaryKeyFromMetadata>":{"_eq":"<id>"}}&limit=1`,
       },
       auth: {
-        publishedMethods: 'If the HTTP method is published for that route, no Bearer required; else Bearer JWT and routePermissions apply.',
-        graphql: 'GraphQL currently requires Bearer auth; route publishedMethods do not make GraphQL anonymous.',
+        publicMethods: 'If the HTTP method is public for that route, no Bearer required; else Bearer JWT and routePermissions apply.',
+        graphql: 'GraphQL currently requires Bearer auth; route publicMethods do not make GraphQL anonymous.',
         mcp: 'This server uses admin credentials from env for tools (fetchAPI).',
       },
       pathResolution: 'Confirm route path with get_all_routes or metadata — path may not equal table name.',
@@ -1041,6 +1174,100 @@ server.tool('update_record', 'Update an existing record by ID using PATCH. The t
     scriptValidation: prepared.scriptValidation,
   }, null, 2) }] };
 });
+
+server.tool(
+  'get_script_source',
+  [
+    'Fetch the full editable source for one script-backed metadata record without preview truncation.',
+    'Use this before reviewing or patching long handlers, hooks, flow steps, websocket scripts, GraphQL scripts, or bootstrap scripts.',
+  ].join(' '),
+  {
+    tableName: z.enum(SCRIPT_BACKED_TABLES).describe('Script-backed table to read'),
+    id: z.string().describe('Record ID to read'),
+  },
+  async ({ tableName, id }) => {
+    const { primaryKey, record, sourceField, sourceCode } = await fetchScriptRecord(tableName, id);
+    return { content: [{ type: 'text', text: JSON.stringify({
+      tableName,
+      id,
+      primaryKey,
+      sourceField,
+      sourceCode,
+      sourceLength: sourceCode.length,
+      sourceSha256: sha256(sourceCode),
+      scriptLanguage: record.scriptLanguage || record.language || null,
+      record: scriptRecordLabel(tableName, record),
+    }, null, 2) }] };
+  },
+);
+
+server.tool(
+  'patch_script_source',
+  [
+    'Patch sourceCode on a script-backed record using exact search/replace with optional hash checking.',
+    'By default this returns a preview only. Set apply=true to validate through /admin/script/validate and save.',
+    'Use get_script_source first for long scripts, then patch only the exact block you intend to change.',
+  ].join(' '),
+  {
+    tableName: z.enum(SCRIPT_BACKED_TABLES).describe('Script-backed table to patch'),
+    id: z.string().describe('Record ID to patch'),
+    oldText: z.string().describe('Exact text to replace'),
+    newText: z.string().describe('Replacement text'),
+    occurrence: z.enum(['first', 'all']).optional().default('all').describe('Replace first occurrence or all occurrences.'),
+    expectedSourceSha256: z.string().optional().describe('Optional SHA-256 from get_script_source; fails if source changed.'),
+    scriptLanguage: z.string().optional().describe('Script language to save. Defaults to existing scriptLanguage or javascript.'),
+    apply: z.boolean().optional().default(false).describe('false returns preview only; true validates and saves.'),
+  },
+  async ({ tableName, id, oldText, newText, occurrence, expectedSourceSha256, scriptLanguage, apply }) => {
+    const { record, sourceField, sourceCode } = await fetchScriptRecord(tableName, id);
+    if (sourceField !== 'sourceCode') {
+      throw new Error(`patch_script_source only saves sourceCode records. Record uses "${sourceField}"; use update_record intentionally for this legacy field.`);
+    }
+    const beforeHash = sha256(sourceCode);
+    if (expectedSourceSha256 && expectedSourceSha256 !== beforeHash) {
+      throw new Error(`Source hash mismatch. Current sha256 is ${beforeHash}; re-read with get_script_source before patching.`);
+    }
+    const { occurrences, patched, replaced } = replaceOccurrence(sourceCode, oldText, newText, occurrence || 'all');
+    const afterHash = sha256(patched);
+    const payload = {
+      action: apply ? 'patch_script_source_applied' : 'patch_script_source_preview',
+      tableName,
+      id,
+      sourceField,
+      sourceLengthBefore: sourceCode.length,
+      sourceLengthAfter: patched.length,
+      sourceSha256Before: beforeHash,
+      sourceSha256After: afterHash,
+      occurrences,
+      replaced,
+      preview: {
+        before: sourcePreview(sourceCode, oldText),
+        after: sourcePreview(patched, newText),
+      },
+      next: apply ? undefined : 'Call patch_script_source again with apply=true and expectedSourceSha256 set to sourceSha256Before to validate and save.',
+    };
+    if (!apply) {
+      return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+    }
+    const language = scriptLanguage || record.scriptLanguage || 'javascript';
+    const prepared = await prepareGenericMutation(
+      tableName,
+      JSON.stringify({ sourceCode: patched, scriptLanguage: language }),
+    );
+    const result = await fetchAPI(
+      ENFYRA_API_URL,
+      `/${tableName}/${encodeURIComponent(String(id))}`,
+      { method: 'PATCH', body: JSON.stringify(prepared.payload) },
+    );
+    return { content: [{ type: 'text', text: JSON.stringify({
+      ...payload,
+      ...summarizeMutationResult(result, 'patch_script_source_applied', tableName),
+      id,
+      scriptLanguage: language,
+      scriptValidation: prepared.scriptValidation,
+    }, null, 2) }] };
+  },
+);
 
 server.tool(
   'update_script_source',
@@ -1295,7 +1522,7 @@ server.tool(
 
 server.tool(
   'test_flow_step',
-  'Test a single flow step without saving it. Wraps POST /admin/flow/test-step.',
+  'Test a single flow step without saving it. Wraps POST /admin/test/run with kind=flow_step.',
   {
     type: z.enum(['script', 'condition', 'query', 'create', 'update', 'delete', 'http', 'trigger_flow', 'sleep', 'log']).describe('Flow step type'),
     config: z.string().describe('Step config as JSON string'),
@@ -1311,9 +1538,9 @@ server.tool(
       ...(key ? { key } : {}),
       ...(mockFlow ? { mockFlow: JSON.parse(mockFlow) } : {}),
     };
-    const result = await fetchAPI(ENFYRA_API_URL, '/admin/flow/test-step', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/admin/test/run', {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, kind: 'flow_step' }),
     });
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   },
@@ -1460,13 +1687,13 @@ function enrichRoute(route, state) {
           method: method.name || state.methodIdNameMap[String(getId(method))] || null,
         }))
       : route.availableMethods,
-    publishedMethods: Array.isArray(route.publishedMethods)
-      ? route.publishedMethods.map((method) => ({
+    publicMethods: Array.isArray(route.publicMethods)
+      ? route.publicMethods.map((method) => ({
           ...method,
           name: method.name || state.methodIdNameMap[String(getId(method))] || null,
           method: method.name || state.methodIdNameMap[String(getId(method))] || null,
         }))
-      : route.publishedMethods,
+      : route.publicMethods,
     skipRoleGuardMethods: Array.isArray(route.skipRoleGuardMethods)
       ? route.skipRoleGuardMethods.map((method) => ({
           ...method,
@@ -1542,7 +1769,7 @@ server.tool(
   'inspect_route',
   [
     'REST-first inspection for a route/path. Use before changing handlers, hooks, permissions, guards, or testing an endpoint.',
-    'Returns the backing table, available/published methods, handlers, hooks, route permissions, guards, and exact REST URL pattern.',
+    'Returns the backing table, available/public methods, handlers, hooks, route permissions, guards, and exact REST URL pattern.',
   ].join(' '),
   {
     path: z.string().optional().describe('Route path, e.g. /user_definition'),
@@ -1627,6 +1854,88 @@ server.tool(
 );
 
 server.tool(
+  'trace_metadata_usage',
+  [
+    'Trace where a table, route path, keyword, or script fragment appears across live metadata and script-backed records.',
+    'Use this before changing production flows/handlers/hooks to find all callers or writers for a table such as cloud_provisioning_history.',
+  ].join(' '),
+  {
+    query: z.string().describe('Table name, route path, field name, event name, or source-code keyword to trace'),
+    includeSourcePreview: z.boolean().optional().default(true).describe('Include short source previews around matches.'),
+    limit: z.number().optional().default(25).describe('Maximum matches per section.'),
+  },
+  async ({ query, includeSourcePreview, limit }) => {
+    const q = String(query || '').trim();
+    if (!q) throw new Error('query is required.');
+    const lower = q.toLowerCase();
+    const max = Math.max(1, Math.min(Number(limit || 25), 100));
+    const state = await collectRestDefinitionState();
+    const contains = (value) => JSON.stringify(value ?? '').toLowerCase().includes(lower);
+    const sourceContains = (record) => getRecordSource(record).sourceCode.toLowerCase().includes(lower);
+
+    const scriptTableResults = await Promise.all(SCRIPT_BACKED_TABLES.map(async (tableName) => {
+      const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}?limit=1000&fields=*`).catch((error) => ({ error }));
+      return { tableName, records: unwrapData(result), error: result?.error?.message || null };
+    }));
+    const scriptMatches = [];
+    const scriptErrors = [];
+    for (const { tableName, records, error } of scriptTableResults) {
+      if (error) {
+        scriptErrors.push({ tableName, error });
+        continue;
+      }
+      for (const record of records) {
+        const { field, sourceCode } = getRecordSource(record);
+        if (!field || !sourceContains(record)) continue;
+        scriptMatches.push({
+          ...scriptRecordLabel(tableName, record),
+          sourceField: field,
+          sourceLength: sourceCode.length,
+          sourceSha256: sha256(sourceCode),
+          preview: includeSourcePreview ? sourcePreview(sourceCode, q) : undefined,
+        });
+      }
+    }
+
+    const tableMatches = state.tables.filter((table) => contains({
+      name: table.name,
+      alias: table.alias,
+      description: table.description,
+      columns: (table.columns || []).map((column) => ({ name: column.name, type: column.type, description: column.description })),
+      relations: (table.relations || []).map((relation) => ({ propertyName: relation.propertyName, type: relation.type, description: relation.description })),
+    }));
+    const routeMatches = state.routes.filter((route) => contains({
+      path: route.path,
+      mainTable: route.mainTable,
+      description: route.description,
+    }));
+    const fieldPermissionMatches = state.fieldPermissions.filter((permission) => contains(permission));
+    const guardMatches = state.guards.filter((guard) => contains(guard));
+    const routePermissionMatches = state.routePermissions.filter((permission) => contains(permission));
+
+    return { content: [{ type: 'text', text: JSON.stringify({
+      query: q,
+      counts: {
+        tables: tableMatches.length,
+        routes: routeMatches.length,
+        scripts: scriptMatches.length,
+        fieldPermissions: fieldPermissionMatches.length,
+        routePermissions: routePermissionMatches.length,
+        guards: guardMatches.length,
+      },
+      tables: tableMatches.map(summarizeTable).slice(0, max),
+      routes: routeMatches.map((route) => enrichRoute(route, state)).slice(0, max),
+      scripts: scriptMatches.slice(0, max),
+      fieldPermissions: fieldPermissionMatches.slice(0, max),
+      routePermissions: routePermissionMatches.slice(0, max),
+      guards: guardMatches.slice(0, max),
+      scriptReadErrors: scriptErrors,
+      next: 'Use inspect_route/inspect_table for structure, get_script_source for full source, and patch_script_source for exact validated edits.',
+    }, null, 2) }] };
+  },
+);
+
+server.tool(
   'test_rest_endpoint',
   [
     'Execute a real REST request against the configured Enfyra API base.',
@@ -1638,7 +1947,7 @@ server.tool(
     query: z.string().optional().describe('Optional query params JSON object, merged onto path query string'),
     body: z.string().optional().describe('Optional JSON request body string'),
     headers: z.string().optional().describe('Optional headers JSON object'),
-    useAuth: z.boolean().optional().default(true).describe('Attach MCP admin Bearer token. Set false to test published/public access.'),
+    useAuth: z.boolean().optional().default(true).describe('Attach MCP admin Bearer token. Set false to test public access.'),
   },
   async ({ method, path, query, body, headers, useAuth }) => {
     const httpMethod = normalizeMethodNameInput(method || 'GET');
@@ -1698,7 +2007,7 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Call 
   const filter = includeDisabled ? {} : { isEnabled: { _eq: true } };
   const queryParams = new URLSearchParams({
     filter: JSON.stringify(filter),
-    fields: 'id,path,mainTable.name,availableMethods.*,publishedMethods.*,isEnabled',
+    fields: 'id,path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled',
     limit: '1000',
   });
   const result = await fetchAPI(ENFYRA_API_URL, `/route_definition?${queryParams.toString()}`);
@@ -1732,7 +2041,7 @@ server.tool(
     '**Use this when the user wants a new REST API route or path** — not `create_table`. Custom routes must omit `mainTableId`.',
     '`mainTableId` is only a marker for canonical table routes such as `/orders`; do not set it for `/orders/stats`, `/reports/summary`, `/auth/login`, or any custom path.',
     'Do NOT create a new table_definition only to expose an endpoint; create a route without `mainTableId`, then have the handler/hook query explicit repos such as `$ctx.$repos.orders`.',
-    'availableMethods = which REST verbs the route responds to. publishedMethods = which REST verbs are public (no auth). GraphQL is enabled separately through gql_definition/update_table graphqlEnabled.',
+    'availableMethods = which REST verbs the route responds to. publicMethods = which REST verbs are public (no auth). GraphQL is enabled separately through gql_definition/update_table graphqlEnabled.',
     'After creation the tool auto-reloads routes. Then create handlers for specific methods via create_handler on this route id.',
     'Flow: create_route → create_handler (per method) → optionally create_pre_hook / create_post_hook → test via HTTP or admin test APIs (see server instructions).',
   ].join(' '),
@@ -1741,12 +2050,12 @@ server.tool(
     mainTableId: z.union([z.string(), z.number()]).optional().describe('Only set for the canonical table route `/<table_name>`. Omit for every custom route.'),
     methods: z.array(z.string())
       .describe('HTTP method names this route supports (availableMethods). Each value must exist in method_definition.name. Common: ["GET","POST","PATCH","DELETE"].'),
-    publishedMethods: z.array(z.string()).optional()
+    publicMethods: z.array(z.string()).optional()
       .describe('Methods accessible WITHOUT auth token. Omit = all methods require auth.'),
     isEnabled: z.boolean().optional().default(true).describe('Enable route immediately'),
     description: z.string().optional().describe('Route description'),
   },
-  async ({ path: routePath, mainTableId, methods, publishedMethods, isEnabled, description }) => {
+  async ({ path: routePath, mainTableId, methods, publicMethods, isEnabled, description }) => {
     const methodMap = await getMethodMap();
     const normalizedPath = normalizeRestPath(routePath);
 
@@ -1763,8 +2072,8 @@ server.tool(
       body.mainTable = { id: mainTableId };
     }
 
-    if (publishedMethods && publishedMethods.length > 0) {
-      body.publishedMethods = resolveMethodIds(methodMap, publishedMethods);
+    if (publicMethods && publicMethods.length > 0) {
+      body.publicMethods = resolveMethodIds(methodMap, publicMethods);
     }
 
     const result = await fetchAPI(ENFYRA_API_URL, '/route_definition', {
@@ -1782,7 +2091,7 @@ server.tool(
         path: created?.path,
         mainTableId: mainTableId ?? null,
         availableMethods: methods,
-        publishedMethods: publishedMethods || [],
+        publicMethods: publicMethods || [],
       },
       routeReload,
       next: `Use create_handler({ routeId: ${JSON.stringify(getId(created))}, method: "GET", sourceCode }) for custom code. Create extra method_definition.name rows first for custom methods such as PUT.`,
@@ -2047,7 +2356,7 @@ server.tool(
   'create_route_permission',
   [
     'Create route access permission for a route and REST methods.',
-    'Use this when a non-root role/user should access an authenticated route. publishedMethods are for public access; route permissions are for authenticated role/user access.',
+    'Use this when a non-root role/user should access an authenticated route. publicMethods are for public access; route permissions are for authenticated role/user access.',
   ].join(' '),
   {
     path: z.string().optional().describe('Route path, e.g. /user_definition'),
@@ -2089,6 +2398,179 @@ server.tool(
       routeReload,
       result,
     }, null, 2) }] };
+  },
+);
+
+server.tool(
+  'audit_route_access',
+  [
+    'Audit route access for one or more routes.',
+    'Use this before granting access or debugging 403s. It reports available methods, public methods, skipRoleGuard methods, route permissions, and optional missing methods for one role/user scope.',
+  ].join(' '),
+  {
+    path: z.string().optional().describe('Exact route path, e.g. /orders'),
+    routeId: z.union([z.string(), z.number()]).optional().describe('Exact route id'),
+    search: z.string().optional().describe('Optional route path search when path/routeId is not provided'),
+    roleId: z.union([z.string(), z.number()]).optional().describe('Expected role id to check'),
+    roleName: z.string().optional().describe('Expected role name to resolve, e.g. user'),
+    allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Expected direct/specific user ids to check'),
+    methods: z.array(z.string()).optional().describe('Methods expected to be allowed for this scope'),
+    limit: z.number().int().positive().max(100).optional().default(25).describe('Maximum routes returned for search mode'),
+  },
+  async ({ path, routeId, search, roleId, roleName, allowedUserIds, methods, limit }) => {
+    if ([path, routeId, search].filter((value) => value !== undefined && value !== null && value !== '').length > 1) {
+      throw new Error('Use only one of path, routeId, or search.');
+    }
+    if (roleId && roleName) throw new Error('Provide roleId or roleName, not both.');
+
+    const [routes, routePermissions, roles, methodIdNameMap] = await Promise.all([
+      fetchAll('/route_definition?limit=1000'),
+      fetchAll('/route_permission_definition?limit=1000'),
+      fetchAll('/role_definition?limit=1000'),
+      getMethodIdNameMap(),
+    ]);
+
+    const role = resolveRoleByNameOrId(roles, { roleId, roleName });
+    const normalizedPath = path ? normalizeRestPath(path) : null;
+    const query = search ? String(search).toLowerCase() : null;
+    const matchedRoutes = routes.filter((route) => {
+      if (routeId) return sameId(getId(route), routeId);
+      if (normalizedPath) return route.path === normalizedPath;
+      if (query) return String(route.path || '').toLowerCase().includes(query);
+      return true;
+    }).slice(0, limit);
+
+    const expectedMethods = normalizeMethodNames(methods || []);
+    const payload = {
+      guidance: {
+        publicAccess: 'publicMethods bypass RoleGuard and do not require route_permission_definition.',
+        authenticatedAccess: 'For non-public methods, eApp PermissionGate and backend RoleGuard both expect enabled route_permission_definition rows with matching route + HTTP method.',
+        directUserAccess: 'allowedRoutePermissions on /me represent direct user-scoped route permissions; role.routePermissions represent role-scoped permissions.',
+      },
+      expectedScope: {
+        role: role ? { id: getId(role), name: role.name } : null,
+        allowedUserIds: allowedUserIds || [],
+        methods: expectedMethods,
+      },
+      returnedRouteCount: matchedRoutes.length,
+      routes: matchedRoutes.map((route) => summarizeRouteAccess(route, routePermissions, methodIdNameMap, {
+        roleId: role ? getId(role) : roleId,
+        roleRequired: !!(role || roleId || roleName),
+        allowedUserIds,
+        methods: expectedMethods,
+      })),
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  },
+);
+
+server.tool(
+  'ensure_route_access',
+  [
+    'Create or update authenticated route access for one role/user scope.',
+    'Use this instead of raw route_permission_definition CRUD when fixing 403s. It resolves roleName/route/method ids, validates route.availableMethods, merges existing permission methods by default, and reloads routes.',
+  ].join(' '),
+  {
+    path: z.string().optional().describe('Route path, e.g. /orders'),
+    routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
+    methods: z.array(z.string()).describe('HTTP method names to allow, e.g. ["GET", "POST"].'),
+    roleId: z.union([z.string(), z.number()]).optional().describe('Role id scope'),
+    roleName: z.string().optional().describe('Role name scope, e.g. user. Prefer this when an LLM does not know role ids.'),
+    allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Specific user ids scope. Omit for role-wide access.'),
+    mode: z.enum(['merge', 'replace']).optional().default('merge').describe('merge adds methods to an existing permission; replace overwrites methods on the matched permission.'),
+    description: z.string().optional().describe('Admin note'),
+    isEnabled: z.boolean().optional().default(true).describe('Enable the permission'),
+  },
+  async ({ path, routeId, methods, roleId, roleName, allowedUserIds, mode, description, isEnabled }) => {
+    if (!path && !routeId) throw new Error('Provide path or routeId.');
+    if (path && routeId) throw new Error('Provide path or routeId, not both.');
+    if (roleId && roleName) throw new Error('Provide roleId or roleName, not both.');
+    if (!roleId && !roleName && (!allowedUserIds || allowedUserIds.length === 0)) {
+      throw new Error('Provide roleId, roleName, or allowedUserIds.');
+    }
+
+    const [routes, routePermissions, roles, methodMap, methodIdNameMap] = await Promise.all([
+      fetchAll('/route_definition?limit=1000'),
+      fetchAll('/route_permission_definition?limit=1000'),
+      fetchAll('/role_definition?limit=1000'),
+      getMethodMap(),
+      getMethodIdNameMap(),
+    ]);
+    const route = routes.find((item) => (
+      routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
+    ));
+    if (!route) throw new Error(`Route not found: ${routeId || path}`);
+
+    const role = resolveRoleByNameOrId(roles, { roleId, roleName });
+    const scope = {
+      roleId: role ? getId(role) : roleId,
+      allowedUserIds: allowedUserIds || [],
+    };
+    const requestedMethods = validateMethodsForRoute(route, methods, methodMap, methodIdNameMap);
+    const existing = findRoutePermission(routePermissions, getId(route), scope);
+    const existingMethods = existing ? summarizeRoutePermission(existing, methodIdNameMap).methods : [];
+    const finalMethods = mergeMethodNames(existingMethods, requestedMethods, mode);
+    const methodRefs = resolveMethodIds(methodMap, finalMethods);
+    const publicMethods = routePublicMethodNames(route, methodIdNameMap);
+    const alreadyPublic = requestedMethods.filter((method) => publicMethods.includes(method));
+
+    let result;
+    let action;
+    if (existing) {
+      action = 'updated';
+      const patchBody = {
+        isEnabled,
+        methods: methodRefs,
+        ...(description !== undefined ? { description } : {}),
+      };
+      result = await fetchAPI(ENFYRA_API_URL, `/route_permission_definition/${encodeURIComponent(String(getId(existing)))}`, {
+        method: 'PATCH',
+        body: JSON.stringify(patchBody),
+      });
+    } else {
+      action = 'created';
+      const createBody = {
+        isEnabled,
+        description,
+        route: { id: getId(route) },
+        methods: methodRefs,
+        ...(scope.roleId ? { role: { id: scope.roleId } } : {}),
+        ...(scope.allowedUserIds.length ? { allowedUsers: scope.allowedUserIds.map((id) => ({ id })) } : {}),
+      };
+      result = await fetchAPI(ENFYRA_API_URL, '/route_permission_definition', {
+        method: 'POST',
+        body: JSON.stringify(createBody),
+      });
+    }
+
+    const routeReload = await reloadRoutesResult();
+    const saved = firstDataRecord(result);
+    const payload = {
+      action,
+      kind: 'route_access',
+      route: {
+        id: getId(route),
+        path: route.path,
+        availableMethods: routeAvailableMethodNames(route, methodIdNameMap),
+        publicMethods,
+      },
+      scope: {
+        role: role ? { id: getId(role), name: role.name } : null,
+        allowedUserIds: scope.allowedUserIds,
+      },
+      permission: {
+        id: getId(saved) || getId(existing),
+        methods: finalMethods,
+        alreadyPublic,
+        isEnabled,
+      },
+      result,
+      routeReload,
+      auditHint: `Call audit_route_access({ path: "${route.path}", ${role ? `roleName: "${role.name}", ` : ''}methods: ${JSON.stringify(requestedMethods)} }) to verify.`,
+    };
+
+    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
   },
 );
 
@@ -2404,20 +2886,26 @@ server.tool('create_menu', 'Create a menu item in the navigation. Use permission
 server.tool(
   'create_extension',
   [
-    'Create an extension (Vue SFC page or widget). Code must be Vue SFC: <template>...</template> + <script setup>...</script> — NO imports, use globals (ref, useToast, useApi, UButton, etc).',
-    'For type=page: create menu first (create_menu), get id, then pass menuId. For type=widget no menu needed. Server auto-compiles and should emit realtime reload to open eApp tabs. See extension rules in MCP instructions.',
+    'Create an extension (Vue SFC page, widget, or global shell extension). Code must be Vue SFC: <template>...</template> + <script setup>...</script> — NO imports, use globals (ref, useToast, useApi, UButton, etc).',
+    'For type=page: create menu first (create_menu), get id, then pass menuId. For type=widget: no menu, embed via <Widget>. For type=global: no menu, eApp mounts it invisibly at shell level for registries/realtime. Server auto-compiles and should emit realtime reload to open eApp tabs. See extension rules in MCP instructions.',
   ].join(' '),
   {
     name: z.string().describe('Extension name (unique)'),
-    type: z.enum(['page', 'widget']).describe('Extension type: page = full page linked to menu; widget = embed via Widget component'),
+    type: z.enum(['page', 'widget', 'global']).describe('Extension type: page = full page linked to menu; widget = embed via Widget component; global = shell-level lifecycle component'),
     code: z.string().describe('Vue SFC string — <template> + <script setup>, NO import statements'),
-    menuId: z.string().optional().describe('Required for type=page — menu_definition id from create_menu. Omit for widget'),
+    menuId: z.string().optional().describe('Required for type=page — menu_definition id from create_menu. Omit for widget/global'),
     isEnabled: z.boolean().optional().default(true).describe('Enable extension'),
     description: z.string().optional().describe('Extension description'),
     version: z.string().optional().default('1.0.0').describe('Extension version'),
   },
   async (data) => {
     const body = { ...data };
+    if (body.type === 'page' && !body.menuId) {
+      throw new Error('menuId is required for type=page. Create or find a menu_definition record first.');
+    }
+    if (body.type !== 'page' && body.menuId) {
+      throw new Error('menuId is only valid for type=page. Omit menuId for widget/global extensions.');
+    }
     if (body.menuId) {
       body.menu = { id: body.menuId };
       delete body.menuId;

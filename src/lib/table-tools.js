@@ -16,8 +16,11 @@ const FORBIDDEN_RELATION_KEYS = [
   'fkCol',
   'fkColumn',
   'foreignKeyColumn',
+  'referencedColumn',
+  'constraintName',
   'sourceColumn',
   'targetColumn',
+  'junctionTableName',
   'junctionSourceColumn',
   'junctionTargetColumn',
 ];
@@ -34,6 +37,12 @@ export function resolveTableFromMetadata(metadata, tableId) {
     .find((table) => String(getId(table)) === String(tableId)) || null;
 }
 
+export function resolveTableFromMetadataByName(metadata, tableName) {
+  if (!tableName) return null;
+  return normalizeTablesFromMetadata(metadata)
+    .find((table) => table?.name === tableName || table?.alias === tableName) || null;
+}
+
 /**
  * Helper: fetch table with full columns and relations.
  * Dynamic table_definition relation fields can be paginated/truncated, so schema
@@ -46,7 +55,9 @@ export async function fetchTableWithDetails(ENFYRA_API_URL, tableId) {
     fetchAPI(ENFYRA_API_URL, '/metadata'),
   ]);
   const tableData = tableResult?.data?.[0] || tableResult?.[0] || null;
-  const metadataTable = resolveTableFromMetadata(metadata, tableId);
+  const metadataTable =
+    resolveTableFromMetadata(metadata, tableId) ||
+    resolveTableFromMetadataByName(metadata, tableData?.name);
   if (!metadataTable) {
     throw new Error(`Full metadata for table ${tableId} was not found; refusing schema cascade patch.`);
   }
@@ -136,6 +147,33 @@ export function normalizeRelationForTablePatch(relation) {
   return normalized;
 }
 
+export function sanitizeExistingRelationForTablePatch(relation) {
+  const {
+    fkCol,
+    fkColumn,
+    foreignKeyColumn,
+    referencedColumn,
+    constraintName,
+    sourceColumn,
+    targetColumn,
+    junctionTableName,
+    junctionSourceColumn,
+    junctionTargetColumn,
+    ...rest
+  } = relation;
+  return normalizeRelationForTablePatch(rest);
+}
+
+export function resolveRelationTargetsFromMetadata(metadata, relations) {
+  return relations.map((relation) => {
+    const targetTable = relation.targetTable;
+    if (typeof targetTable !== 'string' || !targetTable.trim()) return relation;
+    const resolvedTable = resolveTableFromMetadataByName(metadata, targetTable);
+    if (!resolvedTable) return relation;
+    return { ...relation, targetTable: getId(resolvedTable) };
+  });
+}
+
 function getId(record) {
   return record?.id ?? record?._id ?? null;
 }
@@ -192,7 +230,7 @@ async function verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
   propertyName,
 }) {
   const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
-  const afterRelations = (tableData.relations || []).map(normalizeRelationForTablePatch);
+  const afterRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
   const afterIds = afterRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
   const excludedIds = action === 'delete' ? [relationId] : [];
   const missingIds = getMissingIds(beforeIds, afterIds, excludedIds);
@@ -223,15 +261,18 @@ export function buildColumnDefinition({
   description,
   options,
 }) {
-  const column = { name, type };
-  if (isNullable !== undefined) column.isNullable = isNullable;
+  const column = {
+    name,
+    type,
+    isNullable: isNullable ?? true,
+    isPrimary: isPrimary ?? false,
+    isGenerated: isGenerated ?? false,
+    isSystem: isSystem ?? false,
+    isPublished: isPublished ?? true,
+    isUpdatable: isUpdatable ?? true,
+    isEncrypted: isEncrypted ?? false,
+  };
   if (isUnique !== undefined) column.isUnique = isUnique;
-  if (isPublished !== undefined) column.isPublished = isPublished;
-  if (isUpdatable !== undefined) column.isUpdatable = isUpdatable;
-  if (isEncrypted !== undefined) column.isEncrypted = isEncrypted;
-  if (isPrimary !== undefined) column.isPrimary = isPrimary;
-  if (isGenerated !== undefined) column.isGenerated = isGenerated;
-  if (isSystem !== undefined) column.isSystem = isSystem;
   if (defaultValue !== undefined) column.defaultValue = defaultValue;
   if (description !== undefined) column.description = description;
   if (options !== undefined) column.options = JSON.parse(options);
@@ -272,7 +313,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     if (!tableData) {
       return { content: [{ type: 'text', text: `Error: Table with ID ${sourceTableId} not found.` }] };
     }
-    const existingRelations = (tableData.relations || []).map(normalizeRelationForTablePatch);
+    const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
     const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
     const newRelation = { targetTable: targetTableId, type, propertyName };
     if (inversePropertyName !== undefined) newRelation.inversePropertyName = inversePropertyName || null;
@@ -340,7 +381,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
     }
 
-    const existingRelations = (tableData.relations || []).map(normalizeRelationForTablePatch);
+    const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
     const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
     if (!beforeIds.includes(String(relationId))) {
       throw new Error(`Relation ${relationId} was not found on table ${tableId}; refusing schema cascade patch.`);
@@ -439,7 +480,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       '**Not** for adding a custom API path or handler only — for that use **`create_route`** without `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
       'PREFERRED: pass `columns` and `relations` params as JSON arrays to create a table WITH columns and relations in one call (cascade). Only use create_column/create_relation separately when adding to an existing table later.',
       'Indexes and uniques are first-class table metadata. Use `indexes` for query performance and `uniques` for data integrity. Each entry is a logical field group such as [["member","isRead","conversation"]] or [{"value":["message","member"]}]. Relation property names are allowed; Enfyra resolves them to physical FK columns.',
-      'Relations are supported in this same create_table call when the target table already exists. Each relation uses { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete? }; targetTable may be a table id or {id}.',
+      'Relations are supported in this same create_table call when the target table already exists. Each relation uses { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete? }; targetTable may be a table id, {id}, or an exact table name that MCP resolves to an id before mutation.',
       'Do NOT provide physical FK/junction columns. Never include fkCol, fkColumn, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn. Enfyra derives and hides those physical columns from relation propertyName/table metadata.',
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
       'Enfyra auto-creates a default REST route at path `/<table_name>` (same segment as `name`, not alias).',
@@ -455,14 +496,18 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('Description of what this table stores.'),
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record tables such as settings/config. This is passed directly to table_definition create.'),
       columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, defaultValue?, description?, options? }. Set isEncrypted=true for values encrypted at rest; set isUpdatable=false separately only when the field should be immutable. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"api_key","type":"varchar","isEncrypted":true,"isPublished":false}]'),
-      relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id or {"id": <id>}. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Example: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
+      relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id, {"id": <id>}, or an exact table name that MCP resolves to an id before mutation. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Example: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
       indexes: z.string().optional().describe('JSON array of logical index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Example: [["member","isRead","conversation"],["conversation","member","isRead"]]'),
       uniques: z.string().optional().describe('JSON array of logical unique field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Example: [["message","member"]]'),
     },
     async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson, indexes: indexesJson, uniques: uniquesJson }) => withSchemaQueue(async () => {
       const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
       const userColumns = parseJsonArrayParam('columns', columnsJson);
-      const userRelations = parseJsonArrayParam('relations', relationsJson).map(normalizeRelationForTablePatch);
+      const parsedRelations = parseJsonArrayParam('relations', relationsJson).map(normalizeRelationForTablePatch);
+      const metadata = parsedRelations.length ? await fetchAPI(ENFYRA_API_URL, '/metadata') : null;
+      const userRelations = metadata
+        ? resolveRelationTargetsFromMetadata(metadata, parsedRelations)
+        : parsedRelations;
       const indexes = normalizeConstraintGroups('indexes', parseJsonArrayParam('indexes', indexesJson));
       const uniques = normalizeConstraintGroups('uniques', parseJsonArrayParam('uniques', uniquesJson));
       const body = { name, description, columns: [idColumn, ...userColumns], relations: userRelations };

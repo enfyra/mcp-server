@@ -186,9 +186,13 @@ Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env 
 
 Schema and script tools include safety guards for LLM callers: generic record mutations validate request fields against live metadata, script-backed records must validate `sourceCode` before save through `/admin/script/validate` and fail closed if validation is unavailable, relation metadata rejects physical FK/junction inputs, custom routes reject `mainTableId` unless the path is the canonical table route, schema tools serialize table/column/relation changes, and destructive deletes require `confirm=true` after returning a preview.
 
+Read tools use Enfyra's `fields` parameter directly. Passing explicit includes such as `fields=id,email` returns only those fields, while any `-field` token switches that scope to exclude mode. For example, `fields=-compiledCode` returns all readable fields except `compiledCode`, and `fields=id,-compiledCode` still means all except `compiledCode`. Nested exclusions work with dotted fields and `deep`, such as `fields=-owner.avatar` or `deep.owner.fields=-avatar`.
+
+Generated RLS for canonical table reads must keep projection and pagination client-owned. Pre-hooks may merge owner or membership constraints into `@QUERY.filter`, but they must not override `@QUERY.fields`, `@QUERY.deep`, `@QUERY.sort`, `@QUERY.limit`, `@QUERY.page`, `@QUERY.meta`, `@QUERY.aggregate`, or `debugMode`. Fixed projections belong only on clearly custom summary or workflow endpoints with an explicit response contract.
+
 Quick checklist for a new LLM using Enfyra MCP: discover the live system first, inspect the specific table/route, load the matching example category, mutate with explicit fields and relation property names, validate or test scripts/routes before relying on them, re-read the saved row when mutation output is summarized, and preview destructive operations before confirming.
 
-Use `update_script_source` when updating existing long script-backed records such as `flow_step_definition`, `route_handler_definition`, hook tables, websocket scripts, GraphQL scripts, or bootstrap scripts. It accepts raw `sourceCode` directly, validates the source, and saves `sourceCode`/`scriptLanguage` without requiring the caller to manually JSON-escape the full script. Use generic `update_record` for small record patches or patches that include non-script metadata fields.
+Use `trace_metadata_usage` before changing production features to find related tables, routes, handlers, hooks, flow steps, websocket scripts, GraphQL scripts, and bootstrap scripts. Use `get_script_source` to read full untruncated source plus a SHA-256 hash. Prefer `patch_script_source` for focused exact search/replace edits; it previews by default and, with `apply=true`, validates the patched `sourceCode` through `/admin/script/validate` before saving. Use `update_script_source` when replacing an entire existing script. Use generic `update_record` only for small record patches or patches that include non-script metadata fields.
 
 For route contracts that intentionally keep workflow fields out of request bodies, generic `create_record`, `update_record`, and `delete_record` accept optional `queryParams` as a JSON object string. For example, a renewal workflow can keep `expires_at=YYYY-MM-DD` in the URL query while `validateBody` remains enabled for the table body.
 
@@ -219,9 +223,11 @@ When an LLM builds a Nuxt, Next, or other SSR frontend for Enfyra, follow the sa
 
 ## Tools (summary)
 
-Metadata, examples, query/CRUD, method management, route/handler/hook, tables/columns, reload cache, logs, user/roles, login, menu/extension, `get_enfyra_api_context`. For full tool list and behavior, see the app after enabling MCP or the source in `src/mcp-server-entry.mjs`.
+Metadata, examples, query/CRUD, method management, route access audit/grant, route/handler/hook, tables/columns, reload cache, logs, user/roles, login, menu/extension, `get_enfyra_api_context`. For full tool list and behavior, see the app after enabling MCP or the source in `src/mcp-server-entry.mjs`.
 
 Use `get_enfyra_examples` when asking an LLM to generate concrete Enfyra implementation patterns. It returns categorized examples for SSR app auth/OAuth/proxy setup, schema/relations, queries/deep, handlers/hooks, permissions/RLS, websocket, flows, files, and extensions.
+
+For authenticated route access, use `audit_route_access` before changing permissions and `ensure_route_access` to grant access by `path` plus `roleName`/`roleId` or `allowedUserIds`. `ensure_route_access` resolves route, role, and method ids, validates that requested methods are available on the route, merges existing methods by default, and reloads routes.
 
 ## Security
 

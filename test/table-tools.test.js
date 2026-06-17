@@ -8,10 +8,21 @@ import {
   buildColumnDefinition,
   fetchTableWithDetails,
   normalizeRelationForTablePatch,
+  resolveRelationTargetsFromMetadata,
   resolveTableFromMetadata,
+  resolveTableFromMetadataByName,
+  sanitizeExistingRelationForTablePatch,
 } from '../src/lib/table-tools.js';
 import { prepareRecordMutation } from '../src/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../src/lib/route-guards.js';
+import {
+  findRoutePermission,
+  mergeMethodNames,
+  resolveRoleByNameOrId,
+  routePermissionMatchesScope,
+  summarizeRouteAccess,
+  validateMethodsForRoute,
+} from '../src/lib/route-permission-tools.js';
 
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -79,6 +90,73 @@ test('resolveTableFromMetadata supports array and keyed metadata shapes', () => 
   assert.equal(resolveTableFromMetadata({ tables: { b: { id: 2, name: 'b' } } }, 2)?.name, 'b');
 });
 
+test('fetchTableWithDetails falls back to metadata table name when metadata id is malformed', async () => {
+  const originalFetch = global.fetch;
+
+  global.fetch = async (url) => {
+    if (String(url).endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
+    }
+    if (String(url).includes('/table_definition?')) {
+      return jsonResponse({
+        data: [{
+          id: 1,
+          name: 'column_definition',
+          columns: [],
+          relations: [],
+        }],
+      });
+    }
+    if (String(url).endsWith('/metadata')) {
+      return jsonResponse({
+        data: {
+          tables: [{
+            id: true,
+            name: 'column_definition',
+            columns: [{ id: 3, name: 'type', type: 'enum' }],
+            relations: [],
+          }],
+        },
+      });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    const table = await fetchTableWithDetails('https://example.test/api', 1);
+
+    assert.equal(table.name, 'column_definition');
+    assert.equal(table.columns[0].name, 'type');
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('resolveTableFromMetadataByName supports table name and alias', () => {
+  const metadata = { data: { tables: [{ id: true, name: 'column_definition' }, { id: 2, alias: 'Posts' }] } };
+  assert.equal(resolveTableFromMetadataByName(metadata, 'column_definition')?.id, true);
+  assert.equal(resolveTableFromMetadataByName(metadata, 'Posts')?.id, 2);
+});
+
+test('resolveRelationTargetsFromMetadata converts table names to ids before schema mutation', () => {
+  const metadata = { data: { tables: [{ id: 4, name: 'user_definition' }, { id: 9, name: 'post' }] } };
+  assert.deepEqual(
+    resolveRelationTargetsFromMetadata(metadata, [
+      { propertyName: 'owner', type: 'many-to-one', targetTable: 'user_definition' },
+      { propertyName: 'post', type: 'many-to-one', targetTable: { id: 9 } },
+      { propertyName: 'external', type: 'many-to-one', targetTable: '64f011111111111111111111' },
+    ]),
+    [
+      { propertyName: 'owner', type: 'many-to-one', targetTable: 4 },
+      { propertyName: 'post', type: 'many-to-one', targetTable: { id: 9 } },
+      { propertyName: 'external', type: 'many-to-one', targetTable: '64f011111111111111111111' },
+    ]
+  );
+});
+
 test('encrypted column definitions preserve explicit updatable contract', () => {
   assert.deepEqual(
     buildColumnDefinition({
@@ -91,6 +169,10 @@ test('encrypted column definitions preserve explicit updatable contract', () => 
     {
       name: 'api_key',
       type: 'varchar',
+      isNullable: true,
+      isPrimary: false,
+      isGenerated: false,
+      isSystem: false,
       isPublished: false,
       isUpdatable: true,
       isEncrypted: true,
@@ -107,8 +189,33 @@ test('encrypted column definitions preserve explicit updatable contract', () => 
     {
       name: 'secret_key',
       type: 'varchar',
+      isNullable: true,
+      isPrimary: false,
+      isGenerated: false,
+      isSystem: false,
+      isPublished: true,
       isEncrypted: true,
       isUpdatable: false,
+    }
+  );
+});
+
+test('new column definitions include system-table validation defaults', () => {
+  assert.deepEqual(
+    buildColumnDefinition({
+      name: 'tenant_cpu_shares',
+      type: 'int',
+    }),
+    {
+      name: 'tenant_cpu_shares',
+      type: 'int',
+      isNullable: true,
+      isPrimary: false,
+      isGenerated: false,
+      isSystem: false,
+      isPublished: true,
+      isUpdatable: true,
+      isEncrypted: false,
     }
   );
 });
@@ -184,6 +291,63 @@ test('fetchAPI retries once after stale exchanged token is rejected', async () =
     resetTokens();
     global.fetch = originalFetch;
   }
+});
+
+test('route permission helpers resolve role names and validate available methods', () => {
+  const roles = [{ id: 2, name: 'user' }, { id: 1, name: 'Admin' }];
+  const route = {
+    id: 10,
+    path: '/cloud_projects',
+    availableMethods: [{ id: 1 }, { id: 2 }],
+  };
+  const methodMap = { GET: 1, POST: 2, PATCH: 3 };
+  const methodIdNameMap = { 1: 'GET', 2: 'POST', 3: 'PATCH' };
+
+  assert.deepEqual(resolveRoleByNameOrId(roles, { roleName: 'USER' }), roles[0]);
+  assert.deepEqual(validateMethodsForRoute(route, ['get', 'POST'], methodMap, methodIdNameMap), ['GET', 'POST']);
+  assert.throws(
+    () => validateMethodsForRoute(route, ['PATCH'], methodMap, methodIdNameMap),
+    /does not list methods as available/
+  );
+});
+
+test('route permission helpers match scopes and merge methods predictably', () => {
+  const permission = {
+    id: 18,
+    route: { id: 10, path: '/cloud_projects' },
+    role: { id: 2, name: 'user' },
+    allowedUsers: [],
+    methods: [{ id: 1 }, { id: 2 }],
+    isEnabled: true,
+  };
+  const methodIdNameMap = { 1: 'GET', 2: 'POST', 3: 'PATCH' };
+
+  assert.equal(routePermissionMatchesScope(permission, { roleId: 2, allowedUserIds: [] }), true);
+  assert.equal(routePermissionMatchesScope(permission, { roleId: 2, allowedUserIds: [5] }), false);
+  assert.equal(findRoutePermission([permission], 10, { roleId: 2, allowedUserIds: [] })?.id, 18);
+  assert.deepEqual(mergeMethodNames(['GET'], ['get', 'POST'], 'merge'), ['GET', 'POST']);
+  assert.deepEqual(mergeMethodNames(['GET'], ['POST'], 'replace'), ['POST']);
+
+  const access = summarizeRouteAccess(
+    { id: 10, path: '/cloud_projects', availableMethods: [{ id: 1 }, { id: 2 }] },
+    [permission],
+    methodIdNameMap,
+    { roleId: 2, methods: ['GET', 'PATCH'] }
+  );
+  assert.deepEqual(access.expected.missingMethods, ['PATCH']);
+
+  const narrowedPermission = {
+    ...permission,
+    id: 19,
+    allowedUsers: [{ id: 5 }],
+  };
+  const roleWideAccess = summarizeRouteAccess(
+    { id: 10, path: '/cloud_projects', availableMethods: [{ id: 1 }] },
+    [narrowedPermission],
+    methodIdNameMap,
+    { roleId: 2, allowedUserIds: [], methods: ['GET'] }
+  );
+  assert.deepEqual(roleWideAccess.expected.missingMethods, ['GET']);
 });
 
 test('prepareRecordMutation rejects fields that are not in table metadata', async () => {
@@ -282,6 +446,29 @@ test('mcp server exposes update_script_source for raw source updates', () => {
   assert.match(entry, /updated_script_source/);
 });
 
+test('mcp server exposes script source inspection and patch tools', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  assert.match(entry, /server\.tool\(\s*['"]get_script_source['"]/);
+  assert.match(entry, /server\.tool\(\s*['"]patch_script_source['"]/);
+  assert.match(entry, /expectedSourceSha256/);
+  assert.match(entry, /patch_script_source_preview/);
+});
+
+test('mcp server exposes metadata usage tracing for production script edits', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  assert.match(entry, /server\.tool\(\s*['"]trace_metadata_usage['"]/);
+  assert.match(entry, /scriptReadErrors/);
+  assert.match(entry, /get_script_source/);
+});
+
+test('test_flow_step uses unified admin test runner', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  assert.match(entry, /'test_flow_step'/);
+  assert.match(entry, /'\/admin\/test\/run'/);
+  assert.match(entry, /kind:\s*'flow_step'/);
+  assert.doesNotMatch(entry, /fetchAPI\(ENFYRA_API_URL,\s*'\/admin\/flow\/test-step'/);
+});
+
 test('mcp log search matches dashed and dotted app log filenames', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
   assert.match(entry, /\^app\[\.-\]/);
@@ -320,6 +507,31 @@ test('query examples distinguish relation fields from deep relation query option
   assert.match(instructions, /Use `deep` when relation loading needs query options/);
 });
 
+test('query guidance documents fields exclusion mode', () => {
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.match(examples, /fields=-compiledCode/);
+  assert.match(examples, /fields=id,-compiledCode returns all readable fields except compiledCode/);
+  assert.match(examples, /Dotted exclusions and deep relation fields use the same exclude-mode rule/);
+  assert.match(instructions, /`fields=-compiledCode` returns all readable fields except `compiledCode`/);
+  assert.match(instructions, /`fields=id,-compiledCode` still means all except `compiledCode`/);
+  assert.match(instructions, /`deep: \{ owner: \{ fields: "-avatar" \} \}`/);
+  assert.match(readme, /`fields=-compiledCode` returns all readable fields except `compiledCode`/);
+  assert.match(readme, /`fields=-owner\.avatar`/);
+});
+
+test('RLS guidance preserves caller projection and pagination', () => {
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  assert.match(instructions, /do not override `@QUERY\.fields`/);
+  assert.match(instructions, /RLS may only merge security filters into `@QUERY\.filter`/);
+  assert.match(examples, /keep projection and pagination client-owned/);
+  assert.match(entry, /preserve client-controlled query shape/);
+  assert.match(entry, /pass through client fields\/deep\/sort\/page\/limit\/meta\/aggregate\/debugMode/);
+});
+
 test('normalizeRelationForTablePatch rejects physical FK column inputs', () => {
   assert.throws(
     () => normalizeRelationForTablePatch({
@@ -330,6 +542,33 @@ test('normalizeRelationForTablePatch rejects physical FK column inputs', () => {
     }),
     /foreignKeyColumn/
   );
+});
+
+test('sanitizeExistingRelationForTablePatch strips physical fields from metadata relations', () => {
+  const relation = sanitizeExistingRelationForTablePatch({
+    id: 159,
+    targetTable: { id: 76, name: 'cloud_servers' },
+    type: 'many-to-one',
+    propertyName: 'host',
+    mappedBy: null,
+    isNullable: true,
+    onDelete: 'SET NULL',
+    foreignKeyColumn: 'hostId',
+    referencedColumn: 'id',
+    constraintName: 'fk_cloud_projects_hostId',
+    junctionTableName: null,
+    junctionSourceColumn: null,
+    junctionTargetColumn: null,
+  });
+
+  assert.deepEqual(relation, {
+    id: 159,
+    targetTable: 76,
+    type: 'many-to-one',
+    propertyName: 'host',
+    isNullable: true,
+    onDelete: 'SET NULL',
+  });
 });
 
 test('prepareRecordMutation rejects direct relation_definition physical FK inputs', async () => {
