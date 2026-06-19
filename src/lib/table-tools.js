@@ -45,13 +45,13 @@ export function resolveTableFromMetadataByName(metadata, tableName) {
 
 /**
  * Helper: fetch table with full columns and relations.
- * Dynamic table_definition relation fields can be paginated/truncated, so schema
+ * Dynamic enfyra_table relation fields can be paginated/truncated, so schema
  * cascade tools must use /metadata as the complete source of columns/relations.
  */
 export async function fetchTableWithDetails(ENFYRA_API_URL, tableId) {
   const filter = encodeURIComponent(JSON.stringify({ id: { _eq: tableId } }));
   const [tableResult, metadata] = await Promise.all([
-    fetchAPI(ENFYRA_API_URL, `/table_definition?filter=${filter}&limit=1&fields=*`),
+    fetchAPI(ENFYRA_API_URL, `/enfyra_table?filter=${filter}&limit=1&fields=*`),
     fetchAPI(ENFYRA_API_URL, '/metadata'),
   ]);
   const tableData = tableResult?.data?.[0] || tableResult?.[0] || null;
@@ -72,18 +72,18 @@ export async function fetchTableWithDetails(ENFYRA_API_URL, tableId) {
 }
 
 /**
- * PATCH table_definition with auto-confirm for schema changes.
+ * PATCH enfyra_table with auto-confirm for schema changes.
  * First PATCH returns preview + requiredConfirmHash; this helper
  * automatically resends with ?schemaConfirmHash= to apply.
  */
 async function patchTableAutoConfirm(ENFYRA_API_URL, tableId, body) {
-  const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+  const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
   const preview = Array.isArray(result?.data) ? result.data[0] : result?.data;
   if (preview?._preview && preview?.requiredConfirmHash) {
-    return fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}?schemaConfirmHash=${preview.requiredConfirmHash}`, {
+    return fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}?schemaConfirmHash=${preview.requiredConfirmHash}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     });
@@ -464,7 +464,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     'Get all table definitions in the system',
     {},
     async () => {
-      const result = await fetchAPI(ENFYRA_API_URL, '/table_definition?limit=500');
+      const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_table?limit=500');
       return {
         content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
       };
@@ -488,13 +488,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       'There is NO `GET /<table>/:id`. To fetch one row by id, use find_one_record or inspect metadata first and call GET `/<table>?filter={"<primaryKeyFromMetadata>":{"_eq":"<id>"}}&limit=1`.',
       'Set `isSingleRecord: true` directly in create_table for settings/config tables that should keep only one record.',
       `Full URLs: ${apiBase}/<table_name> (example table post: ${apiBase}/post).`,
-      'GraphQL is enabled separately per table through `gql_definition` or `update_table` with `graphqlEnabled`; it is not controlled by route availableMethods.',
+      'GraphQL is enabled separately per table through `enfyra_graphql` or `update_table` with `graphqlEnabled`; it is not controlled by route availableMethods.',
       'Do not set alias during create_table. The create tool accepts name, description, isSingleRecord, columns, and relations only; use update_table later only if alias really needs to change.',
     ].join(' '),
     {
-      name: z.string().describe('Table name (e.g., "user_definition", "my_custom_table"). Must be unique, lowercase with underscores.'),
+      name: z.string().describe('Table name (e.g., "enfyra_user", "my_custom_table"). Must be unique, lowercase with underscores.'),
       description: z.string().optional().describe('Description of what this table stores.'),
-      isSingleRecord: z.boolean().optional().describe('Set to true for single-record tables such as settings/config. This is passed directly to table_definition create.'),
+      isSingleRecord: z.boolean().optional().describe('Set to true for single-record tables such as settings/config. This is passed directly to enfyra_table create.'),
       columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, defaultValue?, description?, options? }. Set isEncrypted=true for values encrypted at rest; set isUpdatable=false separately only when the field should be immutable. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"api_key","type":"varchar","isEncrypted":true,"isPublished":false}]'),
       relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id, {"id": <id>}, or an exact table name that MCP resolves to an id before mutation. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Example: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
       indexes: z.string().optional().describe('JSON array of logical index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Example: [["member","isRead","conversation"],["conversation","member","isRead"]]'),
@@ -514,7 +514,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
       if (indexesJson !== undefined) body.indexes = indexes;
       if (uniquesJson !== undefined) body.uniques = uniques;
-      const result = await fetchAPI(ENFYRA_API_URL, '/table_definition', {
+      const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_table', {
         method: 'POST',
         body: JSON.stringify(body),
       });
@@ -558,9 +558,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       alias: z.string().optional().describe('New table alias.'),
       description: z.string().optional().describe('New description.'),
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record table (e.g., settings/config).'),
-      graphqlEnabled: z.boolean().optional().describe('Enable or disable GraphQL for this table by syncing gql_definition.isEnabled. GraphQL still requires Bearer auth.'),
-      indexes: z.string().optional().describe('Complete JSON array of logical index field groups to store on table_definition.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear.'),
-      uniques: z.string().optional().describe('Complete JSON array of logical unique field groups to store on table_definition.uniques. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current uniques; pass [] to clear.'),
+      graphqlEnabled: z.boolean().optional().describe('Enable or disable GraphQL for this table by syncing enfyra_graphql.isEnabled. GraphQL still requires Bearer auth.'),
+      indexes: z.string().optional().describe('Complete JSON array of logical index field groups to store on enfyra_table.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear.'),
+      uniques: z.string().optional().describe('Complete JSON array of logical unique field groups to store on enfyra_table.uniques. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current uniques; pass [] to clear.'),
     },
     async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled, indexes: indexesJson, uniques: uniquesJson }) => withSchemaQueue(async () => {
       const body = {};
@@ -607,7 +607,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           }, null, 2) }],
         };
       }
-      const result = await fetchAPI(ENFYRA_API_URL, `/table_definition/${tableId}`, {
+      const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}`, {
         method: 'DELETE',
       });
       return {
@@ -621,8 +621,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'create_column',
     [
-      'Add a column to an existing table via PATCH /table_definition/{tableId}.',
-      'Columns are managed through cascade with table_definition — there is NO direct /column_definition endpoint.',
+      'Add a column to an existing table via PATCH /enfyra_table/{tableId}.',
+      'Columns are managed through cascade with enfyra_table — there is NO direct /enfyra_column endpoint.',
       'This tool reads full table metadata, keeps only persisted column rows with id/_id, appends the new one, PATCHes the table, and verifies unrelated columns survived.',
       'Generated metadata projections such as createdAt, updatedAt, or relation-derived FK display fields without id are not valid cascade rows and are skipped.',
       'Run schema changes sequentially — migration locks DB per operation.',
@@ -636,7 +636,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'add_column',
     [
-      'Alias for create_column. Add a column to an existing table through the canonical table_definition cascade.',
+      'Alias for create_column. Add a column to an existing table through the canonical enfyra_table cascade.',
       'Use this for schema additions, including hidden secret fields with isPublished=false.',
       'Reads full table metadata and skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
       'Run schema changes sequentially — migration locks DB per operation.',
@@ -650,7 +650,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'update_column',
     [
-      'Update an existing column on a table via PATCH /table_definition/{tableId}.',
+      'Update an existing column on a table via PATCH /enfyra_table/{tableId}.',
       'Reads full table metadata, keeps only persisted rows with id/_id, modifies the target column, PATCHes the table, and verifies unrelated columns survived.',
       'Generated metadata projections such as createdAt, updatedAt, or relation-derived FK display fields without id are skipped.',
       'Run schema changes sequentially — migration locks DB per operation.',
@@ -711,7 +711,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'delete_column',
     [
-      'Delete a column from a table via PATCH /table_definition/{tableId}.',
+      'Delete a column from a table via PATCH /enfyra_table/{tableId}.',
       'Reads full table metadata, keeps only persisted rows with id/_id, removes the target, PATCHes the table, and verifies unrelated columns survived.',
       'The physical column is dropped from the database. System columns (id, createdAt, updatedAt) cannot be deleted.',
       'Run schema changes sequentially — migration locks DB per operation.',
@@ -725,7 +725,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'remove_column',
     [
-      'Alias for delete_column. Remove a column through the canonical table_definition cascade.',
+      'Alias for delete_column. Remove a column through the canonical enfyra_table cascade.',
       'This drops the physical column. Confirm destructive schema changes before calling.',
       'Reads full table metadata and skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
       'Run schema changes sequentially — migration locks DB per operation.',
@@ -753,7 +753,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'add_relation',
     [
-      'Alias for create_relation. Add a relation through the canonical table_definition cascade.',
+      'Alias for create_relation. Add a relation through the canonical enfyra_table cascade.',
       'Use relation propertyName only; never provide physical FK or junction column names.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
@@ -766,7 +766,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'delete_relation',
     [
-      'Delete a relation from a table via PATCH /table_definition/{tableId}.',
+      'Delete a relation from a table via PATCH /enfyra_table/{tableId}.',
       'Fetches all relations, removes the target, and PATCHes the table.',
       'Drops FK columns and junction tables (for many-to-many).',
     ].join(' '),
@@ -779,7 +779,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   server.tool(
     'remove_relation',
     [
-      'Alias for delete_relation. Remove a relation through the canonical table_definition cascade.',
+      'Alias for delete_relation. Remove a relation through the canonical enfyra_table cascade.',
       'This can drop FK columns or junction tables. Confirm destructive schema changes before calling.',
     ].join(' '),
     relationDeleteSchema,

@@ -31,7 +31,7 @@ function jsonResponse(body, status = 200) {
   });
 }
 
-test('fetchTableWithDetails reads full columns from metadata instead of table_definition nested fields', async () => {
+test('fetchTableWithDetails reads full columns from metadata instead of enfyra_table nested fields', async () => {
   const originalFetch = global.fetch;
   const calls = [];
   const metadataColumns = Array.from({ length: 12 }, (_, index) => ({
@@ -45,7 +45,7 @@ test('fetchTableWithDetails reads full columns from metadata instead of table_de
     if (String(url).endsWith('/auth/token/exchange')) {
       return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
     }
-    if (String(url).includes('/table_definition?')) {
+    if (String(url).includes('/enfyra_table?')) {
       return jsonResponse({
         data: [{
           id: 79,
@@ -97,11 +97,11 @@ test('fetchTableWithDetails falls back to metadata table name when metadata id i
     if (String(url).endsWith('/auth/token/exchange')) {
       return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
     }
-    if (String(url).includes('/table_definition?')) {
+    if (String(url).includes('/enfyra_table?')) {
       return jsonResponse({
         data: [{
           id: 1,
-          name: 'column_definition',
+          name: 'enfyra_column',
           columns: [],
           relations: [],
         }],
@@ -112,7 +112,7 @@ test('fetchTableWithDetails falls back to metadata table name when metadata id i
         data: {
           tables: [{
             id: true,
-            name: 'column_definition',
+            name: 'enfyra_column',
             columns: [{ id: 3, name: 'type', type: 'enum' }],
             relations: [],
           }],
@@ -127,7 +127,7 @@ test('fetchTableWithDetails falls back to metadata table name when metadata id i
     initAuth('https://example.test/api', 'api-token');
     const table = await fetchTableWithDetails('https://example.test/api', 1);
 
-    assert.equal(table.name, 'column_definition');
+    assert.equal(table.name, 'enfyra_column');
     assert.equal(table.columns[0].name, 'type');
   } finally {
     resetTokens();
@@ -136,16 +136,16 @@ test('fetchTableWithDetails falls back to metadata table name when metadata id i
 });
 
 test('resolveTableFromMetadataByName supports table name and alias', () => {
-  const metadata = { data: { tables: [{ id: true, name: 'column_definition' }, { id: 2, alias: 'Posts' }] } };
-  assert.equal(resolveTableFromMetadataByName(metadata, 'column_definition')?.id, true);
+  const metadata = { data: { tables: [{ id: true, name: 'enfyra_column' }, { id: 2, alias: 'Posts' }] } };
+  assert.equal(resolveTableFromMetadataByName(metadata, 'enfyra_column')?.id, true);
   assert.equal(resolveTableFromMetadataByName(metadata, 'Posts')?.id, 2);
 });
 
 test('resolveRelationTargetsFromMetadata converts table names to ids before schema mutation', () => {
-  const metadata = { data: { tables: [{ id: 4, name: 'user_definition' }, { id: 9, name: 'post' }] } };
+  const metadata = { data: { tables: [{ id: 4, name: 'enfyra_user' }, { id: 9, name: 'post' }] } };
   assert.deepEqual(
     resolveRelationTargetsFromMetadata(metadata, [
-      { propertyName: 'owner', type: 'many-to-one', targetTable: 'user_definition' },
+      { propertyName: 'owner', type: 'many-to-one', targetTable: 'enfyra_user' },
       { propertyName: 'post', type: 'many-to-one', targetTable: { id: 9 } },
       { propertyName: 'external', type: 'many-to-one', targetTable: '64f011111111111111111111' },
     ]),
@@ -378,11 +378,11 @@ test('prepareRecordMutation validates sourceCode and rejects compiledCode/code a
     fetchAPI: fetchMock,
     apiUrl: 'https://example.test/api',
     tables: [{
-      name: 'route_handler_definition',
+      name: 'enfyra_route_handler',
       columns: [{ name: 'sourceCode' }, { name: 'scriptLanguage' }],
       relations: [{ propertyName: 'route' }, { propertyName: 'method' }],
     }],
-    tableName: 'route_handler_definition',
+    tableName: 'enfyra_route_handler',
     data: JSON.stringify({ sourceCode: 'return true;', scriptLanguage: 'javascript' }),
   });
 
@@ -393,11 +393,11 @@ test('prepareRecordMutation validates sourceCode and rejects compiledCode/code a
       fetchAPI: fetchMock,
       apiUrl: 'https://example.test/api',
       tables: [{
-        name: 'route_handler_definition',
+        name: 'enfyra_route_handler',
         columns: [{ name: 'sourceCode' }, { name: 'scriptLanguage' }, { name: 'compiledCode' }],
         relations: [],
       }],
-      tableName: 'route_handler_definition',
+      tableName: 'enfyra_route_handler',
       data: JSON.stringify({ sourceCode: 'return true;', compiledCode: 'stale' }),
     }),
     /compiledCode/
@@ -407,11 +407,11 @@ test('prepareRecordMutation validates sourceCode and rejects compiledCode/code a
       fetchAPI: fetchMock,
       apiUrl: 'https://example.test/api',
       tables: [{
-        name: 'pre_hook_definition',
+        name: 'enfyra_pre_hook',
         columns: [{ name: 'sourceCode' }, { name: 'scriptLanguage' }, { name: 'code' }],
         relations: [],
       }],
-      tableName: 'pre_hook_definition',
+      tableName: 'enfyra_pre_hook',
       data: JSON.stringify({ code: 'return true;' }),
     }),
     /sourceCode/
@@ -428,11 +428,11 @@ test('prepareRecordMutation fails closed when script validation endpoint is unav
       fetchAPI: fetchMock,
       apiUrl: 'https://example.test/api',
       tables: [{
-        name: 'route_handler_definition',
+        name: 'enfyra_route_handler',
         columns: [{ name: 'sourceCode' }, { name: 'scriptLanguage' }],
         relations: [],
       }],
-      tableName: 'route_handler_definition',
+      tableName: 'enfyra_route_handler',
       data: JSON.stringify({ sourceCode: 'return true;', scriptLanguage: 'javascript' }),
     }),
     /Script validation failed before save/
@@ -524,6 +524,19 @@ test('query guidance documents fields exclusion mode', () => {
   assert.match(readme, /`fields=-owner\.avatar`/);
 });
 
+test('operator guidance avoids speculative warnings and physical FK generated code', () => {
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  assert.match(instructions, /Do not turn normal implementation details into speculative warnings/);
+  assert.match(instructions, /`compiledCode` is expected to differ textually from `sourceCode`/);
+  assert.match(instructions, /Do not hardcode physical FK fields such as `userId`, `conversationId`, `senderId`, or `memberId`/);
+  assert.match(examples, /conversationId is accepted only as the room\/business identifier; persistence uses relation properties conversation and sender/);
+  assert.match(examples, /Do not ask the client for senderId\. The sender relation is derived from @USER\.id/);
+  assert.match(readme, /`compiledCode` is generated from `sourceCode` and may differ textually/);
+  assert.match(readme, /use relation property names such as `conversation`, `sender`, and `member`/);
+});
+
 test('RLS guidance preserves caller projection and pagination', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
@@ -574,13 +587,13 @@ test('sanitizeExistingRelationForTablePatch strips physical fields from metadata
   });
 });
 
-test('prepareRecordMutation rejects direct relation_definition physical FK inputs', async () => {
+test('prepareRecordMutation rejects direct enfyra_relation physical FK inputs', async () => {
   await assert.rejects(
     () => prepareRecordMutation({
       fetchAPI: async () => ({ success: true, valid: true }),
       apiUrl: 'https://example.test/api',
       tables: [{
-        name: 'relation_definition',
+        name: 'enfyra_relation',
         columns: [
           { name: 'propertyName' },
           { name: 'type' },
@@ -588,7 +601,7 @@ test('prepareRecordMutation rejects direct relation_definition physical FK input
         ],
         relations: [{ propertyName: 'targetTable' }],
       }],
-      tableName: 'relation_definition',
+      tableName: 'enfyra_relation',
       data: JSON.stringify({
         propertyName: 'owner',
         type: 'many-to-one',

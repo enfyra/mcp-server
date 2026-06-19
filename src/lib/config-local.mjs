@@ -6,50 +6,102 @@ import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 
 const SERVER_KEY = 'enfyra';
+const forceColor = process.env.FORCE_COLOR != null && process.env.FORCE_COLOR !== '0';
+const canStyle = forceColor || (output.isTTY && process.env.NO_COLOR == null);
+const style = {
+  bold: value => canStyle ? `\x1B[1m${value}\x1B[22m` : value,
+  dim: value => canStyle ? `\x1B[2m${value}\x1B[22m` : value,
+  cyan: value => canStyle ? `\x1B[36m${value}\x1B[39m` : value,
+  green: value => canStyle ? `\x1B[32m${value}\x1B[39m` : value,
+  magenta: value => canStyle ? `\x1B[35m${value}\x1B[39m` : value,
+  blue: value => canStyle ? `\x1B[34m${value}\x1B[39m` : value,
+  yellow: value => canStyle ? `\x1B[33m${value}\x1B[39m` : value,
+  underline: value => canStyle ? `\x1B[4m${value}\x1B[24m` : value,
+  inverse: value => canStyle ? `\x1B[7m${value}\x1B[27m` : value,
+};
+
+const clients = {
+  codex: {
+    label: 'Codex',
+    path: './.codex/config.toml',
+    color: style.green,
+  },
+  claude: {
+    label: 'Claude Code',
+    path: './.mcp.json',
+    color: style.magenta,
+  },
+  cursor: {
+    label: 'Cursor',
+    path: './.cursor/mcp.json',
+    color: style.cyan,
+  },
+};
+
+function statusIcon(kind) {
+  if (kind === 'success') return canStyle ? style.green('✓') : 'Done';
+  if (kind === 'warn') return canStyle ? style.yellow('!') : 'Warning';
+  return canStyle ? style.cyan('•') : '-';
+}
+
+function isCancelError(error) {
+  return error?.code === 'ABORT_ERR' || (error?.message || '') === 'Cancelled';
+}
+
+function exitCancelled() {
+  console.log('\nCancelled.');
+  process.exit(130);
+}
 
 function printHelp() {
-  console.log(`enfyra-mcp — write MCP config (Codex + Claude Code + Cursor)
+  console.log(`${style.bold('Enfyra MCP config')}
+${style.dim('Write local MCP client config for Enfyra.')}
 
-Usage:
+${style.bold('Usage')}
   npx @enfyra/mcp-server config [options]
 
-Writes project config under the current working directory:
-  • ./.mcp.json           — Claude Code project scope
-  • ./.cursor/mcp.json    — Cursor project scope
-  • ./.codex/config.toml  — Codex project scope
+${style.bold('Supported clients')}
+  Codex        ./.codex/config.toml
+  Claude Code  ./.mcp.json
+  Cursor       ./.cursor/mcp.json
+  Other MCP hosts can use the shared stdio JSON from the README.
 
-Options:
-  --api-url, -a <url>     ENFYRA_API_URL
-  --api-token, -t <secret> ENFYRA_API_TOKEN
-  --global                Write global/user config for selected hosts instead of project config
+${style.bold('Options')}
+  --app-url <url>          Enfyra app/admin URL, for example https://demo.enfyra.io
+  --api-token, -t <secret>  ENFYRA_API_TOKEN
+  --global                Write global/user config for selected clients instead of project config
   --reconfig              Always choose target again in interactive mode and replace the old enfyra config for that target
   --yes                   Non-interactive: no prompts (CI / scripts); use CLI, env, existing file, then defaults
-  Target — non-interactive default is all; with TTY and no target flags, choose with ↑/↓:
+
+${style.bold('Client selection')}
+  Non-interactive default is all supported clients. In a TTY with no target flags, choose with ↑/↓.
+
   --claude-code, --claude, --claude-only   Only ./.mcp.json (Claude Code project scope)
   --cursor, --cursor-only                  Only ./.cursor/mcp.json (Cursor)
   --codex, --codex-only                    Only ./.codex/config.toml (Codex project scope)
   Passing multiple target flags writes each selected target.
+
   -h, --help              Show this help
 
-Interactive mode: lets you choose Claude Code / Cursor / Codex / all if you did not pass target flags; then asks for URL / API token
-  when missing. Existing project config is used as defaults. Re-run to update.
+${style.bold('Interactive mode')}
+  Choose Codex, Claude Code, Cursor, or all clients; then enter ENFYRA_APP_URL and ENFYRA_API_TOKEN.
+  Existing Enfyra config and environment variables are used as defaults. Re-run anytime to update.
 
-Examples:
+${style.bold('Examples')}
   npx @enfyra/mcp-server config
+  npx @enfyra/mcp-server config --yes
+  npx @enfyra/mcp-server config --codex --cursor
   npx @enfyra/mcp-server config --claude-code
-  npx @enfyra/mcp-server config --cursor --yes
-  npx @enfyra/mcp-server config --codex --yes
   npx @enfyra/mcp-server config --global --codex
   npx @enfyra/mcp-server config --reconfig
-  npx @enfyra/mcp-server config -a http://localhost:3000/api -t 'efy_pat_...'
-  npx @enfyra/mcp-server config --yes
-  ENFYRA_API_TOKEN=efy_pat_... npx @enfyra/mcp-server config --yes
+  npx @enfyra/mcp-server config --app-url http://localhost:3000 -t 'efy_pat_...'
+  ENFYRA_APP_URL=https://demo.enfyra.io ENFYRA_API_TOKEN=efy_pat_... npx @enfyra/mcp-server config --yes
 `);
 }
 
 function parseArgs(argv) {
   const out = {
-    apiUrl: undefined,
+    appUrl: undefined,
     apiToken: undefined,
     claude: true,
     cursor: true,
@@ -75,7 +127,10 @@ function parseArgs(argv) {
     else if (a === '--yes') out.yes = true;
     else if (a === '--reconfig') out.reconfig = true;
     else if (a === '--global') out.global = true;
-    else if (a === '--api-url' || a === '-a') out.apiUrl = next();
+    else if (a === '--app-url') out.appUrl = next();
+    else if (a === '--api-url' || a === '-a') {
+      throw new Error(`${a} is no longer supported for setup; use --app-url instead`);
+    }
     else if (a === '--api-token' || a === '-t') out.apiToken = next();
     else if (a === '--email' || a === '-e' || a === '--password' || a === '-p') {
       throw new Error(`${a} is no longer supported; use --api-token instead`);
@@ -103,6 +158,34 @@ function buildServerEntry(apiUrl, apiToken) {
       ENFYRA_API_TOKEN: apiToken,
     },
   };
+}
+
+function normalizeAppUrl(appUrl) {
+  const raw = String(appUrl || '').trim().replace(/\/+$/, '');
+  if (!raw) return '';
+  return raw.replace(/\/(?:api|enfyra)$/i, '') || raw;
+}
+
+function deriveApiUrlFromAppUrl(appUrl) {
+  const normalized = normalizeAppUrl(appUrl);
+  return normalized ? `${normalized}/api` : 'http://localhost:3000/api';
+}
+
+function deriveAppUrlFromApiUrl(apiUrl) {
+  return normalizeAppUrl(apiUrl);
+}
+
+function deriveMeUrl(appUrl) {
+  const normalized = normalizeAppUrl(appUrl);
+  return normalized ? `${normalized}/me` : '/me';
+}
+
+function resolveDefaultAppUrl(opts, existing) {
+  const appCandidate = opts.appUrl ?? process.env.ENFYRA_APP_URL;
+  if (appCandidate) return normalizeAppUrl(appCandidate);
+  const apiCandidate = process.env.ENFYRA_API_URL ?? existing.apiUrl;
+  if (apiCandidate) return deriveAppUrlFromApiUrl(apiCandidate);
+  return 'http://localhost:3000';
 }
 
 async function mergeMcpFile(absPath, serverEntry) {
@@ -160,7 +243,8 @@ async function mergeCodexConfig(absPath, apiUrl, apiToken) {
     if (!skip) kept.push(line);
   }
 
-  const next = `${kept.join('\n').trimEnd()}\n\n${buildCodexTomlBlock(apiUrl, apiToken)}`;
+  const prefix = kept.join('\n').trimEnd();
+  const next = prefix ? `${prefix}\n\n${buildCodexTomlBlock(apiUrl, apiToken)}` : buildCodexTomlBlock(apiUrl, apiToken);
   await mkdir(dirname(absPath), { recursive: true });
   await writeFile(absPath, next, 'utf8');
 }
@@ -213,6 +297,13 @@ function getCursorConfigPath(root, globalScope) {
   return globalScope ? join(homedir(), '.cursor', 'mcp.json') : join(root, '.cursor', 'mcp.json');
 }
 
+function getClientPath(client, root, globalScope) {
+  if (client === 'claude') return getClaudeConfigPath(root, globalScope);
+  if (client === 'cursor') return getCursorConfigPath(root, globalScope);
+  if (client === 'codex') return getCodexConfigPath(root, globalScope);
+  throw new Error(`Unknown MCP client: ${client}`);
+}
+
 async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, globalScope) {
   const paths = [];
   if (readClaude) paths.push(getClaudeConfigPath(root, globalScope));
@@ -246,19 +337,19 @@ async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, gl
 async function promptTargetChoice() {
   const choices = [
     {
-      label: 'Claude Code — project ./.mcp.json',
-      value: { claude: true, cursor: false, codex: false },
-    },
-    {
-      label: 'Cursor — project ./.cursor/mcp.json',
-      value: { claude: false, cursor: true, codex: false },
-    },
-    {
-      label: 'Codex — project ./.codex/config.toml',
+      client: 'codex',
       value: { claude: false, cursor: false, codex: true },
     },
     {
-      label: 'All',
+      client: 'claude',
+      value: { claude: true, cursor: false, codex: false },
+    },
+    {
+      client: 'cursor',
+      value: { claude: false, cursor: true, codex: false },
+    },
+    {
+      client: 'all',
       value: { claude: true, cursor: true, codex: true },
     },
   ];
@@ -269,9 +360,9 @@ async function promptTargetChoice() {
   const rl = createInterface({ input, output });
   const line = (await rl.question(
     'Where should Enfyra MCP config be written?\n'
-      + '  [1] Claude Code — ./.mcp.json\n'
-      + '  [2] Cursor — ./.cursor/mcp.json\n'
-      + '  [3] Codex — ./.codex/config.toml\n'
+      + '  [1] Codex        ./.codex/config.toml\n'
+      + '  [2] Claude Code  ./.mcp.json\n'
+      + '  [3] Cursor       ./.cursor/mcp.json\n'
       + '  [4] All [default]\n'
       + 'Choice [4]: ',
   )).trim().toLowerCase();
@@ -279,14 +370,14 @@ async function promptTargetChoice() {
   if (line === '' || line === '4' || line === 'all' || line === 'a') {
     return { claude: true, cursor: true, codex: true };
   }
-  if (line === '1' || line === 'c' || line === 'claude') {
+  if (line === '1' || line === 'codex' || line === 'x') {
+    return { claude: false, cursor: false, codex: true };
+  }
+  if (line === '2' || line === 'claude' || line === 'claude-code') {
     return { claude: true, cursor: false, codex: false };
   }
-  if (line === '2' || line === 'u' || line === 'cursor') {
+  if (line === '3' || line === 'cursor' || line === 'u') {
     return { claude: false, cursor: true, codex: false };
-  }
-  if (line === '3' || line === 'x' || line === 'codex') {
-    return { claude: false, cursor: false, codex: true };
   }
   return { claude: true, cursor: true, codex: true };
 }
@@ -295,15 +386,35 @@ async function promptTargetSelect(choices, initialIndex = 0) {
   let selected = Math.max(0, Math.min(initialIndex, choices.length - 1));
   let renderedLines = 0;
 
+  const formatChoice = (choice, active) => {
+    const indicator = active ? style.cyan('◆') : style.dim('◇');
+    const accent = active ? style.cyan('│') : style.dim('│');
+    if (choice.client === 'all') {
+      const label = active ? style.bold(style.underline('All supported clients')) : 'All supported clients';
+      const paddedLabel = label + ' '.repeat(22 - 'All supported clients'.length);
+      const hint = active ? style.cyan('Codex + Claude Code + Cursor') : style.dim('Codex + Claude Code + Cursor');
+      return `${accent} ${indicator} ${paddedLabel} ${hint}`;
+    }
+
+    const meta = clients[choice.client];
+    const label = active ? style.bold(meta.color(meta.label)) : meta.color(meta.label);
+    const paddedLabel = label + ' '.repeat(Math.max(1, 22 - meta.label.length));
+    const path = active ? style.cyan(meta.path) : style.dim(meta.path);
+    return `${accent} ${indicator} ${paddedLabel} ${path}`;
+  };
+
   const render = () => {
     if (renderedLines > 0) {
       output.write(`\x1B[${renderedLines}A\x1B[0J`);
     }
     const lines = [
-      'Where should Enfyra MCP config be written?',
-      ...choices.map((choice, index) => `${index === selected ? '›' : ' '} ${choice.label}`),
-      '',
-      'Use ↑/↓ to move, Enter to select.',
+      `${style.cyan('◆')} ${style.bold('Enfyra MCP setup')}`,
+      `${style.dim('│')} ${style.dim('Choose where to write the project config.')}`,
+      style.dim('│'),
+      ...choices.map((choice, index) => formatChoice(choice, index === selected)),
+      style.dim('│'),
+      style.dim('Choose one client config, or write all supported project configs.'),
+      `${style.dim('└')} ${style.dim('Use ↑/↓ to move, Enter to select, Ctrl+C to cancel.')}`,
     ];
     renderedLines = lines.length;
     output.write(`${lines.join('\n')}\n`);
@@ -352,31 +463,41 @@ async function promptTargetSelect(choices, initialIndex = 0) {
 }
 
 async function promptConfig(opts, existing) {
-  let apiUrl = opts.apiUrl;
+  let appUrl = opts.appUrl ? normalizeAppUrl(opts.appUrl) : '';
   let apiToken = opts.apiToken;
-  if (apiUrl !== undefined && apiToken !== undefined) {
-    return { apiUrl: String(apiUrl).replace(/\/$/, ''), apiToken };
+  if (appUrl && apiToken !== undefined) {
+    return { apiUrl: deriveApiUrlFromAppUrl(appUrl), apiToken };
   }
 
   const rl = createInterface({ input, output });
-  const q = (msg) => rl.question(msg);
+  const q = async (msg) => {
+    try {
+      return await rl.question(msg);
+    } catch (error) {
+      if (isCancelError(error)) {
+        throw new Error('Cancelled');
+      }
+      throw error;
+    }
+  };
 
-  const defaultUrl = (
-    opts.apiUrl ??
-    process.env.ENFYRA_API_URL ??
-    (existing.apiUrl || undefined) ??
-    'http://localhost:3000/api'
-  ).replace(/\/$/, '');
-  if (apiUrl === undefined) {
-    const line = (await q(`ENFYRA_API_URL [${defaultUrl}]: `)).trim();
-    apiUrl = line || defaultUrl;
+  const defaultAppUrl = resolveDefaultAppUrl(opts, existing);
+  if (!appUrl) {
+    console.log(`${style.cyan('◆')} ${style.bold('Connect to Enfyra')}`);
+    console.log(`${style.dim('│')} Enter the Enfyra app URL.`);
+    const line = (await q(`${style.dim('└')} ENFYRA_APP_URL ${style.dim(`[${defaultAppUrl}]`)}: `)).trim();
+    appUrl = normalizeAppUrl(line || defaultAppUrl);
   }
-  apiUrl = String(apiUrl).replace(/\/$/, '');
+  const apiUrl = deriveApiUrlFromAppUrl(appUrl);
 
   const defaultApiToken = opts.apiToken ?? process.env.ENFYRA_API_TOKEN ?? existing.apiToken ?? '';
   if (apiToken === undefined) {
     const hint = defaultApiToken ? ' (Enter = keep current)' : '';
-    const line = (await q(`ENFYRA_API_TOKEN${hint}: `)).trim();
+    const meUrl = deriveMeUrl(appUrl);
+    console.log('');
+    console.log(`${style.cyan('◆')} ${style.bold('API token')}`);
+    console.log(`${style.dim('│')} If you do not have a token yet, create one here: ${style.cyan(meUrl)}`);
+    const line = (await q(`${style.dim('└')} ENFYRA_API_TOKEN${hint}: `)).trim();
     apiToken = line !== '' ? line : defaultApiToken;
   }
 
@@ -385,17 +506,25 @@ async function promptConfig(opts, existing) {
 }
 
 function resolveNonInteractive(opts, existing) {
-  const apiUrl = (
-    opts.apiUrl ??
-    process.env.ENFYRA_API_URL ??
-    (existing.apiUrl || undefined) ??
-    'http://localhost:3000/api'
-  ).replace(/\/$/, '');
+  const appUrl = resolveDefaultAppUrl(opts, existing);
+  const apiUrl = deriveApiUrlFromAppUrl(appUrl);
   const apiToken = opts.apiToken ?? process.env.ENFYRA_API_TOKEN ?? existing.apiToken ?? '';
   return { apiUrl, apiToken };
 }
 
 export async function runLocalConfig(argv) {
+  const onSigint = () => exitCancelled();
+  const onUnhandledRejection = (error) => {
+    if (isCancelError(error)) exitCancelled();
+  };
+  const onUncaughtException = (error) => {
+    if (isCancelError(error)) exitCancelled();
+    throw error;
+  };
+  process.once('SIGINT', onSigint);
+  process.once('unhandledRejection', onUnhandledRejection);
+  process.once('uncaughtException', onUncaughtException);
+
   let opts;
   try {
     opts = parseArgs(argv);
@@ -427,43 +556,67 @@ export async function runLocalConfig(argv) {
 
   let apiUrl;
   let apiToken;
-  if (usePrompt) {
-    const resolved = await promptConfig(opts, existing);
-    apiUrl = resolved.apiUrl;
-    apiToken = resolved.apiToken;
-  } else {
-    const resolved = resolveNonInteractive(opts, existing);
-    apiUrl = resolved.apiUrl;
-    apiToken = resolved.apiToken;
+  try {
+    if (usePrompt) {
+      const resolved = await promptConfig(opts, existing);
+      apiUrl = resolved.apiUrl;
+      apiToken = resolved.apiToken;
+    } else {
+      const resolved = resolveNonInteractive(opts, existing);
+      apiUrl = resolved.apiUrl;
+      apiToken = resolved.apiToken;
+    }
+  } catch (error) {
+    if (isCancelError(error)) {
+      exitCancelled();
+      return;
+    }
+    throw error;
   }
 
   const serverEntry = buildServerEntry(apiUrl, apiToken);
   const written = [];
 
+  if (writeCodex) {
+    const p = getClientPath('codex', root, opts.global);
+    await mergeCodexConfig(p, apiUrl, apiToken);
+    written.push({ client: 'codex', path: p });
+  }
   if (writeClaude) {
-    const p = getClaudeConfigPath(root, opts.global);
+    const p = getClientPath('claude', root, opts.global);
     await mergeMcpFile(p, serverEntry);
-    written.push(p);
+    written.push({ client: 'claude', path: p });
   }
   if (writeCursor) {
-    const p = getCursorConfigPath(root, opts.global);
+    const p = getClientPath('cursor', root, opts.global);
     await mergeMcpFile(p, serverEntry);
-    written.push(p);
-  }
-  if (writeCodex) {
-    const p = getCodexConfigPath(root, opts.global);
-    await mergeCodexConfig(p, apiUrl, apiToken);
-    written.push(p);
+    written.push({ client: 'cursor', path: p });
   }
 
-  console.log('Enfyra MCP — local config updated:\n');
-  for (const p of written) console.log(`  ${p}`);
-  console.log('\nNext steps:');
-  console.log('  • Codex: open this folder in a new Codex session so project ./.codex/config.toml is loaded.');
-  console.log('  • Claude Code: open this folder; approve project MCP if prompted (`claude mcp reset-project-choices` to reset).');
-  console.log('  • Cursor: open this folder, restart Cursor or reload MCP, then confirm server under Settings → MCP.');
-  console.log('  • Run `config` again anytime to change values (same files are merged/overwritten for `enfyra`).');
-  if (!apiToken) {
-    console.log('\nWarning: ENFYRA_API_TOKEN is empty — tools will not authenticate until set.');
+  const scopeLabel = opts.global ? 'global/user' : 'project';
+  console.log(`${statusIcon('success')} ${style.bold(style.green('Enfyra MCP config updated'))} ${style.dim(`(${scopeLabel})`)}\n`);
+  for (const entry of written) {
+    const meta = clients[entry.client];
+    console.log(`  ${style.cyan('•')} ${style.bold(meta.color(meta.label))}`);
+    console.log(`    ${style.dim(entry.path)}`);
   }
+
+  const selectedClients = new Set(written.map(entry => entry.client));
+  console.log(`\n${style.bold(style.blue('Next steps'))}`);
+  if (selectedClients.has('codex')) {
+    console.log('  - Codex: open this folder in a new Codex session and approve the project MCP config if prompted.');
+  }
+  if (selectedClients.has('claude')) {
+    console.log('  - Claude Code: open this folder; approve project MCP if prompted.');
+  }
+  if (selectedClients.has('cursor')) {
+    console.log('  - Cursor: restart Cursor or reload MCP, then confirm the server under Settings -> MCP.');
+  }
+  console.log('  - Re-run this command anytime to update the same Enfyra entries.');
+  if (!apiToken) {
+    console.log(`\n${statusIcon('warn')} ${style.yellow('ENFYRA_API_TOKEN is empty; tools will not authenticate until it is set.')}`);
+  }
+  process.off('SIGINT', onSigint);
+  process.off('unhandledRejection', onUnhandledRejection);
+  process.off('uncaughtException', onUncaughtException);
 }

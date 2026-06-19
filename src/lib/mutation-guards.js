@@ -1,23 +1,23 @@
 const SCRIPT_TABLES = new Set([
-  'route_handler_definition',
-  'pre_hook_definition',
-  'post_hook_definition',
-  'flow_step_definition',
-  'websocket_event_definition',
-  'websocket_definition',
-  'gql_definition',
-  'bootstrap_script_definition',
+  'enfyra_route_handler',
+  'enfyra_pre_hook',
+  'enfyra_post_hook',
+  'enfyra_flow_step',
+  'enfyra_websocket_event',
+  'enfyra_websocket',
+  'enfyra_graphql',
+  'enfyra_bootstrap_script',
 ]);
 
 const CODE_ALIAS_FORBIDDEN_TABLES = new Set([
-  'route_handler_definition',
-  'pre_hook_definition',
-  'post_hook_definition',
-  'flow_step_definition',
-  'websocket_event_definition',
-  'websocket_definition',
-  'gql_definition',
-  'bootstrap_script_definition',
+  'enfyra_route_handler',
+  'enfyra_pre_hook',
+  'enfyra_post_hook',
+  'enfyra_flow_step',
+  'enfyra_websocket_event',
+  'enfyra_websocket',
+  'enfyra_graphql',
+  'enfyra_bootstrap_script',
 ]);
 
 const FORBIDDEN_RELATION_DEFINITION_KEYS = new Set([
@@ -67,11 +67,11 @@ export function rejectUnsafeScriptPayload(tableName, payload) {
 }
 
 export function rejectUnsafeRelationDefinitionPayload(tableName, payload) {
-  if (tableName !== 'relation_definition') return;
+  if (tableName !== 'enfyra_relation') return;
   const forbidden = Object.keys(payload).filter((key) => FORBIDDEN_RELATION_DEFINITION_KEYS.has(key));
   if (forbidden.length > 0) {
     throw new Error(
-      `Do not send physical FK/junction fields to relation_definition: ${forbidden.join(', ')}. ` +
+      `Do not send physical FK/junction fields to enfyra_relation: ${forbidden.join(', ')}. ` +
       'Use create_relation/add_relation with targetTable/type/propertyName; Enfyra derives physical columns.'
     );
   }

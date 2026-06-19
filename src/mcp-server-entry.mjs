@@ -40,52 +40,52 @@ initAuth(ENFYRA_API_URL, ENFYRA_API_TOKEN);
 const CAPABILITY_AREAS = [
   {
     area: 'Schema and metadata',
-    tables: ['table_definition', 'column_definition', 'relation_definition', 'schema_migration_definition'],
-    workflow: 'Use table tools for table/column/relation schema changes. column_definition and session_definition are internal/no-route; do not CRUD them directly.',
+    tables: ['enfyra_table', 'enfyra_column', 'enfyra_relation', 'enfyra_schema_migration'],
+    workflow: 'Use table tools for table/column/relation schema changes. enfyra_column and enfyra_session are internal/no-route; do not CRUD them directly.',
   },
   {
     area: 'Dynamic REST API',
-    tables: ['route_definition', 'route_handler_definition', 'pre_hook_definition', 'post_hook_definition', 'route_permission_definition', 'method_definition'],
-    workflow: 'Create custom paths with create_route without mainTableId, then add handlers/hooks. mainTableId is only for canonical table routes like /table_name. Query method_definition before assigning route methods.',
+    tables: ['enfyra_route', 'enfyra_route_handler', 'enfyra_pre_hook', 'enfyra_post_hook', 'enfyra_route_permission', 'enfyra_method'],
+    workflow: 'Create custom paths with create_route without mainTableId, then add handlers/hooks. mainTableId is only for canonical table routes like /table_name. Query enfyra_method before assigning route methods.',
   },
   {
     area: 'Auth, roles, sessions, OAuth',
-    tables: ['user_definition', 'role_definition', 'api_token_definition', 'session_definition', 'oauth_config_definition', 'oauth_account_definition'],
-    workflow: 'MCP auth exchanges ENFYRA_API_TOKEN through /auth/token/exchange. Configure an API token from eApp /me.',
+    tables: ['enfyra_user', 'enfyra_role', 'enfyra_api_token', 'enfyra_session', 'enfyra_oauth_config', 'enfyra_oauth_account'],
+    workflow: 'MCP auth exchanges ENFYRA_API_TOKEN through /auth/token/exchange. Configure an API token from Enfyra admin UI /me.',
   },
   {
     area: 'Guards and permissions',
-    tables: ['guard_definition', 'guard_rule_definition', 'field_permission_definition', 'column_rule_definition'],
+    tables: ['enfyra_guard', 'enfyra_guard_rule', 'enfyra_field_permission', 'enfyra_column_rule'],
     workflow: 'Use route guard metadata for request gating, field permissions for record field access, and column rules for body validation.',
   },
   {
     area: 'GraphQL',
-    tables: ['gql_definition'],
-    workflow: 'Enable per table through gql_definition or update_table graphqlEnabled. GraphQL requires Bearer auth.',
+    tables: ['enfyra_graphql'],
+    workflow: 'Enable per table through enfyra_graphql or update_table graphqlEnabled. GraphQL requires Bearer auth.',
   },
   {
     area: 'Files and storage',
-    tables: ['file_definition', 'file_permission_definition', 'folder_definition', 'storage_config_definition'],
+    tables: ['enfyra_file', 'enfyra_file_permission', 'enfyra_folder', 'enfyra_storage_config'],
     workflow: 'Use file endpoints/helpers for uploads and asset streaming; metadata tables describe files, permissions, folders, and storage backends.',
   },
   {
     area: 'WebSocket',
-    tables: ['websocket_definition', 'websocket_event_definition'],
+    tables: ['enfyra_websocket', 'enfyra_websocket_event'],
     workflow: 'Socket.IO gateways/events are metadata-backed. Use admin test runner for handler scripts before relying on a real client.',
   },
   {
     area: 'Flows',
-    tables: ['flow_definition', 'flow_step_definition', 'flow_execution_definition'],
+    tables: ['enfyra_flow', 'enfyra_flow_step', 'enfyra_flow_execution'],
     workflow: 'Create flows as small operation-sized steps via CRUD, test steps with test_flow_step/run_admin_test, trigger with trigger_flow. Split oversized scripts instead of adding more work to one step.',
   },
   {
     area: 'Extensions, menus, packages',
-    tables: ['extension_definition', 'menu_definition', 'package_definition', 'bootstrap_script_definition'],
-    workflow: 'Extensions are Vue SFC records. Use install_package for package_definition rather than raw CRUD.',
+    tables: ['enfyra_extension', 'enfyra_menu', 'enfyra_package', 'enfyra_bootstrap_script'],
+    workflow: 'Extensions are Vue SFC records. Use install_package for enfyra_package rather than raw CRUD.',
   },
   {
     area: 'Settings and platform config',
-    tables: ['setting_definition', 'cors_origin_definition'],
+    tables: ['enfyra_setting', 'enfyra_cors_origin'],
     workflow: 'Settings and CORS origins are metadata-backed platform configuration.',
   },
 ];
@@ -129,14 +129,14 @@ const FIELD_PERMISSION_CONDITION_OPERATORS = [
 ];
 
 const SCRIPT_BACKED_TABLES = [
-  'route_handler_definition',
-  'pre_hook_definition',
-  'post_hook_definition',
-  'flow_step_definition',
-  'websocket_event_definition',
-  'websocket_definition',
-  'gql_definition',
-  'bootstrap_script_definition',
+  'enfyra_route_handler',
+  'enfyra_pre_hook',
+  'enfyra_post_hook',
+  'enfyra_flow_step',
+  'enfyra_websocket_event',
+  'enfyra_websocket',
+  'enfyra_graphql',
+  'enfyra_bootstrap_script',
 ];
 
 const SCRIPT_SOURCE_FIELDS = [
@@ -510,7 +510,7 @@ function sourcePreview(source, aroundText) {
 }
 
 function scriptRecordLabel(tableName, record) {
-  const method = record.method?.name || record.method?.method || null;
+  const method = record.method?.name || null;
   const route = record.route?.path || null;
   const flow = record.flow?.name || null;
   const gateway = record.gateway?.path || null;
@@ -530,21 +530,21 @@ function scriptRecordLabel(tableName, record) {
 function scriptTraceFields(tableName) {
   const common = 'id,_id,name,key,eventName,sourceCode,handlerScript,connectionHandlerScript,code,scriptLanguage';
   const byTable = {
-    route_handler_definition: `${common},route.id,route.path,method.id,method.name`,
-    pre_hook_definition: `${common},route.id,route.path,methods.id,methods.name,isGlobal`,
-    post_hook_definition: `${common},route.id,route.path,methods.id,methods.name,isGlobal`,
-    flow_step_definition: `${common},flow.id,flow.name`,
-    websocket_event_definition: `${common},gateway.id,gateway.path`,
-    websocket_definition: `${common},path`,
-    gql_definition: `${common},table.id,table.name`,
-    bootstrap_script_definition: common,
+    enfyra_route_handler: `${common},route.id,route.path,method.id,method.name`,
+    enfyra_pre_hook: `${common},route.id,route.path,methods.id,methods.name,isGlobal`,
+    enfyra_post_hook: `${common},route.id,route.path,methods.id,methods.name,isGlobal`,
+    enfyra_flow_step: `${common},flow.id,flow.name`,
+    enfyra_websocket_event: `${common},gateway.id,gateway.path`,
+    enfyra_websocket: `${common},path`,
+    enfyra_graphql: `${common},table.id,table.name`,
+    enfyra_bootstrap_script: common,
   };
   return byTable[tableName] || '*';
 }
 
 async function findMethodRecordByName(method) {
   const filter = encodeURIComponent(JSON.stringify({ name: { _eq: method } }));
-  const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
+  const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_method?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
   return unwrapData(result)[0] || null;
 }
 
@@ -581,7 +581,7 @@ server.tool('get_all_metadata', 'Get concise metadata summary for all tables. Us
 });
 
 server.tool('get_table_metadata', 'Get concise metadata for a specific table by name', {
-  tableName: z.string().describe('Table name (e.g., "user_definition", "route_definition")'),
+  tableName: z.string().describe('Table name (e.g., "enfyra_user", "enfyra_route")'),
   includeFull: z.boolean().optional().default(false).describe('Return full raw table metadata. Default false to keep MCP context small.'),
 }, async ({ tableName, includeFull }) => {
   const result = await fetchAPI(ENFYRA_API_URL, `/metadata/${tableName}`);
@@ -622,8 +622,8 @@ server.tool(
   async () => {
     const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
     const [routesResult, methodsResult] = await Promise.all([
-      fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publicMethods.*&limit=1000'),
-      fetchAPI(ENFYRA_API_URL, '/method_definition?limit=100'),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*&limit=1000'),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_method?limit=100'),
     ]);
 
     const tables = normalizeTables(metadata);
@@ -631,9 +631,9 @@ server.tool(
     const routes = summarizeRoutes(routesResult);
     const routeTables = new Set(routes.map((route) => route.mainTable).filter(Boolean));
     const noRouteTables = tableNames.filter((name) => !routeTables.has(name));
-    const relationTable = tables.find((table) => table?.name === 'relation_definition');
-    const tableDefinition = tables.find((table) => table?.name === 'table_definition');
-    const gqlDefinition = tables.find((table) => table?.name === 'gql_definition');
+    const relationTable = tables.find((table) => table?.name === 'enfyra_relation');
+    const tableDefinition = tables.find((table) => table?.name === 'enfyra_table');
+    const gqlDefinition = tables.find((table) => table?.name === 'enfyra_graphql');
     const routeTableList = [...routeTables].sort();
 
     const payload = {
@@ -643,7 +643,7 @@ server.tool(
         routes: routes.length,
         methods: methodsResult?.data?.length || 0,
       },
-      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, name: method.name, method: method.name })),
+      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, name: method.name })),
       capabilityAreas: CAPABILITY_AREAS.map((item) => ({
         ...item,
         presentTables: item.tables.filter((table) => tableNames.includes(table)),
@@ -659,12 +659,12 @@ server.tool(
         customRouteWorkflow: 'For a new endpoint use create_route without mainTableId, then create_handler/create_pre_hook/create_post_hook. Do not create a table just to get a path.',
       },
       schemaManagement: {
-        createTable: 'POST /table_definition supports isSingleRecord at create time and supports columns and relations arrays in the same cascade call. MCP create_table exposes isSingleRecord, columns, and relations directly. It does not accept alias at create time; table name drives the default route/schema behavior.',
-        updateTable: 'PATCH /table_definition/:id is the canonical path for table property changes and column/relation schema changes.',
-        columns: 'column_definition has no REST route; use create_table/create_column/update_column/delete_column.',
-        relations: routeTables.has('relation_definition')
-          ? 'relation_definition has a REST route for reads/metadata, but canonical schema migration is create_relation/delete_relation or table_definition PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
-          : 'Use create_relation/delete_relation or table_definition PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
+        createTable: 'POST /enfyra_table supports isSingleRecord at create time and supports columns and relations arrays in the same cascade call. MCP create_table exposes isSingleRecord, columns, and relations directly. It does not accept alias at create time; table name drives the default route/schema behavior.',
+        updateTable: 'PATCH /enfyra_table/:id is the canonical path for table property changes and column/relation schema changes.',
+        columns: 'enfyra_column has no REST route; use create_table/create_column/update_column/delete_column.',
+        relations: routeTables.has('enfyra_relation')
+          ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relation/delete_relation or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
+          : 'Use create_relation/delete_relation or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
         relationCascadeFkContract: 'Do not ask for or send physical FK/junction column names in relation create/update payloads. Enfyra derives fk/junction columns from relation propertyName/table metadata and hides FK columns from app schema/forms. Use targetTable, type, propertyName, inversePropertyName or mappedBy, isNullable, onDelete.',
         tableDefinitionRelations: (tableDefinition?.relations || []).map((rel) => rel.propertyName),
         relationDefinitionRelations: (relationTable?.relations || []).map((rel) => rel.propertyName),
@@ -677,10 +677,10 @@ server.tool(
       graphql: {
         endpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`,
         schemaEndpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql-schema`,
-        enablement: 'A table appears in GraphQL when gql_definition has an enabled row for that table. REST route availableMethods does not enable GraphQL.',
+        enablement: 'A table appears in GraphQL when enfyra_graphql has an enabled row for that table. REST route availableMethods does not enable GraphQL.',
         auth: 'GraphQL currently requires Authorization: Bearer <accessToken>; REST publicMethods does not make GraphQL anonymous.',
-        management: routeTables.has('gql_definition')
-          ? 'Use update_table graphqlEnabled or create/update records on gql_definition, then reload_graphql if needed.'
+        management: routeTables.has('enfyra_graphql')
+          ? 'Use update_table graphqlEnabled or create/update records on enfyra_graphql, then reload_graphql if needed.'
           : 'Use update_table graphqlEnabled, then reload_graphql if needed.',
         gqlDefinitionColumns: (gqlDefinition?.columns || []).map((column) => column.name),
       },
@@ -711,13 +711,13 @@ server.tool(
       settingsResult,
       meResult,
     ] = await Promise.all([
-      fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000'),
-      fetchAPI(ENFYRA_API_URL, '/method_definition?limit=100'),
-      fetchAPI(ENFYRA_API_URL, '/gql_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/flow_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/websocket_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/storage_config_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/setting_definition?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000'),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_method?limit=100'),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_graphql?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_flow?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_websocket?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_storage_config?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
+      fetchAPI(ENFYRA_API_URL, '/enfyra_setting?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
       fetchAPI(ENFYRA_API_URL, '/me').catch((error) => ({ error: String(error.message || error), data: [] })),
     ]);
 
@@ -746,7 +746,7 @@ server.tool(
         storageConfigs: storageResult?.data?.length || 0,
         settings: settingsResult?.data?.length || 0,
       },
-      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, name: method.name, method: method.name })),
+      methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, name: method.name })),
       routeRuntime: {
         routePattern: 'GET/POST /<route-path>; PATCH/DELETE /<route-path>/:id; no dynamic GET /<route-path>/:id.',
         adminRoutes: adminRoutes.map((route) => route.path).sort(),
@@ -786,7 +786,7 @@ server.tool(
   },
   async ({ tableName }) => {
     const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
-    const routesResult = await fetchAPI(ENFYRA_API_URL, '/route_definition?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000');
+    const routesResult = await fetchAPI(ENFYRA_API_URL, '/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000');
     const tables = normalizeTables(metadata);
     const routes = summarizeRoutes(routesResult);
     const table = tableName ? tables.find((item) => item.name === tableName) : null;
@@ -826,8 +826,8 @@ server.tool(
       backendNotes: {
         primaryKey: 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
         relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
-        relationCascadeFkContract: 'When creating relations through create_table/create_relation/table_definition PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms.',
-        graphql: 'GraphQL query args also accept filter/sort/page/limit, but GraphQL requires Bearer auth and table enablement via gql_definition.',
+        relationCascadeFkContract: 'When creating relations through create_table/create_relation/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms.',
+        graphql: 'GraphQL query args also accept filter/sort/page/limit, but GraphQL requires Bearer auth and table enablement via enfyra_graphql.',
       },
       table: tableName
         ? {
@@ -901,7 +901,7 @@ server.tool(
         throws: '@THROW400 through @THROW503 and @THROW map to $ctx.$throw helpers.',
         helpers: {
           crypto: '$ctx.$helpers.$crypto exposes bounded runtime crypto helpers: randomUUID(), randomBytes(size, encoding), sha256(value, encoding), hmacSha256(value, secret, encoding), and generateSshKeyPair(comment). Use generateSshKeyPair for SSH key material. Do not use legacy $ctx.$helpers.$ssh.',
-          files: '$ctx.$storage.$upload and $ctx.$storage.$update accept file: @UPLOADED_FILE for request uploads and stream from the server temp file path. $ctx.$storage.$registerFile creates a file_definition record for an object that already exists in storage without uploading bytes. Use buffer only for small generated/transformed files; do not use @UPLOADED_FILE.buffer.',
+          files: '$ctx.$storage.$upload and $ctx.$storage.$update accept file: @UPLOADED_FILE for request uploads and stream from the server temp file path. $ctx.$storage.$registerFile creates a enfyra_file record for an object that already exists in storage without uploading bytes. Use buffer only for small generated/transformed files; do not use @UPLOADED_FILE.buffer.',
         },
         env: '$ctx.$env exposes a sanitized process env snapshot with exact sensitive keys removed: DB_URI, DB_REPLICA_URIS, REDIS_URI, SECRET_KEY, and ADMIN_PASSWORD. Store app secrets in unpublished isEncrypted fields instead of reading them from $env.',
       },
@@ -948,7 +948,7 @@ server.tool(
         extensionVueSfc: {
           runs: 'Frontend extension code, not server sandbox.',
           data: ['Vue/Nuxt composables', 'Enfyra composables', 'auto-resolved UI components'],
-          caveat: 'No import statements; save as extension_definition Vue SFC record.',
+          caveat: 'No import statements; save as enfyra_extension Vue SFC record.',
         },
       },
       helpers: {
@@ -961,7 +961,7 @@ server.tool(
         },
         socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast, but cannot reply/join/leave/disconnect/emitToCurrentRoom/broadcastToRoom because there is no bound socket. emitToRoom requires an explicit gateway path: emitToRoom(path, room, event, data).',
         packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
-        files: 'Upload helpers are on $storage; raw create_record on file_definition is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the file_definition record without uploading bytes. Use buffer only for small generated files.',
+        files: 'Upload helpers are on $storage; raw create_record on enfyra_file is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the enfyra_file record without uploading bytes. Use buffer only for small generated files.',
       },
       adminTesting: {
         flowStep: 'Use test_flow_step or run_admin_test(kind=flow_step).',
@@ -985,7 +985,7 @@ server.tool(
     'Auth: publicMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
     'If path might differ from table name, use get_all_routes before asserting a URL.',
     'Same mapping as MCP tool → HTTP: query_table=GET /table?..., create_record=POST /table, update_record=PATCH /table/id, delete_record=DELETE /table/id.',
-    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via gql_definition/update_table graphqlEnabled and send Bearer auth.',
+    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via enfyra_graphql/update_table graphqlEnabled and send Bearer auth.',
   ].join(' '),
   {},
   async () => {
@@ -1292,19 +1292,19 @@ server.tool(
   'update_script_source',
   [
     'Update sourceCode on a script-backed record without forcing the caller to JSON-escape long code.',
-    'Use this for flow_step_definition, route_handler_definition, pre_hook_definition, post_hook_definition, websocket_event_definition, websocket_definition, gql_definition, and bootstrap_script_definition.',
+    'Use this for enfyra_flow_step, enfyra_route_handler, enfyra_pre_hook, enfyra_post_hook, enfyra_websocket_event, enfyra_websocket, enfyra_graphql, and enfyra_bootstrap_script.',
     'The tool validates sourceCode through /admin/script/validate before saving and never accepts compiledCode.',
   ].join(' '),
   {
     tableName: z.enum([
-      'route_handler_definition',
-      'pre_hook_definition',
-      'post_hook_definition',
-      'flow_step_definition',
-      'websocket_event_definition',
-      'websocket_definition',
-      'gql_definition',
-      'bootstrap_script_definition',
+      'enfyra_route_handler',
+      'enfyra_pre_hook',
+      'enfyra_post_hook',
+      'enfyra_flow_step',
+      'enfyra_websocket_event',
+      'enfyra_websocket',
+      'enfyra_graphql',
+      'enfyra_bootstrap_script',
     ]).describe('Script-backed table to update'),
     id: z.string().describe('Record ID to update'),
     sourceCode: z.string().describe('Editable script sourceCode. Pass the raw code string; do not JSON-escape it yourself.'),
@@ -1370,20 +1370,19 @@ server.tool('delete_record', 'Delete a record by ID', {
 
 server.tool(
   'list_methods',
-  'List method_definition records with their UI colors. Use this before creating route methods or method-colored UI.',
+  'List enfyra_method records with their UI colors. Use this before creating route methods or method-colored UI.',
   {},
   async () => {
-    const result = await fetchAPI(ENFYRA_API_URL, '/method_definition?fields=id,_id,name,buttonColor,textColor,isSystem&sort=name&limit=0');
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_method?fields=id,_id,name,buttonColor,textColor,isSystem&sort=name&limit=0');
     const methods = unwrapData(result).map((method) => ({
       id: getId(method),
       name: method.name,
-      method: method.name,
       buttonColor: method.buttonColor,
       textColor: method.textColor,
       isSystem: method.isSystem === true,
     }));
     return { content: [{ type: 'text', text: JSON.stringify({
-      tableName: 'method_definition',
+      tableName: 'enfyra_method',
       methods,
       appUi: '/settings/methods',
     }, null, 2) }] };
@@ -1392,7 +1391,7 @@ server.tool(
 
 server.tool(
   'create_method',
-  'Create a method_definition record with app badge colors. Prefer this over generic create_record for method_definition.',
+  'Create a enfyra_method record with app badge colors. Prefer this over generic create_record for enfyra_method.',
   {
     method: z.string().describe('Uppercase method name, e.g. GET, POST, PUT, CUSTOM_METHOD. Must start with A-Z and contain only A-Z, 0-9, or underscore.'),
     buttonColor: z.string().describe('Badge background color as full hex, e.g. #dbeafe.'),
@@ -1411,15 +1410,14 @@ server.tool(
       textColor: normalizeHexColorInput(textColor, 'textColor'),
       isSystem: isSystem === true,
     };
-    const result = await fetchAPI(ENFYRA_API_URL, '/method_definition', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_method', {
       method: 'POST',
       body: JSON.stringify(body),
     });
     _methodMap = null;
     return { content: [{ type: 'text', text: JSON.stringify({
-      ...summarizeMutationResult(result, 'created', 'method_definition'),
+      ...summarizeMutationResult(result, 'created', 'enfyra_method'),
       name: normalizedMethod,
-      method: normalizedMethod,
       appUi: '/settings/methods',
     }, null, 2) }] };
   },
@@ -1427,7 +1425,7 @@ server.tool(
 
 server.tool(
   'update_method',
-  'Update a method_definition record color pair, and optionally rename non-system methods. Prefer this over generic update_record for method_definition.',
+  'Update a enfyra_method record color pair, and optionally rename non-system methods. Prefer this over generic update_record for enfyra_method.',
   {
     id: z.string().optional().describe('Method record id. If omitted, method is used to find the record.'),
     method: z.string().optional().describe('Existing method name to find, or new name when id is provided.'),
@@ -1459,13 +1457,13 @@ server.tool(
       throw new Error('Provide buttonColor, textColor, or a new method name.');
     }
 
-    const result = await fetchAPI(ENFYRA_API_URL, `/method_definition/${encodeURIComponent(String(targetId))}`, {
+    const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_method/${encodeURIComponent(String(targetId))}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     });
     _methodMap = null;
     return { content: [{ type: 'text', text: JSON.stringify({
-      ...summarizeMutationResult(result, 'updated', 'method_definition'),
+      ...summarizeMutationResult(result, 'updated', 'enfyra_method'),
       id: targetId,
       appUi: '/settings/methods',
     }, null, 2) }] };
@@ -1474,7 +1472,7 @@ server.tool(
 
 server.tool(
   'delete_method',
-  'Preview or delete a method_definition record. Only delete unused custom methods; system/default methods should be kept.',
+  'Preview or delete a enfyra_method record. Only delete unused custom methods; system/default methods should be kept.',
   {
     id: z.string().optional().describe('Method record id. If omitted, method is used to find the record.'),
     method: z.string().optional().describe('Method name to find when id is omitted.'),
@@ -1491,27 +1489,26 @@ server.tool(
     }
     if (!confirm) {
       if (!target) {
-        const primaryKey = await getPrimaryFieldName('method_definition');
+        const primaryKey = await getPrimaryFieldName('enfyra_method');
         const filter = encodeURIComponent(JSON.stringify({ [primaryKey]: { _eq: targetId } }));
-        const result = await fetchAPI(ENFYRA_API_URL, `/method_definition?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
+        const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_method?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
         target = unwrapData(result)[0] || null;
       }
       return { content: [{ type: 'text', text: JSON.stringify({
         action: 'delete_method_preview',
         id: targetId,
         name: target?.name,
-        method: target?.name,
         isSystem: target?.isSystem === true,
         destructive: true,
         warning: 'Only delete unused custom methods. Deleting a method can affect route method relations.',
         next: 'Call delete_method again with confirm=true to delete.',
       }, null, 2) }] };
     }
-    const result = await fetchAPI(ENFYRA_API_URL, `/method_definition/${encodeURIComponent(String(targetId))}`, { method: 'DELETE' });
+    const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_method/${encodeURIComponent(String(targetId))}`, { method: 'DELETE' });
     _methodMap = null;
     return { content: [{ type: 'text', text: JSON.stringify({
       action: 'deleted',
-      tableName: 'method_definition',
+      tableName: 'enfyra_method',
       id: targetId,
       statusCode: result?.statusCode,
       success: result?.success,
@@ -1588,7 +1585,7 @@ server.tool(
 let _methodMap = null;
 async function getMethodMap() {
   if (_methodMap) return _methodMap;
-  const result = await fetchAPI(ENFYRA_API_URL, '/method_definition?limit=0');
+  const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_method?limit=0');
   _methodMap = {};
   for (const m of result.data) {
     _methodMap[m.name] = m.id || m._id;
@@ -1616,7 +1613,6 @@ function withMethodNames(records, methodIdNameMap, field = 'methods') {
       ? record[field].map((item) => ({
           ...item,
           name: item.name || methodIdNameMap[String(getId(item))] || null,
-          method: item.name || methodIdNameMap[String(getId(item))] || null,
         }))
       : record?.[field],
   }));
@@ -1638,15 +1634,15 @@ async function collectRestDefinitionState() {
     methodIdNameMap,
   ] = await Promise.all([
     getMetadataTables(),
-    fetchAll('/route_definition?limit=1000'),
-    fetchAll('/route_handler_definition?limit=1000'),
-    fetchAll('/pre_hook_definition?limit=1000'),
-    fetchAll('/post_hook_definition?limit=1000'),
-    fetchAll('/route_permission_definition?limit=1000'),
-    fetchAll('/guard_definition?limit=1000'),
-    fetchAll('/guard_rule_definition?limit=1000'),
-    fetchAll('/field_permission_definition?limit=1000'),
-    fetchAll('/column_rule_definition?limit=1000'),
+    fetchAll('/enfyra_route?limit=1000'),
+    fetchAll('/enfyra_route_handler?limit=1000'),
+    fetchAll('/enfyra_pre_hook?limit=1000'),
+    fetchAll('/enfyra_post_hook?limit=1000'),
+    fetchAll('/enfyra_route_permission?limit=1000'),
+    fetchAll('/enfyra_guard?limit=1000'),
+    fetchAll('/enfyra_guard_rule?limit=1000'),
+    fetchAll('/enfyra_field_permission?limit=1000'),
+    fetchAll('/enfyra_column_rule?limit=1000'),
     getMethodIdNameMap(),
   ]);
 
@@ -1674,7 +1670,6 @@ function enrichRoute(route, state) {
       method: item.method ? {
         ...item.method,
         name: state.methodIdNameMap[String(getId(item.method))] || item.method.name || null,
-        method: state.methodIdNameMap[String(getId(item.method))] || item.method.name || null,
       } : item.method,
     }, 'sourceCode'));
   const routePreHooks = withMethodNames(
@@ -1703,21 +1698,18 @@ function enrichRoute(route, state) {
       ? route.availableMethods.map((method) => ({
           ...method,
           name: method.name || state.methodIdNameMap[String(getId(method))] || null,
-          method: method.name || state.methodIdNameMap[String(getId(method))] || null,
         }))
       : route.availableMethods,
     publicMethods: Array.isArray(route.publicMethods)
       ? route.publicMethods.map((method) => ({
           ...method,
           name: method.name || state.methodIdNameMap[String(getId(method))] || null,
-          method: method.name || state.methodIdNameMap[String(getId(method))] || null,
         }))
       : route.publicMethods,
     skipRoleGuardMethods: Array.isArray(route.skipRoleGuardMethods)
       ? route.skipRoleGuardMethods.map((method) => ({
           ...method,
           name: method.name || state.methodIdNameMap[String(getId(method))] || null,
-          method: method.name || state.methodIdNameMap[String(getId(method))] || null,
         }))
       : route.skipRoleGuardMethods,
     handlers: routeHandlers,
@@ -1791,8 +1783,8 @@ server.tool(
     'Returns the backing table, available/public methods, handlers, hooks, route permissions, guards, and exact REST URL pattern.',
   ].join(' '),
   {
-    path: z.string().optional().describe('Route path, e.g. /user_definition'),
-    routeId: z.union([z.string(), z.number()]).optional().describe('route_definition id. Use either path or routeId.'),
+    path: z.string().optional().describe('Route path, e.g. /enfyra_user'),
+    routeId: z.union([z.string(), z.number()]).optional().describe('enfyra_route id. Use either path or routeId.'),
   },
   async ({ path, routeId }) => {
     if (!path && !routeId) throw new Error('Provide path or routeId');
@@ -1962,11 +1954,11 @@ server.tool(
   'test_rest_endpoint',
   [
     'Execute a real REST request against the configured Enfyra API base.',
-    'Use this after inspecting a route or changing handlers/hooks/guards. Pass paths like /table_definition?limit=1, not external URLs.',
+    'Use this after inspecting a route or changing handlers/hooks/guards. Pass paths like /enfyra_table?limit=1, not external URLs.',
   ].join(' '),
   {
-    method: z.string().optional().default('GET').describe('HTTP method name. Must exist in method_definition.name for Enfyra route-backed calls.'),
-    path: z.string().describe('Enfyra API path, e.g. /route_definition?limit=1'),
+    method: z.string().optional().default('GET').describe('HTTP method name. Must exist in enfyra_method.name for Enfyra route-backed calls.'),
+    path: z.string().describe('Enfyra API path, e.g. /enfyra_route?limit=1'),
     query: z.string().optional().describe('Optional query params JSON object, merged onto path query string'),
     body: z.string().optional().describe('Optional JSON request body string'),
     headers: z.string().optional().describe('Optional headers JSON object'),
@@ -2033,7 +2025,7 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Call 
     fields: 'id,path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled',
     limit: '1000',
   });
-  const result = await fetchAPI(ENFYRA_API_URL, `/route_definition?${queryParams.toString()}`);
+  const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_route?${queryParams.toString()}`);
   const routeLimit = limit || 50;
   const q = search ? search.toLowerCase() : null;
   const allRoutes = summarizeRoutes(result);
@@ -2063,8 +2055,8 @@ server.tool(
   [
     '**Use this when the user wants a new REST API route or path** — not `create_table`. Custom routes must omit `mainTableId`.',
     '`mainTableId` is only a marker for canonical table routes such as `/orders`; do not set it for `/orders/stats`, `/reports/summary`, `/auth/login`, or any custom path.',
-    'Do NOT create a new table_definition only to expose an endpoint; create a route without `mainTableId`, then have the handler/hook query explicit repos such as `$ctx.$repos.orders`.',
-    'availableMethods = which REST verbs the route responds to. publicMethods = which REST verbs are public (no auth). GraphQL is enabled separately through gql_definition/update_table graphqlEnabled.',
+    'Do NOT create a new enfyra_table only to expose an endpoint; create a route without `mainTableId`, then have the handler/hook query explicit repos such as `$ctx.$repos.orders`.',
+    'availableMethods = which REST verbs the route responds to. publicMethods = which REST verbs are public (no auth). GraphQL is enabled separately through enfyra_graphql/update_table graphqlEnabled.',
     'After creation the tool auto-reloads routes. Then create handlers for specific methods via create_handler on this route id.',
     'Flow: create_route → create_handler (per method) → optionally create_pre_hook / create_post_hook → test via HTTP or admin test APIs (see server instructions).',
   ].join(' '),
@@ -2072,7 +2064,7 @@ server.tool(
     path: z.string().describe('URL path, must start with / (e.g., "/my-endpoint")'),
     mainTableId: z.union([z.string(), z.number()]).optional().describe('Only set for the canonical table route `/<table_name>`. Omit for every custom route.'),
     methods: z.array(z.string())
-      .describe('HTTP method names this route supports (availableMethods). Each value must exist in method_definition.name. Common: ["GET","POST","PATCH","DELETE"].'),
+      .describe('HTTP method names this route supports (availableMethods). Each value must exist in enfyra_method.name. Common: ["GET","POST","PATCH","DELETE"].'),
     publicMethods: z.array(z.string()).optional()
       .describe('Methods accessible WITHOUT auth token. Omit = all methods require auth.'),
     isEnabled: z.boolean().optional().default(true).describe('Enable route immediately'),
@@ -2099,7 +2091,7 @@ server.tool(
       body.publicMethods = resolveMethodIds(methodMap, publicMethods);
     }
 
-    const result = await fetchAPI(ENFYRA_API_URL, '/route_definition', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_route', {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -2117,7 +2109,7 @@ server.tool(
         publicMethods: publicMethods || [],
       },
       routeReload,
-      next: `Use create_handler({ routeId: ${JSON.stringify(getId(created))}, method: "GET", sourceCode }) for custom code. Create extra method_definition.name rows first for custom methods such as PUT.`,
+      next: `Use create_handler({ routeId: ${JSON.stringify(getId(created))}, method: "GET", sourceCode }) for custom code. Create extra enfyra_method.name rows first for custom methods such as PUT.`,
     }, null, 2) }] };
   },
 );
@@ -2135,7 +2127,7 @@ server.tool(
   {
     routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
     method: z.string().optional()
-      .describe('Single method_definition.name to create. Prefer this for one handler.'),
+      .describe('Single enfyra_method.name to create. Prefer this for one handler.'),
     methods: z.array(z.string()).optional()
       .describe('Batch create multiple handlers. Use only when the same sourceCode applies to every method.'),
     sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic.'),
@@ -2147,7 +2139,7 @@ server.tool(
     if (methodNames.length === 0) throw new Error('Provide method or methods');
     const methodMap = await getMethodMap();
     const results = [];
-    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'route_handler_definition', {
+    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_route_handler', {
       sourceCode,
       scriptLanguage,
     });
@@ -2159,7 +2151,7 @@ server.tool(
       const body = { route: { id: routeId }, method: { id: methodId }, sourceCode, scriptLanguage };
       if (timeout) body.timeout = timeout;
 
-      const result = await fetchAPI(ENFYRA_API_URL, '/route_handler_definition', {
+      const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_route_handler', {
         method: 'POST',
         body: JSON.stringify(body),
       });
@@ -2206,12 +2198,12 @@ server.tool(
   async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled }) => {
     const methodMap = await getMethodMap();
     const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
-    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'pre_hook_definition', {
+    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_pre_hook', {
       sourceCode: code,
       scriptLanguage,
     });
 
-    const result = await fetchAPI(ENFYRA_API_URL, '/pre_hook_definition', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_pre_hook', {
       method: 'POST',
       body: JSON.stringify({
         route: { id: routeId },
@@ -2260,12 +2252,12 @@ server.tool(
   async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled }) => {
     const methodMap = await getMethodMap();
     const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
-    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'post_hook_definition', {
+    const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_post_hook', {
       sourceCode: code,
       scriptLanguage,
     });
 
-    const result = await fetchAPI(ENFYRA_API_URL, '/post_hook_definition', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_post_hook', {
       method: 'POST',
       body: JSON.stringify({
         route: { id: routeId },
@@ -2320,7 +2312,7 @@ server.tool(
       isEnabled,
       column: { id: getId(column) },
     };
-    const result = await fetchAPI(ENFYRA_API_URL, '/column_rule_definition', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_column_rule', {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -2367,7 +2359,7 @@ server.tool(
     } else {
       body.relation = { id: getId(resolveFieldOrThrow(table, relationName, 'relation')) };
     }
-    const result = await fetchAPI(ENFYRA_API_URL, '/field_permission_definition', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_field_permission', {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -2382,9 +2374,9 @@ server.tool(
     'Use this when a non-root role/user should access an authenticated route. publicMethods are for public access; route permissions are for authenticated role/user access.',
   ].join(' '),
   {
-    path: z.string().optional().describe('Route path, e.g. /user_definition'),
+    path: z.string().optional().describe('Route path, e.g. /enfyra_user'),
     routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
-    methods: z.array(z.string()).describe('REST method names this permission allows. Each value must exist in method_definition.name.'),
+    methods: z.array(z.string()).describe('REST method names this permission allows. Each value must exist in enfyra_method.name.'),
     roleId: z.union([z.string(), z.number()]).optional().describe('Role id scope'),
     allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Specific user ids scope'),
     description: z.string().optional().describe('Admin note'),
@@ -2395,7 +2387,7 @@ server.tool(
     if (!roleId && (!allowedUserIds || allowedUserIds.length === 0)) {
       throw new Error('Provide roleId or allowedUserIds');
     }
-    const routes = await fetchAll('/route_definition?limit=1000');
+    const routes = await fetchAll('/enfyra_route?limit=1000');
     const route = routes.find((item) => (
       routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
     ));
@@ -2409,7 +2401,7 @@ server.tool(
       ...(roleId ? { role: { id: roleId } } : {}),
       ...(allowedUserIds?.length ? { allowedUsers: allowedUserIds.map((id) => ({ id })) } : {}),
     };
-    const result = await fetchAPI(ENFYRA_API_URL, '/route_permission_definition', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_route_permission', {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -2447,9 +2439,9 @@ server.tool(
     if (roleId && roleName) throw new Error('Provide roleId or roleName, not both.');
 
     const [routes, routePermissions, roles, methodIdNameMap] = await Promise.all([
-      fetchAll('/route_definition?limit=1000'),
-      fetchAll('/route_permission_definition?limit=1000'),
-      fetchAll('/role_definition?limit=1000'),
+      fetchAll('/enfyra_route?limit=1000'),
+      fetchAll('/enfyra_route_permission?limit=1000'),
+      fetchAll('/enfyra_role?limit=1000'),
       getMethodIdNameMap(),
     ]);
 
@@ -2466,8 +2458,8 @@ server.tool(
     const expectedMethods = normalizeMethodNames(methods || []);
     const payload = {
       guidance: {
-        publicAccess: 'publicMethods bypass RoleGuard and do not require route_permission_definition.',
-        authenticatedAccess: 'For non-public methods, eApp PermissionGate and backend RoleGuard both expect enabled route_permission_definition rows with matching route + HTTP method.',
+        publicAccess: 'publicMethods bypass RoleGuard and do not require enfyra_route_permission.',
+        authenticatedAccess: 'For non-public methods, Enfyra admin UI PermissionGate and backend RoleGuard both expect enabled enfyra_route_permission rows with matching route + HTTP method.',
         directUserAccess: 'allowedRoutePermissions on /me represent direct user-scoped route permissions; role.routePermissions represent role-scoped permissions.',
       },
       expectedScope: {
@@ -2492,7 +2484,7 @@ server.tool(
   'ensure_route_access',
   [
     'Create or update authenticated route access for one role/user scope.',
-    'Use this instead of raw route_permission_definition CRUD when fixing 403s. It resolves roleName/route/method ids, validates route.availableMethods, merges existing permission methods by default, and reloads routes.',
+    'Use this instead of raw enfyra_route_permission CRUD when fixing 403s. It resolves roleName/route/method ids, validates route.availableMethods, merges existing permission methods by default, and reloads routes.',
   ].join(' '),
   {
     path: z.string().optional().describe('Route path, e.g. /orders'),
@@ -2514,9 +2506,9 @@ server.tool(
     }
 
     const [routes, routePermissions, roles, methodMap, methodIdNameMap] = await Promise.all([
-      fetchAll('/route_definition?limit=1000'),
-      fetchAll('/route_permission_definition?limit=1000'),
-      fetchAll('/role_definition?limit=1000'),
+      fetchAll('/enfyra_route?limit=1000'),
+      fetchAll('/enfyra_route_permission?limit=1000'),
+      fetchAll('/enfyra_role?limit=1000'),
       getMethodMap(),
       getMethodIdNameMap(),
     ]);
@@ -2547,7 +2539,7 @@ server.tool(
         methods: methodRefs,
         ...(description !== undefined ? { description } : {}),
       };
-      result = await fetchAPI(ENFYRA_API_URL, `/route_permission_definition/${encodeURIComponent(String(getId(existing)))}`, {
+      result = await fetchAPI(ENFYRA_API_URL, `/enfyra_route_permission/${encodeURIComponent(String(getId(existing)))}`, {
         method: 'PATCH',
         body: JSON.stringify(patchBody),
       });
@@ -2561,7 +2553,7 @@ server.tool(
         ...(scope.roleId ? { role: { id: scope.roleId } } : {}),
         ...(scope.allowedUserIds.length ? { allowedUsers: scope.allowedUserIds.map((id) => ({ id })) } : {}),
       };
-      result = await fetchAPI(ENFYRA_API_URL, '/route_permission_definition', {
+      result = await fetchAPI(ENFYRA_API_URL, '/enfyra_route_permission', {
         method: 'POST',
         body: JSON.stringify(createBody),
       });
@@ -2601,11 +2593,13 @@ server.tool(
   'create_guard',
   [
     'Create a metadata guard with optional rules for REST request gating.',
-    'Root guards attach to route or global position. Rule configs: rate limits use {"maxRequests":number,"perSeconds":number}; IP lists use {"ips":["127.0.0.1"]}.',
+    'Root guards attach to one route by path/routeId or globally with isGlobal. pre_auth runs before JWT and only has IP/route context; post_auth runs after auth and can use user id.',
+    'Rule types: rate_limit_by_ip, rate_limit_by_user, rate_limit_by_route, ip_whitelist, ip_blacklist. Rate limits use {"maxRequests":number,"perSeconds":number}; IP lists use {"ips":["127.0.0.1","10.0.0.0/24"]}.',
+    'Do not use rate_limit_by_user or userIds on pre_auth guards. Create risky global/IP whitelist guards disabled first, then inspect and test before enabling.',
   ].join(' '),
   {
     name: z.string().describe('Guard name'),
-    position: z.enum(['pre_auth', 'post_auth']).default('pre_auth').describe('Execution position for root guard'),
+    position: z.enum(['pre_auth', 'post_auth']).default('pre_auth').describe('Execution position for root guard. pre_auth has only IP/route context; post_auth also has authenticated user id.'),
     routeId: z.union([z.string(), z.number()]).optional().describe('Optional route id'),
     path: z.string().optional().describe('Optional route path'),
     methods: z.array(z.string()).optional().describe('Method names this guard applies to. Empty means all configured behavior for route/global.'),
@@ -2614,12 +2608,12 @@ server.tool(
     isGlobal: z.boolean().optional().default(false).describe('Apply globally instead of one route'),
     isEnabled: z.boolean().optional().default(false).describe('Enable immediately. Default false to avoid accidental lockout.'),
     description: z.string().optional().describe('Admin note'),
-    rules: z.string().optional().describe('Optional rules JSON array: [{type, config, priority?, isEnabled?, description?, userIds?}]'),
+    rules: z.string().optional().describe('Optional rules JSON array: [{type, config, priority?, isEnabled?, description?, userIds?}]. Supported types: rate_limit_by_ip, rate_limit_by_user, rate_limit_by_route, ip_whitelist, ip_blacklist.'),
   },
   async ({ name, position, routeId, path, methods, combinator, priority, isGlobal, isEnabled, description, rules }) => {
     let route = null;
     if (!isGlobal && (routeId || path)) {
-      const routes = await fetchAll('/route_definition?limit=1000');
+      const routes = await fetchAll('/enfyra_route?limit=1000');
       route = routes.find((item) => (
         routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
       ));
@@ -2637,7 +2631,7 @@ server.tool(
       ...(route ? { route: { id: getId(route) } } : {}),
       ...(methods?.length ? { methods: resolveMethodIds(methodMap, methods) } : {}),
     };
-    const guard = await fetchAPI(ENFYRA_API_URL, '/guard_definition', {
+    const guard = await fetchAPI(ENFYRA_API_URL, '/enfyra_guard', {
       method: 'POST',
       body: JSON.stringify(guardBody),
     });
@@ -2653,7 +2647,7 @@ server.tool(
         guard: { id: resultRecordId(guard) },
         ...(Array.isArray(rule.userIds) && rule.userIds.length ? { users: rule.userIds.map((id) => ({ id })) } : {}),
       };
-      createdRules.push(await fetchAPI(ENFYRA_API_URL, '/guard_rule_definition', {
+      createdRules.push(await fetchAPI(ENFYRA_API_URL, '/enfyra_guard_rule', {
         method: 'POST',
         body: JSON.stringify(ruleBody),
       }));
@@ -2756,7 +2750,7 @@ server.tool('get_current_user', 'Get current authenticated user info', {}, async
 });
 
 server.tool('get_all_roles', 'Get all role definitions', {}, async () => {
-  const result = await fetchAPI(ENFYRA_API_URL, '/role_definition?limit=100');
+  const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_role?limit=100');
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
 
@@ -2808,7 +2802,7 @@ server.tool(
 server.tool(
   'install_package',
   [
-    'Install an NPM package on Enfyra. Searches NPM registry for exact version, then creates package_definition record.',
+    'Install an NPM package on Enfyra. Searches NPM registry for exact version, then creates enfyra_package record.',
     'Enfyra handles the actual yarn add internally based on type.',
     'Type "Server" = available in handlers/hooks as $ctx.$pkgs.packageName.',
     'Type "App" = available in extensions via getPackages().',
@@ -2838,7 +2832,7 @@ server.tool(
 
     // Step 2: Check if already installed (same name AND type)
     const checkFilter = JSON.stringify({ name: { _eq: name }, type: { _eq: type } });
-    const existing = await fetchAPI(ENFYRA_API_URL, `/package_definition?filter=${encodeURIComponent(checkFilter)}&limit=1`);
+    const existing = await fetchAPI(ENFYRA_API_URL, `/enfyra_package?filter=${encodeURIComponent(checkFilter)}&limit=1`);
     if (existing.data && existing.data.length > 0) {
       return {
         content: [{
@@ -2853,7 +2847,7 @@ server.tool(
     const userId = me.data?.[0]?.id || me.data?.[0]?._id;
     if (!userId) throw new Error('Cannot get current user ID');
 
-    // Step 4: Install via package_definition
+    // Step 4: Install via enfyra_package
     const body = {
       name,
       version: pkgVersion,
@@ -2862,7 +2856,7 @@ server.tool(
       installedBy: { id: userId },
     };
 
-    const result = await fetchAPI(ENFYRA_API_URL, '/package_definition', {
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_package', {
       method: 'POST',
       body: JSON.stringify(body),
     });
@@ -2901,7 +2895,7 @@ server.tool('create_menu', 'Create a menu item in the navigation. Use permission
   if (body.path && !body.path.startsWith('/')) {
     body.path = '/' + body.path;
   }
-  const result = await fetchAPI(ENFYRA_API_URL, '/menu_definition', { method: 'POST', body: JSON.stringify(body) });
+  const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_menu', { method: 'POST', body: JSON.stringify(body) });
   const created = firstDataRecord(result);
   return { content: [{ type: 'text', text: `Menu created (ID: ${getId(created)}):\n${JSON.stringify(result, null, 2)}` }] };
 });
@@ -2910,13 +2904,13 @@ server.tool(
   'create_extension',
   [
     'Create an extension (Vue SFC page, widget, or global shell extension). Code must be Vue SFC: <template>...</template> + <script setup>...</script> — NO imports, use globals (ref, useToast, useApi, UButton, etc).',
-    'For type=page: create menu first (create_menu), get id, then pass menuId. For type=widget: no menu, embed via <Widget>. For type=global: no menu, eApp mounts it invisibly at shell level for registries/realtime. Server auto-compiles and should emit realtime reload to open eApp tabs. See extension rules in MCP instructions.',
+    'For type=page: create menu first (create_menu), get id, then pass menuId. For type=widget: no menu, embed via <Widget>. For type=global: no menu, the Enfyra admin UI mounts it invisibly at shell level for registries/realtime. Server auto-compiles and should emit realtime reload to open Enfyra admin tabs. See extension rules in MCP instructions.',
   ].join(' '),
   {
     name: z.string().describe('Extension name (unique)'),
     type: z.enum(['page', 'widget', 'global']).describe('Extension type: page = full page linked to menu; widget = embed via Widget component; global = shell-level lifecycle component'),
     code: z.string().describe('Vue SFC string — <template> + <script setup>, NO import statements'),
-    menuId: z.string().optional().describe('Required for type=page — menu_definition id from create_menu. Omit for widget/global'),
+    menuId: z.string().optional().describe('Required for type=page — enfyra_menu id from create_menu. Omit for widget/global'),
     isEnabled: z.boolean().optional().default(true).describe('Enable extension'),
     description: z.string().optional().describe('Extension description'),
     version: z.string().optional().default('1.0.0').describe('Extension version'),
@@ -2924,7 +2918,7 @@ server.tool(
   async (data) => {
     const body = { ...data };
     if (body.type === 'page' && !body.menuId) {
-      throw new Error('menuId is required for type=page. Create or find a menu_definition record first.');
+      throw new Error('menuId is required for type=page. Create or find a enfyra_menu record first.');
     }
     if (body.type !== 'page' && body.menuId) {
       throw new Error('menuId is only valid for type=page. Omit menuId for widget/global extensions.');
@@ -2933,9 +2927,9 @@ server.tool(
       body.menu = { id: body.menuId };
       delete body.menuId;
     }
-    const result = await fetchAPI(ENFYRA_API_URL, '/extension_definition', { method: 'POST', body: JSON.stringify(body) });
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_extension', { method: 'POST', body: JSON.stringify(body) });
     const created = firstDataRecord(result);
-    return { content: [{ type: 'text', text: `Extension created (ID: ${getId(created)}). Open eApp tabs should update through the realtime reload contract.\n${JSON.stringify(result, null, 2)}` }] };
+    return { content: [{ type: 'text', text: `Extension created (ID: ${getId(created)}). Open Enfyra admin tabs should update through the realtime reload contract.\n${JSON.stringify(result, null, 2)}` }] };
   },
 );
 

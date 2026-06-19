@@ -154,6 +154,26 @@ onUnmounted(() => {
         ],
       },
       {
+        name: 'OAuth provider setup values',
+        code: `// Enfyra OAuth config row, stored in enfyra_oauth_config.
+{
+  "provider": "google",
+  "clientId": "<google-client-id>",
+  "clientSecret": "<google-client-secret>",
+  "redirectUri": "http://localhost:3000/api/auth/google/callback",
+  "isEnabled": true
+}
+
+// Google Cloud Console -> Authorized redirect URIs:
+// http://localhost:3000/api/auth/google/callback`,
+        notes: [
+          'redirectUri is the Enfyra callback URL: {ENFYRA_API_URL}/auth/google/callback.',
+          'The provider console callback URL and enfyra_oauth_config.redirectUri must match exactly.',
+          'This callback URL is not the app return page; the app return page is sent as the redirect query when starting OAuth.',
+          'Use appCallbackUrl only for manual-token apps that intentionally read token query parameters.',
+        ],
+      },
+      {
         name: 'Google OAuth button',
         code: `const redirect = new URL("/chat", window.location.origin)
 const url = new URL("/enfyra/auth/google", window.location.origin)
@@ -164,6 +184,7 @@ window.location.href = url.toString()`,
           'redirect must be absolute and must include the app origin.',
           'cookieBridgePrefix is the app proxy prefix that forwards to Enfyra API routes.',
           'Enfyra redirects through {redirect.origin}{cookieBridgePrefix}/auth/set-cookies before returning to redirect.',
+          'After returning, call /enfyra/me to load the authenticated user; do not parse tokens from the URL in proxy-cookie mode.',
         ],
       },
     ],
@@ -189,7 +210,7 @@ window.location.href = url.toString()`,
         ],
       },
       {
-        name: 'Create relations directly to user_definition',
+        name: 'Create relations directly to enfyra_user',
         code: `create_table({
   name: "chat_message",
   columns: JSON.stringify([
@@ -207,7 +228,7 @@ window.location.href = url.toString()`,
     {
       propertyName: "sender",
       type: "many-to-one",
-      targetTable: { id: "<user_definition_id>" },
+      targetTable: { id: "<enfyra_user_id>" },
       isNullable: false,
       onDelete: "CASCADE"
     }
@@ -217,9 +238,9 @@ window.location.href = url.toString()`,
   ])
 })`,
         notes: [
-          'Use user_definition as the user table.',
-          'Use table ids for targetTable when already known; MCP can also resolve exact table names such as "user_definition" before schema mutation.',
-          'Do not add inverse relations on user_definition unless the user explicitly asks.',
+          'Use enfyra_user as the user table.',
+          'Use table ids for targetTable when already known; MCP can also resolve exact table names such as "enfyra_user" before schema mutation.',
+          'Do not add inverse relations on enfyra_user unless the user explicitly asks.',
           'createdAt, updatedAt, and custom date/datetime/timestamp fields already get auto-generated single-field indexes; add only compound indexes needed by hot filters.',
           'Do not provide physical FK column names; Enfyra derives them.',
         ],
@@ -232,7 +253,7 @@ window.location.href = url.toString()`,
     {
       propertyName: "createdBy",
       type: "many-to-one",
-      targetTable: { id: "<user_definition_id>" },
+      targetTable: { id: "<enfyra_user_id>" },
       isNullable: true,
       onDelete: "CASCADE"
     },
@@ -261,7 +282,7 @@ window.location.href = url.toString()`,
   relations: JSON.stringify([
     { propertyName: "message", type: "many-to-one", targetTable: { id: "<chat_message_id>" }, onDelete: "CASCADE" },
     { propertyName: "conversation", type: "many-to-one", targetTable: { id: "<chat_conversation_id>" }, onDelete: "CASCADE" },
-    { propertyName: "member", type: "many-to-one", targetTable: { id: "<user_definition_id>" }, onDelete: "CASCADE" }
+    { propertyName: "member", type: "many-to-one", targetTable: { id: "<enfyra_user_id>" }, onDelete: "CASCADE" }
   ]),
   uniques: JSON.stringify([["message", "member"]]),
   indexes: JSON.stringify([
@@ -278,7 +299,7 @@ window.location.href = url.toString()`,
       {
         name: 'Add server-owned user verification fields',
         code: `create_column({
-  tableId: "<user_definition_table_id>",
+  tableId: "<enfyra_user_table_id>",
   name: "emailVerifiedAt",
   type: "datetime",
   isNullable: true,
@@ -287,7 +308,7 @@ window.location.href = url.toString()`,
 })
 
 create_column({
-  tableId: "<user_definition_table_id>",
+  tableId: "<enfyra_user_table_id>",
   name: "emailVerificationStatus",
   type: "varchar",
   isNullable: false,
@@ -307,7 +328,7 @@ create_column({
 })`,
         notes: [
           'Run schema-changing calls sequentially. Do not parallelize create_column calls.',
-          'create_column fetches table_definition and patches only real persisted columns with id/_id; generated metadata projections such as createdAt, updatedAt, or relation FK display fields are skipped.',
+          'create_column fetches enfyra_table and patches only real persisted columns with id/_id; generated metadata projections such as createdAt, updatedAt, or relation FK display fields are skipped.',
           'Use isEncrypted=true for encryption at rest. Add isUpdatable=false separately only when the field should be immutable.',
           'Use hooks or field permissions to prevent clients from updating server-owned fields.',
         ],
@@ -318,7 +339,7 @@ create_column({
 // 1. Read GET /metadata and find the target table.
 // 2. Keep only persisted column rows with id/_id.
 // 3. Add, change, or remove the intended column.
-// 4. PATCH /table_definition/:id with the full preserved columns array.
+// 4. PATCH /enfyra_table/:id with the full preserved columns array.
 // 5. If the backend returns requiredConfirmHash, resend with ?schemaConfirmHash=<hash>.
 // 6. Re-read metadata and verify unrelated column ids still exist.
 
@@ -330,8 +351,8 @@ create_column({
   isEncrypted: true
 })`,
         notes: [
-          'Do not rebuild schema cascade payloads from table_definition?fields=columns.*; nested fields can be truncated or relation-derived.',
-          'Generated projections such as createdAt, updatedAt, and relation FK display fields without id/_id are not valid column_definition rows.',
+          'Do not rebuild schema cascade payloads from enfyra_table?fields=columns.*; nested fields can be truncated or relation-derived.',
+          'Generated projections such as createdAt, updatedAt, and relation FK display fields without id/_id are not valid enfyra_column rows.',
           'Never delete or omit unrelated persisted columns when adding one field.',
           'Run schema-changing calls sequentially; migration locks are backend-owned.',
         ],
@@ -345,7 +366,7 @@ create_column({
       {
         name: 'Minimal MCP query then explicit detail query',
         code: `query_table({
-  tableName: "user_definition",
+  tableName: "enfyra_user",
   fields: ["id", "email"],
   filter: "{\\"email\\":{\\"_contains\\":\\"@example.com\\"}}",
   limit: 10
@@ -422,7 +443,7 @@ GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
       {
         name: 'Exclude large generated fields',
         code: `query_table({
-  tableName: "route_handler_definition",
+  tableName: "enfyra_route_handler",
   fields: ["-compiledCode"],
   limit: 20
 })
@@ -560,7 +581,7 @@ return { ok: true, email }\`
         notes: [
           'Use sourceCode, not logic. The server generates compiledCode.',
           'Use method for one handler, or methods only when the same sourceCode should be saved for multiple methods.',
-          'Do not pass name to route_handler_definition; one handler is identified by route + method.',
+          'Do not pass name to enfyra_route_handler; one handler is identified by route + method.',
         ],
       },
       {
@@ -570,13 +591,13 @@ const password = @BODY.password
 
 if (!email || !password) @THROW400("Email and password are required")
 
-const existing = await #user_definition.find({
+const existing = await #enfyra_user.find({
   filter: { email: { _eq: email } },
   limit: 1
 })
 if (existing.data[0]) @THROW409("Email is already registered")
 
-const result = await #user_definition.create({
+const result = await #enfyra_user.create({
   data: {
     email,
     password: await @HELPERS.$bcrypt.hash(password)
@@ -635,7 +656,7 @@ const scope = {
       {
         name: 'Pre-hook strips protected body fields silently',
         code: `create_pre_hook({
-  routeId: "<user_definition_patch_route_id>",
+  routeId: "<enfyra_user_patch_route_id>",
   name: "strip_email_verification_fields",
   methods: ["PATCH"],
   priority: -10,
@@ -644,7 +665,7 @@ delete @BODY.emailVerificationStatus
 delete @BODY.emailVerificationSentAt\`
 })`,
         notes: [
-          'Use this pattern when clients may send protected user fields through /me or user_definition PATCH.',
+          'Use this pattern when clients may send protected user fields through /me or enfyra_user PATCH.',
           'Strip fields instead of throwing when the product wants a permissive client contract with server-owned fields.',
           'Use native macros such as @BODY instead of raw $ctx when a macro exists.',
         ],
@@ -703,7 +724,7 @@ ensure_route_access({
       {
         name: 'Publish read-only route',
         code: `update_record({
-  tableName: "route_definition",
+  tableName: "enfyra_route",
   id: "<route_id>",
   data: {
     publicMethods: [{ id: "<GET_method_id_from_list_methods>" }]
@@ -716,9 +737,84 @@ ensure_route_access({
         ],
       },
       {
+        name: 'Rate limit anonymous requests by IP',
+        code: `create_guard({
+  name: "Public signup IP rate limit",
+  path: "/newsletter_signup",
+  methods: ["POST"],
+  position: "pre_auth",
+  isEnabled: true,
+  description: "Limit anonymous signup attempts by client IP.",
+  rules: JSON.stringify([
+    {
+      type: "rate_limit_by_ip",
+      config: { maxRequests: 10, perSeconds: 60 },
+      description: "10 signup attempts per minute per IP"
+    }
+  ])
+})
+
+inspect_route({ path: "/newsletter_signup" })
+
+test_rest_endpoint({
+  method: "POST",
+  path: "/newsletter_signup",
+  body: { email: "test@example.com" }
+})`,
+        notes: [
+          'Use pre_auth for anonymous/public route protection because no user is available yet.',
+          'Rate-limit configs use maxRequests and perSeconds.',
+          'Inspect and test after creation so the final behavior is verified through the actual REST route.',
+        ],
+      },
+      {
+        name: 'Rate limit authenticated users',
+        code: `create_guard({
+  name: "Project create per-user limit",
+  path: "/projects",
+  methods: ["POST"],
+  position: "post_auth",
+  isEnabled: true,
+  description: "Authenticated users can create at most 3 projects per hour.",
+  rules: JSON.stringify([
+    {
+      type: "rate_limit_by_user",
+      config: { maxRequests: 3, perSeconds: 3600 }
+    }
+  ])
+})`,
+        notes: [
+          'Use post_auth for rate_limit_by_user because the server only has user id after auth and RoleGuard.',
+          'This does not grant access; users still need route permissions or a public method to reach the route.',
+          'Do not put rate_limit_by_user on pre_auth guards; the server drops that rule from pre-auth trees.',
+        ],
+      },
+      {
+        name: 'Restrict an admin-only route to office IPs',
+        code: `create_guard({
+  name: "Admin reports office allowlist",
+  path: "/admin/reports",
+  methods: ["GET", "POST"],
+  position: "pre_auth",
+  isEnabled: false,
+  description: "Only office network IPs can reach admin reports.",
+  rules: JSON.stringify([
+    {
+      type: "ip_whitelist",
+      config: { ips: ["203.0.113.10", "198.51.100.0/24"] }
+    }
+  ])
+})`,
+        notes: [
+          'Create risky allowlists disabled first, then inspect the saved guard before enabling it.',
+          'IP list configs use ips; exact IPv4 addresses and IPv4 CIDR ranges are supported.',
+          'An allowlist is an additional gate, not a replacement for route permissions.',
+        ],
+      },
+      {
         name: 'Column rule for email format',
         code: `create_column_rule({
-  tableName: "user_definition",
+  tableName: "enfyra_user",
   columnName: "email",
   ruleType: "format",
   value: JSON.stringify({ v: "email" }),
@@ -789,25 +885,25 @@ const { checkPermissionCondition } = usePermissions()
 const canReadReports = computed(() => checkPermissionCondition({
   or: [
     { route: '/reports', methods: ['GET'] },
-    { route: '/report_definition', methods: ['GET'] }
+    { route: '/report', methods: ['GET'] }
   ]
 }))
 
 const canCreateReport = computed(() => checkPermissionCondition({
-  or: [{ route: '/report_definition', methods: ['POST'] }]
+  or: [{ route: '/report', methods: ['POST'] }]
 }))
 
 const canUpdateReport = computed(() => checkPermissionCondition({
-  or: [{ route: '/report_definition', methods: ['PATCH'] }]
+  or: [{ route: '/report', methods: ['PATCH'] }]
 }))
 
 const canDeleteReport = computed(() => checkPermissionCondition({
-  or: [{ route: '/report_definition', methods: ['DELETE'] }]
+  or: [{ route: '/report', methods: ['DELETE'] }]
 }))
 </script>`,
         notes: [
           'This is menu/extension visibility, not row-level RLS.',
-          'Set menu_definition.permission on every sensitive admin menu. Example for /reports: { or: [{ route: "/reports", methods: ["GET"] }, { route: "/report_definition", methods: ["GET"] }] }.',
+          'Set enfyra_menu.permission on every sensitive admin menu. Example for /reports: { or: [{ route: "/reports", methods: ["GET"] }, { route: "/report", methods: ["GET"] }] }.',
           'Admin pages are sensitive. Use permission gates by default, not as an optional polish step.',
           'Menus should only be visible when the user has at least GET permission for the page route or backing data route.',
           'Inside the extension, gate each action by its own route/method: GET for page visibility, POST for create/flow-trigger buttons, PATCH for normal record edits, DELETE for native delete routes.',
@@ -868,6 +964,7 @@ if (!membership.data[0]) @THROW403("Not a conversation member")
 @SOCKET.reply("chat:joined", { conversationId })`,
         notes: [
           'Join conversation rooms, not member-id rooms.',
+          'conversationId is a request/room identifier; DB filters still use the relation property conversation.',
           'Check membership server-side; do not trust the client.',
         ],
       },
@@ -908,7 +1005,8 @@ if (message?.id) {
 
 return { ok: true, message }`,
         notes: [
-          'Do not ask the client for senderId; use @USER.id.',
+          'Do not ask the client for senderId. The sender relation is derived from @USER.id.',
+          'conversationId is accepted only as the room/business identifier; persistence uses relation properties conversation and sender, not physical FK fields.',
           'Event scripts should explicitly emit replies/broadcasts.',
         ],
       },
@@ -955,13 +1053,13 @@ return order && order.total > 1000`,
         notes: [
           'Prefer operation-sized flow steps with clear keys over one large script that performs SSH, Docker, DB, API, email, and finalization work together.',
           'Each step should return only ids, booleans, status keys, or small counters that later steps need.',
-          'When refactoring an existing flow, add or extract adjacent focused flow_step_definition rows instead of making an oversized sourceCode block longer.',
+          'When refactoring an existing flow, add or extract adjacent focused enfyra_flow_step rows instead of making an oversized sourceCode block longer.',
         ],
       },
       {
         name: 'Flow query step config',
         code: `{
-  "table": "user_definition",
+  "table": "enfyra_user",
   "filter": { "email": { "_contains": "@example.com" } },
   "limit": 50
 }`,
@@ -1010,7 +1108,7 @@ return saved`,
         notes: [
           'Use file-specific context only in upload-capable routes.',
           'For request uploads, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from the temp file path.',
-          'Use @STORAGE.$registerFile when an external process already uploaded the object and the script only needs to create the file_definition record.',
+          'Use @STORAGE.$registerFile when an external process already uploaded the object and the script only needs to create the enfyra_file record.',
           'Do not read @UPLOADED_FILE.path into a Buffer and do not generate examples using @UPLOADED_FILE.buffer.',
           'Use buffer only for small generated or transformed files, such as image thumbnails.',
         ],
@@ -1037,10 +1135,10 @@ update_method({
   textColor: "#b45309"
 })`,
         notes: [
-          'Use dedicated method tools instead of generic CRUD on method_definition.',
-          'The backend stores the method label in method_definition.name; do not send or filter a method_definition.method field.',
+          'Use dedicated method tools instead of generic CRUD on enfyra_method.',
+          'The backend stores the method label in enfyra_method.name; do not send or filter a `method` field on `enfyra_method`.',
           'buttonColor is the badge background and textColor is the badge text color.',
-          'The eApp management UI is /settings/methods.',
+          'The Enfyra admin UI is /settings/methods.',
           'delete_method is preview-first and should only be used for unused custom methods.',
         ],
       },
@@ -1056,7 +1154,7 @@ update_method({
   permission: JSON.stringify({
     or: [
       { route: "/reports", methods: ["GET"] },
-      { route: "/report_definition", methods: ["GET"] }
+      { route: "/report", methods: ["GET"] }
     ]
   })
 })
@@ -1072,7 +1170,7 @@ create_extension({
 })`,
         notes: [
           'Menu provides navigation; extension provides content.',
-          'Use menu_definition.label, not title.',
+          'Use enfyra_menu.label, not title.',
           'Sensitive admin menus should include a permission condition at creation time.',
           'For page extensions, create the menu first and pass menuId to create_extension.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',
@@ -1080,8 +1178,8 @@ create_extension({
           'Do not put ordinary KPI cards in PageHeader.stats; render metrics in the extension body.',
           'Put page-level actions in useHeaderActionRegistry or useSubHeaderActionRegistry, destructure register first, then call it with one action or an array.',
           'Page extensions should be full-bleed by default and responsive from the first version.',
-          'The extension root is already inside eApp main; do not add root-level page padding.',
-          'After saving, open eApp tabs should update through the server/eApp realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',
+          'The extension root is already inside Enfyra admin page main; do not add root-level page padding.',
+          'After saving, open Enfyra admin tabs should update through the server/Enfyra admin UI realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',
         ],
       },
       {
@@ -1130,18 +1228,18 @@ create_extension({
   type: "page",
   name: "ReportsPage",
   menuId: "<reports-menu-id>",
-  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><Widget :id=\\"<report-status-widget-id>\\" :total=\\"totalReports\\" :rows=\\"reportRows\\" :open-details=\\"openReportDetails\\" @refresh=\\"refresh\\" /><Widget :id=\\"<report-table-widget-id>\\" :rows=\\"reportRows\\" @refresh=\\"refresh\\" /></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); const totalReports = ref(0); const reportRows = ref([]); function refresh() {} function openReportDetails(row) { navigateTo('/data/report_definition?filter=' + encodeURIComponent(JSON.stringify({ id: { _eq: row.id } }))) }</script>",
+  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><Widget :id=\\"<report-status-widget-id>\\" :total=\\"totalReports\\" :rows=\\"reportRows\\" :open-details=\\"openReportDetails\\" @refresh=\\"refresh\\" /><Widget :id=\\"<report-table-widget-id>\\" :rows=\\"reportRows\\" @refresh=\\"refresh\\" /></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); const totalReports = ref(0); const reportRows = ref([]); function refresh() {} function openReportDetails(row) { navigateTo('/data/report?filter=' + encodeURIComponent(JSON.stringify({ id: { _eq: row.id } }))) }</script>",
   isEnabled: true
 })`,
         notes: [
           'Use widgets for bulky or reusable sections such as operation panels, timelines, tables, sidebars, and status cards.',
-          'Embed widgets by their numeric extension_definition id, not by extensionId/name.',
+          'Embed widgets by their numeric enfyra_extension id, not by extensionId/name.',
           'Props and listeners pass through the Widget wrapper. Widget defineProps values update reactively when the parent refs/computed values change.',
           'Use kebab-case in the parent template for camelCase widget props, for example :open-details maps to openDetails.',
           'Do not mutate widget props. Use computed for derived display state, and use watch only when mirroring a prop into local editable draft state.',
           'Prefer defineEmits for child-to-parent requests such as refresh. Use callback props only for parent-owned modal/drawer openers or imperative navigation.',
           'Keep PermissionGate and type="button" plus @click.stop.prevent inside action widgets; server permissions still enforce the real boundary.',
-          'eApp batch-fetches widget metadata requested in the same tick and caches loaded widgets, so render Widget components directly instead of manually fetching widget code.',
+          'the Enfyra admin UI batch-fetches widget metadata requested in the same tick and caches loaded widgets, so render Widget components directly instead of manually fetching widget code.',
         ],
       },
       {
@@ -1211,13 +1309,13 @@ create_extension({
   isEnabled: true
 })`,
         notes: [
-          'Global extensions are mounted invisibly by eApp during layout init; do not create a menu and do not embed them with Widget.',
+          'Global extensions are mounted invisibly by Enfyra admin UI during layout init; do not create a menu and do not embed them with Widget.',
           'Use them for shell-level registrations, realtime listeners, notification counters, account panel rows, and background refresh bridges.',
           'Keep the global extension template empty or hidden; visible UI should be registered into an existing shell registry or component slot.',
-          'For account-panel UI, register data-driven row fields so eApp owns icon size, row spacing, badge placement, hover state, and expanded chrome.',
+          'For account-panel UI, register data-driven row fields so Enfyra admin UI owns icon size, row spacing, badge placement, hover state, and expanded chrome.',
           'Use contentComponent only for expanded inner content; use raw component only as an escape hatch when the row cannot fit the shell contract.',
           'Destructure registry functions and register stable ids so reloads replace the same shell item predictably.',
-          'Remove socket or DOM listeners in onUnmounted; eApp unmounts old global components when extension cache reloads or the extension is disabled.',
+          'Remove socket or DOM listeners in onUnmounted; The Enfyra admin UI unmounts old global components when extension cache reloads or the extension is disabled.',
         ],
       },
       {
@@ -1257,7 +1355,7 @@ register({
         notes: [
           'Prefer this contract for shell/account-panel items: data fields for the row, optional contentComponent for the expanded body.',
           'Do not draw a custom full row with page-scale cards, hero headings, large whitespace, or nested buttons unless the shell contract cannot express the UI.',
-          'Let eApp handle the row button, icon container, label, microcopy, badge, chevron, hover state, spacing, and expanded wrapper.',
+          'Let the Enfyra admin UI handle the row button, icon container, label, microcopy, badge, chevron, hover state, spacing, and expanded wrapper.',
           'Keep contentComponent compact; it is rendered inside account-panel chrome and should not create another large card around itself.',
           'Register the component from a `type="global"` extension, not from a page extension, when it must appear everywhere.',
         ],
@@ -1316,15 +1414,15 @@ registerHeaderActions([
         ],
       },
       {
-        name: 'Debug menu or extension changes that do not appear in open eApp tabs',
-        code: `// Server side: menu_definition and extension_definition are runtime UI definitions.
+        name: 'Debug menu or extension changes that do not appear in open Enfyra admin tabs',
+        code: `// Server side: enfyra_menu and enfyra_extension are runtime UI definitions.
 // They must participate in partial reload, just like metadata/routes.
 // Expected server contract:
-// - cache orchestrator maps menu_definition -> menu reload
-// - cache orchestrator maps extension_definition -> extension reload
+// - cache orchestrator maps enfyra_menu -> menu reload
+// - cache orchestrator maps enfyra_extension -> extension reload
 // - successful writes emit $system:reload to the admin Socket.IO namespace
 
-// eApp side expected listener behavior:
+// Enfyra admin UI side expected listener behavior:
 // if reload target is metadata/menu:
 //   await fetch menus
 //   rebuild menu registry with reset: true
@@ -1335,12 +1433,12 @@ registerHeaderActions([
 
 // Verification pattern:
 // 1. Save the menu or extension record.
-// 2. Watch the open eApp tab for the $system:reload event.
+// 2. Watch the open Enfyra admin UI tab for the $system:reload event.
 // 3. Confirm sidebar/menu registry or extension component cache changed.
 // 4. Only use manual reload endpoints or browser refresh after the natural event path is proven stale.`,
         notes: [
           'Do not treat menu and extension writes as plain CRUD when debugging live admin UI.',
-          'Check both halves: ASV/ESV emits the reload event, and eApp consumes it.',
+          'Check both halves: Enfyra Server emits the reload event, and Enfyra admin UI consumes it.',
           'Menu reload should also invalidate extension cache because menu records attach page extensions to routes.',
           'Manual reload is a fallback, not the default fix.',
         ],
@@ -1358,7 +1456,7 @@ create_menu({
   permission: JSON.stringify({
     or: [
       { route: "/operations/jobs", methods: ["GET"] },
-      { route: "/flow_execution_definition", methods: ["GET"] }
+      { route: "/enfyra_flow_execution", methods: ["GET"] }
     ]
   })
 })
@@ -1370,7 +1468,7 @@ create_menu({
 // /operations/reports   report configuration and delivery history
 // /operations/settings  system readiness and configuration
 // Use UTabs inside large pages instead of placing every section in one dashboard.
-// For admin record management, link to /data/<table>, e.g. /data/report_definition, not public website paths.`,
+// For admin record management, link to /data/<table>, e.g. /data/report, not public website paths.`,
         notes: [
           'Design the menu/page split before generating dashboard code.',
           'Permission-gate sensitive parent dropdown menus too, using any child page route or backing route that represents read access.',
@@ -1380,14 +1478,14 @@ create_menu({
           'PageHeader.stats is reserved for deliberate overview headers; operational KPIs belong in body cards/tables.',
           'Operational history pages should not show raw event rows as the primary UI; group by entity/run and translate step keys into operator-facing labels.',
           'Operational lists should use pagination plus search/filter controls; do not rely on arbitrary fixed limits such as limit=50.',
-          'UTabs is available in eApp extension runtime for page-level sections.',
+          'UTabs is available in the Enfyra admin UI extension runtime for page-level sections.',
           'Admin links for editing or inspecting records should point to /data/<table> routes.',
         ],
       },
       {
         name: 'Extension fetches Enfyra data',
         code: `<script setup>
-const { data, pending, execute: fetchOrders } = useApi('/order_definition', {
+const { data, pending, execute: fetchOrders } = useApi('/order', {
   query: {
     limit: 10,
     sort: '-createdAt'
@@ -1463,7 +1561,7 @@ console.log(ok, requiredTerms.has('terms'), loaded, label, date)
 </script>`,
         notes: [
           'Do not rewrite extension code to ES5 when tooling rejects modern APIs.',
-          'If diagnostics complain about these APIs, fix eApp extension TypeScript lib/runtime contract.',
+          'If diagnostics complain about these APIs, fix Enfyra admin extension TypeScript lib/runtime contract.',
         ],
       },
       {
@@ -1489,7 +1587,7 @@ onMounted(async () => {
 </template>`,
         notes: [
           'Install browser-side extension dependencies as type: "App".',
-          'Do not use static import statements in extension_definition.code.',
+          'Do not use static import statements in enfyra_extension.code.',
           'Load app packages with getPackages([...]) inside the extension runtime.',
           'Use onMounted or an explicit action for package loading when the UI can render a loading state.',
         ],
@@ -1507,7 +1605,7 @@ const rangeStart = computed(() => {
   return d.toISOString()
 })
 
-const flowStats = useApi('/flow_execution_definition', {
+const flowStats = useApi('/enfyra_flow_execution', {
   query: computed(() => ({
     fields: 'id',
     limit: 1,
@@ -1520,7 +1618,7 @@ const flowStats = useApi('/flow_execution_definition', {
   }))
 })
 
-const orderStats = useApi('/order_definition', {
+const orderStats = useApi('/order', {
   query: computed(() => ({
     fields: 'id',
     limit: 1,

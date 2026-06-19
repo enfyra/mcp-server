@@ -1,66 +1,55 @@
 # Enfyra MCP Server
 
-MCP server for managing Enfyra instances from **Codex**, **Claude Code**, **Cursor**, and other MCP-compatible clients. All operations go through Enfyra's REST API.
+Manage Enfyra instances from MCP-compatible coding tools such as **Codex**, **Claude Code**, **Cursor**, MCP Inspector, and other STDIO MCP hosts.
 
+This package is the MCP bridge only. Assistant rules, schema behavior, dynamic script guidance, and examples are served through the MCP server itself from `src/lib/mcp-instructions.js`, `src/lib/mcp-examples.js`, and tool descriptions in `src/mcp-server-entry.mjs`.
 
-**LLM rules (REST, GraphQL, auth, URL, mutation `create_{tableName}`, etc.):** not in this README — see **`src/lib/mcp-instructions.js`** (content sent via MCP `instructions`), **`src/lib/mcp-examples.js`** (concrete examples loaded through `get_enfyra_examples`), and tool descriptions in **`src/mcp-server-entry.mjs`**. This README only covers **MCP installation and configuration** for users/devs.
+## Quick Start
 
-**Official docs:** [Claude Code MCP](https://docs.anthropic.com/en/docs/claude-code/mcp) · [Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings) · [Cursor MCP (`mcp.json`)](https://cursor.com/docs/context/mcp)
-
----
-
-## Quick local setup (`config` command)
-
-From your **Enfyra project root**:
+From your project root:
 
 ```bash
 npx @enfyra/mcp-server config
 ```
 
-- **Interactive (default in a terminal):** first asks **where** to write config with an arrow-key selector — Claude Code, Cursor, Codex, or all — unless you already passed target flags. Then prompts for `ENFYRA_API_URL` and `ENFYRA_API_TOKEN` when missing. Press **Enter** to accept bracketed defaults from env or existing `enfyra` config.
-- **Re-run anytime** to update the same files; other entries under `mcpServers` are preserved.
-- **Non-interactive** (CI / scripts): `npx @enfyra/mcp-server config --yes` plus optional `-a` / `-t` and/or env vars.
-- **One host only:** `--claude-code` / `--claude` / `--claude-only` → `./.mcp.json`. `--cursor` / `--cursor-only` → `./.cursor/mcp.json`. `--codex` / `--codex-only` → `./.codex/config.toml`. Pass multiple target flags to write each selected host.
-- **Reconfigure:** `npx @enfyra/mcp-server config --reconfig` prompts for the target host again, uses existing project values as defaults, and replaces the old project `enfyra` entry for that host.
-- **Global/user config:** add `--global` only when you intentionally want the selected host config under your home directory instead of this project.
-- **Help:** `npx @enfyra/mcp-server -h` or `npx @enfyra/mcp-server config --help`
+The config command writes project config for Codex, Claude Code, and Cursor. It preserves other MCP servers and replaces only the `enfyra` entry.
 
-Equivalent in this repo: `yarn mcp:config` (Yarn v1 reserves `yarn config` for registry settings). Same as `node src/index.mjs config` / `npm run mcp:config`.
+Interactive setup asks for your Enfyra app/admin URL, then guides you to the token page when needed and asks for `ENFYRA_API_TOKEN`.
 
----
+```bash
+# Non-interactive, all supported clients
+npx @enfyra/mcp-server config --yes \
+  --app-url http://localhost:3000 \
+  -t efy_pat_your-token
 
-## Which coding tool? (switch)
+# One or more clients
+npx @enfyra/mcp-server config --codex
+npx @enfyra/mcp-server config --cursor --claude-code
+```
 
-Use this table to see **where** each host stores config. The **`mcpServers.enfyra` JSON block** at the bottom of each section is identical; only the **file paths** and **CLI** differ.
+Equivalent in this repo:
 
-| | **Codex** | **Claude Code** | **Cursor** |
-|---|-----------|-----------------|------------|
-| **Project (repo, default)** | **`.codex/config.toml`** in the project | **`.mcp.json`** at repository root | **`.cursor/mcp.json`** in the project |
-| **Global (explicit `--global`)** | `~/.codex/config.toml` | `~/.mcp.json` from this helper, or Claude's `~/.claude.json` via `claude mcp add --scope user` | `~/.cursor/mcp.json` |
-| **Typical install** | `npx @enfyra/mcp-server config --codex` | `npx @enfyra/mcp-server config --claude-code` | `npx @enfyra/mcp-server config --cursor` |
-| **Precedence / merge** | Project config is merged/replaced for `enfyra` | Project `.mcp.json` is merged/replaced for `enfyra` | Project `.cursor/mcp.json` is merged/replaced for `enfyra` |
-| **Gotcha** | Open this folder in a new Codex session after editing config | Do not put MCP server definitions in `.claude/settings.json` | Root **`.mcp.json`** is for Claude Code project scope, not Cursor — use **`.cursor/mcp.json`** for Cursor |
+```bash
+yarn mcp:config
+```
 
-Expand **one** block below for step-by-step setup.
+## Choose A Client
 
-<details open>
-<summary><strong>Codex</strong> — setup</summary>
+| Client | Command | Project config |
+|--------|---------|----------------|
+| Codex | `npx @enfyra/mcp-server config --codex` | `.codex/config.toml` |
+| Claude Code | `npx @enfyra/mcp-server config --claude-code` | `.mcp.json` |
+| Cursor | `npx @enfyra/mcp-server config --cursor` | `.cursor/mcp.json` |
+| MCP Inspector / other hosts | Paste the shared STDIO config below | Host-specific `mcpServers` config |
 
-The config command writes project Codex config to `./.codex/config.toml` by default:
+<details>
+<summary><strong>Codex setup</strong></summary>
 
 ```bash
 npx @enfyra/mcp-server config --codex
 ```
 
-Non-interactive:
-
-```bash
-npx @enfyra/mcp-server config --codex --yes \
-  -a http://localhost:3000/api \
-  -t efy_pat_your-token
-```
-
-The generated TOML section is:
+Generated project config:
 
 ```toml
 [mcp_servers.enfyra]
@@ -72,92 +61,57 @@ ENFYRA_API_URL = "http://localhost:3000/api"
 ENFYRA_API_TOKEN = "efy_pat_your-token"
 ```
 
-The config writer replaces only `[mcp_servers.enfyra]` and `[mcp_servers.enfyra.env]`; other Codex config and other MCP servers are preserved. Open this folder in a new Codex session after updating `./.codex/config.toml`. Use `--global --codex` only when you intentionally want `~/.codex/config.toml`.
+The writer replaces only `[mcp_servers.enfyra]` and `[mcp_servers.enfyra.env]`. Other Codex config and other MCP servers are preserved.
+
+Open this folder in a new Codex session and approve the project MCP config if prompted. The setup command only writes `.codex/config.toml`; it does not ship or create `.codex/skills`.
+
+Official reference: [Codex config](https://developers.openai.com/codex/config-reference).
 
 </details>
 
-<details open>
-<summary><strong>Claude Code</strong> — setup</summary>
-
-MCP server definitions are **not** placed in `.claude/settings.json`; that folder is for other Claude Code settings.
-
-### Choose scope (Claude Code)
-
-| Goal | Location | Claude Code scope | Typical use |
-|------|----------|-------------------|-------------|
-| Same Enfyra MCP in **every** project on your machine | **`~/.claude.json`** | **user** (`claude mcp add … --scope user`) | One admin stack you always use |
-| MCP only when this **repo is cwd**, private to you, often with secrets | **`~/.claude.json`** | **local** (default: `claude mcp add …` without `--scope project`) | Per-machine URLs or tokens; nothing committed |
-| **Team** / reproducible setup; commit config to git | **`.mcp.json`** at the **repository root** | **project** (`claude mcp add … --scope project`) | Shared onboarding; env expansion supported |
-
-**Precedence when the same server name exists in more than one place:** **local** → **project** (`.mcp.json`) → **user**. See the [official MCP docs](https://docs.anthropic.com/en/docs/claude-code/mcp).
-
-**Project `.mcp.json` approval:** Claude Code may prompt before trusting project-scoped servers; use `claude mcp reset-project-choices` to reset.
-
-### `claude mcp add` — user, local, or project
-
-Use the CLI (recommended). **User** and **local** configs are stored in **`~/.claude.json`**; **project** (`--scope project`) writes **`./.mcp.json`** at the repo root.
+<details>
+<summary><strong>Claude Code setup</strong></summary>
 
 ```bash
-# User scope — available in all projects (options before server name per Claude Code docs)
-claude mcp add --transport stdio --scope user \
-  --env ENFYRA_API_URL=http://localhost:3000/api \
-  --env ENFYRA_API_TOKEN=efy_pat_your-token \
-  enfyra -- npx -y @enfyra/mcp-server
+npx @enfyra/mcp-server config --claude-code
+```
 
-# Local scope (default) — only when this repo is cwd; still stored in ~/.claude.json under project path
-claude mcp add --transport stdio \
-  --env ENFYRA_API_URL=http://localhost:3000/api \
-  --env ENFYRA_API_TOKEN=efy_pat_your-token \
-  enfyra -- npx -y @enfyra/mcp-server
+Project config is written to `.mcp.json`. MCP server definitions do not belong in `.claude/settings.json`.
 
-# Project scope — writes/updates .mcp.json at repo root (good for teams)
+Claude Code also supports its own CLI:
+
+```bash
 claude mcp add --transport stdio --scope project \
   --env ENFYRA_API_URL=http://localhost:3000/api \
   --env ENFYRA_API_TOKEN=efy_pat_your-token \
   enfyra -- npx -y @enfyra/mcp-server
 ```
 
-On **native Windows** (not WSL), stdio servers using `npx` often need the `cmd /c` wrapper — see [Claude Code MCP — Windows](https://docs.anthropic.com/en/docs/claude-code/mcp).
+Scope precedence when the same server name exists in multiple places is local, then project, then user. Project-scoped `.mcp.json` may require approval in Claude Code.
 
-You can set env vars with **`--env`** (as above), edit **`~/.claude.json`** / **`.mcp.json`**, or use the `/mcp` UI.
-
-### Manual JSON (Claude Code)
-
-Use inside **`.mcp.json`** `mcpServers`, or merge into **`~/.claude.json`** per [Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings) for your scope. Reuse the **shared JSON** in the [Shared](#shared-enfyra-mcp-json-and-environment) section below.
-
-### `.mcp.json` only (Claude Code project, manual)
-
-If you skip the CLI, add **`mcpServers.enfyra`** to **`.mcp.json`** at the repository root. Official docs support **environment variable expansion** in `.mcp.json`.
-
-**Local dev (this monorepo):** point `command` / `args` / `cwd` at `node` and `src/index.mjs` inside your clone — see the sample **`.mcp.json`** in this repository (adjust `cwd` or use expansion).
+Official references: [Claude Code MCP](https://docs.anthropic.com/en/docs/claude-code/mcp) and [Claude Code settings](https://docs.anthropic.com/en/docs/claude-code/settings).
 
 </details>
 
 <details>
-<summary><strong>Cursor</strong> — setup</summary>
+<summary><strong>Cursor setup</strong></summary>
 
-Cursor reads MCP from **`mcp.json`** in two places ([Cursor docs](https://cursor.com/docs/context/mcp)):
+```bash
+npx @enfyra/mcp-server config --cursor
+```
 
-| Scope | Path |
-|-------|------|
-| **Global** | `~/.cursor/mcp.json` (macOS/Linux) or `%USERPROFILE%\.cursor\mcp.json` (Windows) |
-| **Project** | **`.cursor/mcp.json`** inside the project (directory **`.cursor`** at repo root) |
+Cursor project config is written to `.cursor/mcp.json`. Global config is `~/.cursor/mcp.json` on macOS/Linux or `%USERPROFILE%\.cursor\mcp.json` on Windows.
 
-Paste the **same** `mcpServers` structure as in the [Shared](#shared-enfyra-mcp-json-and-environment) section. Cursor supports **interpolation**, e.g. `${env:ENFYRA_API_TOKEN}`, `${workspaceFolder}`, for secrets and paths.
+After edits, restart Cursor or reload MCP, then confirm the server under Cursor MCP settings. Use MCP logs if the server fails to start.
 
-Optional **STDIO** fields per Cursor: `type`, `command`, `args`, `env`, `envFile` — see [STDIO server configuration](https://cursor.com/docs/context/mcp).
-
-**After edits:** restart Cursor (or toggle the server under **Settings → Features → Model Context Protocol**). Use **Output → MCP Logs** if the server fails to start.
-
-**Using both Cursor and Claude Code in one repo:** keep **`.cursor/mcp.json`** for Cursor and **`.mcp.json`** (root) for Claude Code **project** scope if needed — they are different files.
+Official reference: [Cursor MCP](https://cursor.com/docs/context/mcp).
 
 </details>
 
----
+<details>
+<summary><strong>Other MCP hosts and MCP Inspector</strong></summary>
 
-## Shared: Enfyra MCP JSON and environment
-
-Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env or use `${env:…}` where your editor supports it).
+Use the shared STDIO config with any host that accepts an `mcpServers` JSON block:
 
 ```json
 {
@@ -174,61 +128,130 @@ Use this block in any host-specific `mcp.json` / `mcpServers` merge (adjust env 
 }
 ```
 
-- `-y`: auto-confirm `npx` package install without prompting.
-- **Restart** the coding tool after manual file edits.
+`ENFYRA_API_TOKEN` is a programmatic token from the Enfyra admin UI `/me`. It is not a JWT; the MCP server exchanges it through `POST {ENFYRA_API_URL}/auth/token/exchange` before calling Enfyra REST APIs.
+
+Official reference: [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector).
+
+</details>
+
+## Config Command
+
+```bash
+npx @enfyra/mcp-server config [options]
+```
+
+| Option | Use |
+|--------|-----|
+| `--app-url` | Set the Enfyra app/admin URL |
+| `--api-token`, `-t` | Set `ENFYRA_API_TOKEN` |
+| `--yes` | Non-interactive mode for CI/scripts |
+| `--global` | Write global/user config instead of project config |
+| `--reconfig` | Prompt for target clients again and replace the existing `enfyra` entry |
+| `--codex` | Write Codex config |
+| `--claude-code`, `--claude` | Write Claude Code config |
+| `--cursor` | Write Cursor config |
+| `-h`, `--help` | Show CLI help |
+
+Without a target flag, interactive mode asks which client to configure. Non-interactive mode defaults to all supported clients.
+
+## Environment
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ENFYRA_API_URL` | Base for REST + GraphQL + auth through the Nuxt/app proxy | `http://localhost:3000/api` |
-| `ENFYRA_API_TOKEN` | Programmatic token from eApp `/me`. MCP exchanges it through `/auth/token/exchange` for an access token. | — |
+| `ENFYRA_APP_URL` | App/admin URL used by setup | `http://localhost:3000` |
+| `ENFYRA_API_URL` | Runtime API base written into MCP client config | Generated by setup |
+| `ENFYRA_API_TOKEN` | Programmatic token from the Enfyra admin UI `/me` | Required |
 
-`ENFYRA_API_TOKEN` is a long-lived programmatic token, not a JWT. MCP must never send it directly as `Authorization: Bearer <token>` to REST tools. The MCP client first calls `POST {ENFYRA_API_URL}/auth/token/exchange` with `{ "apiToken": ENFYRA_API_TOKEN }`, caches the returned `accessToken`, and uses that JWT as the Bearer token for subsequent requests.
+For normal apps and demos, enter the app/admin URL such as `http://localhost:3000` or `https://demo.enfyra.io`. Treat the direct Enfyra backend host as private infrastructure unless you are debugging Enfyra core/server internals.
 
-Schema and script tools include safety guards for LLM callers: generic record mutations validate request fields against live metadata, script-backed records must validate `sourceCode` before save through `/admin/script/validate` and fail closed if validation is unavailable, relation metadata rejects physical FK/junction inputs, custom routes reject `mainTableId` unless the path is the canonical table route, schema tools serialize table/column/relation changes, and destructive deletes require `confirm=true` after returning a preview.
+## Common Examples
 
-Read tools use Enfyra's `fields` parameter directly. Passing explicit includes such as `fields=id,email` returns only those fields, while any `-field` token switches that scope to exclude mode. For example, `fields=-compiledCode` returns all readable fields except `compiledCode`, and `fields=id,-compiledCode` still means all except `compiledCode`. Nested exclusions work with dotted fields and `deep`, such as `fields=-owner.avatar` or `deep.owner.fields=-avatar`.
+Use `get_enfyra_examples` from the MCP tool list when asking an LLM to generate implementation patterns. It returns focused examples for:
 
-Generated RLS for canonical table reads must keep projection and pagination client-owned. Pre-hooks may merge owner or membership constraints into `@QUERY.filter`, but they must not override `@QUERY.fields`, `@QUERY.deep`, `@QUERY.sort`, `@QUERY.limit`, `@QUERY.page`, `@QUERY.meta`, `@QUERY.aggregate`, or `debugMode`. Fixed projections belong only on clearly custom summary or workflow endpoints with an explicit response contract.
+- SSR app auth, OAuth, and proxy setup
+- schema, columns, relations, indexes, and validation
+- query filters, sorting, fields, deep relations, and aggregates
+- handlers, hooks, permissions, and RLS
+- websocket gateways and events
+- flows
+- files and storage
+- Enfyra admin extensions
 
-Quick checklist for a new LLM using Enfyra MCP: discover the live system first, inspect the specific table/route, load the matching example category, mutate with explicit fields and relation property names, validate or test scripts/routes before relying on them, re-read the saved row when mutation output is summarized, and preview destructive operations before confirming.
+## OAuth Setup
 
-Use `trace_metadata_usage` before changing production features to find related tables, routes, handlers, hooks, flow steps, websocket scripts, GraphQL scripts, and bootstrap scripts. Use `get_script_source` to read full untruncated source plus a SHA-256 hash. Prefer `patch_script_source` for focused exact search/replace edits; it previews by default and, with `apply=true`, validates the patched `sourceCode` through `/admin/script/validate` before saving. Use `update_script_source` when replacing an entire existing script. Use generic `update_record` only for small record patches or patches that include non-script metadata fields.
+OAuth has three different URLs:
 
-For route contracts that intentionally keep workflow fields out of request bodies, generic `create_record`, `update_record`, and `delete_record` accept optional `queryParams` as a JSON object string. For example, a renewal workflow can keep `expires_at=YYYY-MM-DD` in the URL query while `validateBody` remains enabled for the table body.
+| URL | Meaning |
+|-----|---------|
+| Provider callback URL | `{ENFYRA_API_URL}/auth/{provider}/callback` |
+| Enfyra `redirectUri` | Must exactly match the provider callback URL |
+| App `redirect` query | Where Enfyra sends the browser after cookies are set |
 
-### `ENFYRA_API_URL` — use the app proxy
-
-For normal apps and demos, set `ENFYRA_API_URL` to the Nuxt/app proxy:
+Example Google callback when `ENFYRA_API_URL=http://localhost:3000/api`:
 
 ```text
-http://localhost:3000/api
+http://localhost:3000/api/auth/google/callback
 ```
 
-The Enfyra backend is private infrastructure. MCP, browser code, SSR routes, GraphQL calls, and generated app code should go through the app origin `/api/**`; do not connect them directly to the backend host/port. Direct backend URLs are only for Enfyra core/server debugging when you intentionally bypass the app proxy.
+Start OAuth from the app proxy:
 
-### SSR app auth pattern
+```text
+/enfyra/auth/google?redirect=<absoluteReturnUrl>&cookieBridgePrefix=/enfyra
+```
 
-When an LLM builds a Nuxt, Next, or other SSR frontend for Enfyra, follow the same-origin proxy pattern:
+`appCallbackUrl` is only for manual-token apps that intentionally read token query parameters. SSR apps should prefer proxy-owned cookies.
 
-- Browser code calls a same-origin proxy such as `{{ appOrigin }}/enfyra/**`, never the raw Enfyra backend URL.
-- Nuxt can proxy it with `routeRules: { "/enfyra/**": { proxy: { to: `${API_URL}/**`, fetchOptions: { redirect: "manual" } } } }`. Keep redirects manual so OAuth set-cookie redirects reach the browser as real HTTP redirects with `Set-Cookie`.
-- Generated apps should not create custom login/logout/me routes that manually set `accessToken`, `refreshToken`, or `expTime` cookies when the proxy is enough.
-- Password login is `POST /enfyra/login`, not `/enfyra/auth/login`.
-- Fetch the current user with `GET /enfyra/me` and logout with `POST /enfyra/logout`.
-- OAuth starts through the same proxy prefix, for example `/enfyra/auth/google?redirect=<absoluteReturnUrl>&cookieBridgePrefix=/enfyra`. `redirect` must include the app origin, and `cookieBridgePrefix` is the same proxy prefix that reaches Enfyra API routes. Enfyra validates the redirect, exchanges OAuth on its callback, then redirects through `{redirect.origin}{cookieBridgePrefix}/auth/set-cookies` so the third app origin stores the cookies before returning to `redirect`.
-- Socket.IO browser clients use a same-origin bridge too. Connect to the namespace, e.g. `io("/chat", { path: "/socket.io", withCredentials: true })`, and proxy `/socket.io/**` to the Enfyra app bridge `/ws/socket.io/**`. The backend gateway metadata path remains `/chat`.
-- Use token-query OAuth callback pages only for non-SSR/manual-token apps.
+## Runtime Safety
 
----
+The MCP server includes safety guards for LLM callers:
 
-## Tools (summary)
+- Generic record mutations validate fields against live metadata.
+- Script-backed records validate `sourceCode` through `/admin/script/validate` before saving.
+- `compiledCode` is generated from `sourceCode` and may differ textually because macros are expanded; the MCP server never accepts hand-written `compiledCode`.
+- Relation tools reject physical FK/junction names.
+- Generated code should use relation property names such as `conversation`, `sender`, and `member` instead of physical FK fields such as `conversationId`, `senderId`, or `memberId`.
+- Custom route tools reject `mainTableId` unless the route is the canonical table route.
+- Schema changes are serialized.
+- Destructive deletes return a preview before requiring `confirm=true`.
 
-Metadata, examples, query/CRUD, method management, route access audit/grant, route/handler/hook, tables/columns, reload cache, logs, user/roles, login, menu/extension, `get_enfyra_api_context`. For full tool list and behavior, see the app after enabling MCP or the source in `src/mcp-server-entry.mjs`.
+## Query Notes
 
-Use `get_enfyra_examples` when asking an LLM to generate concrete Enfyra implementation patterns. It returns categorized examples for SSR app auth/OAuth/proxy setup, schema/relations, queries/deep, handlers/hooks, permissions/RLS, websocket, flows, files, and extensions.
+Use explicit `fields` in read tools. Include mode is the default, such as `fields=id,email`. Any excluded field switches that scope to exclude mode: `fields=-compiledCode` returns all readable fields except `compiledCode`, and `fields=id,-compiledCode` still means all except `compiledCode`. Dotted exclusions such as `fields=-owner.avatar` work for relation fields when the relation exists in metadata.
 
-For authenticated route access, use `audit_route_access` before changing permissions and `ensure_route_access` to grant access by `path` plus `roleName`/`roleId` or `allowedUserIds`. `ensure_route_access` resolves route, role, and method ids, validates that requested methods are available on the route, merges existing methods by default, and reloads routes.
+## Enfyra URL Pattern
+
+Generated apps should use a same-origin proxy:
+
+```js
+export default defineNuxtConfig({
+  routeRules: {
+    "/enfyra/**": {
+      proxy: {
+        to: `${process.env.ENFYRA_API_URL}/**`,
+        fetchOptions: { redirect: "manual" }
+      }
+    }
+  }
+})
+```
+
+Browser code then calls:
+
+```text
+POST /enfyra/login
+GET  /enfyra/me
+POST /enfyra/logout
+GET  /enfyra/<table>
+```
+
+Do not create custom login/logout/me routes that manually set Enfyra token cookies when the proxy is enough.
+
+## Tool Summary
+
+The MCP server exposes tools for metadata discovery, examples, query/CRUD, method management, route access audit/grant, routes, handlers, hooks, tables, columns, relations, cache reloads, logs, users, roles, packages, menus, extensions, scripts, flows, websocket, files, and `get_enfyra_api_context`.
+
+For authenticated route access, use `audit_route_access` before changing permissions and `ensure_route_access` to grant access by route path plus role/user. For production script edits, use `trace_metadata_usage`, `get_script_source`, and `patch_script_source` so changes are targeted, hash-checked, and validated.
 
 ## Security
 
-API calls use JWT (MCP auto-refreshes). Permissions are enforced by Enfyra.
+API calls use exchanged JWTs and Enfyra permissions are still enforced server-side. Keep `ENFYRA_API_TOKEN` out of committed config unless the project intentionally uses environment interpolation or another secret-management path.

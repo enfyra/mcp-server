@@ -36,7 +36,7 @@ export function resolveRoleByNameOrId(roles, { roleId, roleName } = {}) {
 
 export function methodNamesFromRecords(methods, methodIdNameMap = {}) {
   return normalizeMethodNames((methods || []).map((method) => (
-    method?.name || method?.method || methodIdNameMap[String(getRecordId(method))] || method
+    method?.name || methodIdNameMap[String(getRecordId(method))] || method
   )));
 }
 
@@ -57,7 +57,7 @@ export function validateMethodsForRoute(route, methods, methodMap, methodIdNameM
   const knownMethods = new Set(Object.keys(methodMap || {}).map(normalizeMethodName));
   const unknown = normalizedMethods.filter((method) => !knownMethods.has(method));
   if (unknown.length) {
-    throw new Error(`Unknown method_definition.name values: ${unknown.join(', ')}`);
+    throw new Error(`Unknown enfyra_method.name values: ${unknown.join(', ')}`);
   }
 
   const availableMethods = routeAvailableMethodNames(route, methodIdNameMap);
