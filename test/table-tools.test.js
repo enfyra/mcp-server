@@ -478,6 +478,34 @@ test('mcp log search matches dashed and dotted app log filenames', () => {
   assert.match(entry, /\^error\[\.-\]/);
 });
 
+test('server instructions stay compact and route details to tools', () => {
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+
+  assert.ok(Buffer.byteLength(instructions, 'utf8') < 12000);
+  assert.match(instructions, /Load examples only when needed/);
+  assert.match(instructions, /Run broad discovery tools sequentially, not in parallel/);
+  assert.match(instructions, /fetch only the relevant live context or example category/);
+  assert.doesNotMatch(instructions, /#### Injected Vue API functions/);
+  assert.doesNotMatch(instructions, /Tables confirmed to have REST routes/);
+});
+
+test('discovery tools report target instance and avoid unbounded broad searches', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+
+  assert.match(entry, /function targetInstance\(\)/);
+  assert.match(entry, /source: 'ENFYRA_API_URL environment variable used by this MCP server process'/);
+  assert.match(entry, /targetInstance: targetInstance\(\)/);
+  assert.match(entry, /DISCOVERY_FETCH_TIMEOUT_MS = 12000/);
+  assert.match(entry, /partialErrors: collectPartialErrors/);
+  assert.match(entry, /async function collectFeatureSearchState\(\)/);
+  assert.match(entry, /const state = await collectFeatureSearchState\(\)/);
+  assert.doesNotMatch(entry, /const state = await collectRestDefinitionState\(\);\n\s+const q = rawQuery\.toLowerCase\(\)/);
+  assert.match(entry, /Run broad discovery tools sequentially; do not call multiple broad discovery tools in parallel/);
+  assert.match(entry, /limit: z\.number\(\)\.int\(\)\.positive\(\)\.max\(25\)\.optional\(\)\.default\(8\)/);
+  assert.match(entry, /inspect_feature query must be at least 2 characters/);
+  assert.match(entry, /For a specific match, call inspect_table, inspect_route, trace_metadata_usage, or get_script_source/);
+});
+
 test('query_table supports deep meta and aggregate query options', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
   assert.match(entry, /meta: z\.string\(\)\.optional\(\)/);
@@ -485,6 +513,86 @@ test('query_table supports deep meta and aggregate query options', () => {
   assert.match(entry, /aggregate: z\.string\(\)\.optional\(\)/);
   assert.match(entry, /queryParams\.set\('deep', deep\)/);
   assert.match(entry, /queryParams\.set\('aggregate', aggregate\)/);
+});
+
+test('list query tools require explicit limit or all intent', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+
+  assert.match(entry, /query_table requires either limit or all=true/);
+  assert.match(entry, /get_all_routes requires either limit or all=true/);
+  assert.match(entry, /query_table accepts either all=true or limit, not both/);
+  assert.match(entry, /get_all_routes accepts either all=true or limit, not both/);
+  assert.match(entry, /all: z\.boolean\(\)\.optional\(\)\.default\(false\)\.describe\('Return all matching rows by sending REST limit=0/);
+  assert.match(instructions, /pass `limit` for bounded reads or `all: true` for a complete list/);
+  assert.match(examples, /pass all: true instead of choosing an arbitrary page size such as 30 or 50/);
+  assert.match(readme, /Every list\/query call must pass either `limit`/);
+});
+
+test('websocket script context documents roomSize helper', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+
+  assert.match(entry, /roomSize\(room\) counts sockets in that room across registered gateways/);
+  assert.match(entry, /@SOCKET reply\/join\/leave\/disconnect\/emit helpers\/roomSize/);
+  assert.match(instructions, /`@SOCKET\.roomSize\(room\)` is available/);
+  assert.match(instructions, /HTTP\/flow contexts only have global emit helpers plus `roomSize`/);
+});
+
+test('script context discovery documents runtime macro and helper surface', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+
+  for (const macro of [
+    '@BODY',
+    '@QUERY',
+    '@PARAMS',
+    '@USER',
+    '@REQ',
+    '@RES',
+    '@REPOS',
+    '@CACHE',
+    '@HELPERS',
+    '@FETCH',
+    '@STORAGE',
+    '@UPLOADED_FILE',
+    '@SOCKET',
+    '@TRIGGER',
+    '@DATA',
+    '@ERROR',
+    '@STATUS',
+    '@ENV',
+    '@PKGS',
+    '@LOGS',
+    '@SHARE',
+    '@API',
+    '@THROW',
+    '@THROW400',
+    '@THROW503',
+  ]) {
+    assert.match(entry, new RegExp(`'${macro.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`));
+  }
+
+  assert.match(entry, /@FETCH maps to \$ctx\.\$helpers\.\$fetch/);
+  assert.match(entry, /\$ctx\.\$helpers includes \$bcrypt\.hash\/compare, autoSlug\(text\), \$fetch, \$sleep\(ms\)/);
+  assert.match(entry, /@REQ websocket request metadata/);
+  assert.match(entry, /@RES when response streaming is available/);
+  assert.match(instructions, /@REQ`, `@RES`/);
+  assert.match(instructions, /@FETCH/);
+  assert.match(instructions, /@UPLOADED_FILE/);
+  assert.match(instructions, /Call `discover_script_contexts` for exact per-surface availability/);
+});
+
+test('SSR app examples include Nuxt and Next connection patterns', () => {
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+
+  assert.match(examples, /Nuxt routeRules for REST and Socket\.IO/);
+  assert.match(examples, /Next rewrites for REST and Socket\.IO/);
+  assert.match(examples, /Next client provider for authenticated realtime/);
+  assert.match(examples, /Create the Socket\.IO client once in a top-level client provider/);
+  assert.match(examples, /Proxy \/socket\.io through Next rewrites to the Enfyra app bridge \/ws\/socket\.io/);
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {
@@ -502,12 +610,9 @@ test('column rule examples use the current value contract', () => {
 
 test('query examples distinguish relation fields from deep relation query options', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
   assert.match(examples, /Use fields with dotted relation paths when you only need scalar fields from related records/);
   assert.match(examples, /Use deep when relation loading needs query options such as filter, sort, limit, page, or nested deep/);
   assert.match(examples, /Do not use deep just to filter by a relation id/);
-  assert.match(instructions, /Use dotted relation fields such as `owner\.email`/);
-  assert.match(instructions, /Use `deep` when relation loading needs query options/);
 });
 
 test('query guidance documents fields exclusion mode', () => {
@@ -517,9 +622,7 @@ test('query guidance documents fields exclusion mode', () => {
   assert.match(examples, /fields=-compiledCode/);
   assert.match(examples, /fields=id,-compiledCode returns all readable fields except compiledCode/);
   assert.match(examples, /Dotted exclusions and deep relation fields use the same exclude-mode rule/);
-  assert.match(instructions, /`fields=-compiledCode` returns all readable fields except `compiledCode`/);
-  assert.match(instructions, /`fields=id,-compiledCode` still means all except `compiledCode`/);
-  assert.match(instructions, /`deep: \{ owner: \{ fields: "-avatar" \} \}`/);
+  assert.match(instructions, /Field exclusion mode exists: `fields=-compiledCode`/);
   assert.match(readme, /`fields=-compiledCode` returns all readable fields except `compiledCode`/);
   assert.match(readme, /`fields=-owner\.avatar`/);
 });
@@ -528,9 +631,9 @@ test('operator guidance avoids speculative warnings and physical FK generated co
   const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  assert.match(instructions, /Do not turn normal implementation details into speculative warnings/);
-  assert.match(instructions, /`compiledCode` is expected to differ textually from `sourceCode`/);
-  assert.match(instructions, /Do not hardcode physical FK fields such as `userId`, `conversationId`, `senderId`, or `memberId`/);
+  assert.match(instructions, /Do not turn expected implementation details into speculative warnings/);
+  assert.match(instructions, /`compiledCode` is generated and may differ textually/);
+  assert.match(instructions, /not physical FK fields like `userId`, `conversationId`, `senderId`, or `memberId`/);
   assert.match(examples, /conversationId is accepted only as the room\/business identifier; persistence uses relation properties conversation and sender/);
   assert.match(examples, /Do not ask the client for senderId\. The sender relation is derived from @USER\.id/);
   assert.match(readme, /`compiledCode` is generated from `sourceCode` and may differ textually/);
@@ -542,7 +645,7 @@ test('RLS guidance preserves caller projection and pagination', () => {
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
   const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
   assert.match(instructions, /do not override `@QUERY\.fields`/);
-  assert.match(instructions, /RLS may only merge security filters into `@QUERY\.filter`/);
+  assert.match(instructions, /Merge only security filters into `@QUERY\.filter`/);
   assert.match(examples, /keep projection and pagination client-owned/);
   assert.match(entry, /preserve client-controlled query shape/);
   assert.match(entry, /pass through client fields\/deep\/sort\/page\/limit\/meta\/aggregate\/debugMode/);

@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 // Configuration
 const ENFYRA_API_URL = process.env.ENFYRA_API_URL || 'http://localhost:3000/api';
 const ENFYRA_API_TOKEN = process.env.ENFYRA_API_TOKEN || '';
+const DISCOVERY_FETCH_TIMEOUT_MS = 12000;
 
 // Import modules
 import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
@@ -353,6 +354,43 @@ async function fetchAll(path) {
   return unwrapData(await fetchAPI(ENFYRA_API_URL, path));
 }
 
+function targetInstance() {
+  return {
+    apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
+    source: 'ENFYRA_API_URL environment variable used by this MCP server process',
+  };
+}
+
+async function discoveryFetch(path, { fallbackData = [], timeoutMs = DISCOVERY_FETCH_TIMEOUT_MS } = {}) {
+  let timeoutId;
+  try {
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Discovery request timeout after ${timeoutMs}ms for ${path}`));
+      }, timeoutMs);
+    });
+    return await Promise.race([
+      fetchAPI(ENFYRA_API_URL, path),
+      timeout,
+    ]);
+  } catch (error) {
+    return {
+      statusCode: null,
+      success: false,
+      error: String(error?.message || error),
+      data: fallbackData,
+    };
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+function collectPartialErrors(results) {
+  return Object.entries(results)
+    .filter(([, result]) => result?.error)
+    .map(([name, result]) => ({ name, error: result.error }));
+}
+
 async function getMetadataTables() {
   const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
   return {
@@ -617,14 +655,13 @@ server.tool(
   [
     'Call this first when you need to understand the live Enfyra instance.',
     'Returns a concise capability map from live metadata/routes/method rows, including schema management, REST route behavior, GraphQL enablement, and relation handling.',
+    'Run broad discovery tools sequentially; do not call multiple broad discovery tools in parallel.',
   ].join(' '),
   {},
   async () => {
-    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
-    const [routesResult, methodsResult] = await Promise.all([
-      fetchAPI(ENFYRA_API_URL, '/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*&limit=1000'),
-      fetchAPI(ENFYRA_API_URL, '/enfyra_method?limit=100'),
-    ]);
+    const metadata = await discoveryFetch('/metadata');
+    const routesResult = await discoveryFetch('/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*&limit=1000');
+    const methodsResult = await discoveryFetch('/enfyra_method?limit=100');
 
     const tables = normalizeTables(metadata);
     const tableNames = tables.map((table) => table?.name).filter(Boolean).sort();
@@ -637,7 +674,9 @@ server.tool(
     const routeTableList = [...routeTables].sort();
 
     const payload = {
+      targetInstance: targetInstance(),
       apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
+      partialErrors: collectPartialErrors({ metadata, routesResult, methodsResult }),
       counts: {
         tables: tableNames.length,
         routes: routes.length,
@@ -696,30 +735,19 @@ server.tool(
   'discover_runtime_context',
   [
     'Discover live runtime context that affects how an LLM should use Enfyra.',
-    'Reports inferred primary key/backend family, route/cache/admin surfaces, active metadata-backed runtime areas, and what is not exposed by the backend API.',
+    'Reports inferred primary key/backend family, route/cache/admin surfaces, active metadata-backed runtime areas, and what is not exposed by the backend API. Run broad discovery tools sequentially; do not call multiple broad discovery tools in parallel.',
   ].join(' '),
   {},
   async () => {
-    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
-    const [
-      routesResult,
-      methodsResult,
-      gqlResult,
-      flowsResult,
-      websocketResult,
-      storageResult,
-      settingsResult,
-      meResult,
-    ] = await Promise.all([
-      fetchAPI(ENFYRA_API_URL, '/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000'),
-      fetchAPI(ENFYRA_API_URL, '/enfyra_method?limit=100'),
-      fetchAPI(ENFYRA_API_URL, '/enfyra_graphql?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/enfyra_flow?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/enfyra_websocket?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/enfyra_storage_config?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/enfyra_setting?limit=1000').catch((error) => ({ error: String(error.message || error), data: [] })),
-      fetchAPI(ENFYRA_API_URL, '/me').catch((error) => ({ error: String(error.message || error), data: [] })),
-    ]);
+    const metadata = await discoveryFetch('/metadata');
+    const routesResult = await discoveryFetch('/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000');
+    const methodsResult = await discoveryFetch('/enfyra_method?limit=100');
+    const gqlResult = await discoveryFetch('/enfyra_graphql?limit=1000');
+    const flowsResult = await discoveryFetch('/enfyra_flow?limit=1000');
+    const websocketResult = await discoveryFetch('/enfyra_websocket?limit=1000');
+    const storageResult = await discoveryFetch('/enfyra_storage_config?limit=1000');
+    const settingsResult = await discoveryFetch('/enfyra_setting?limit=1000');
+    const meResult = await discoveryFetch('/me', { fallbackData: null });
 
     const tables = normalizeTables(metadata);
     const routes = summarizeRoutes(routesResult);
@@ -728,7 +756,19 @@ server.tool(
     const publicRoutes = routes.filter((route) => route.publicMethods?.length);
 
     const payload = {
+      targetInstance: targetInstance(),
       apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
+      partialErrors: collectPartialErrors({
+        metadata,
+        routesResult,
+        methodsResult,
+        gqlResult,
+        flowsResult,
+        websocketResult,
+        storageResult,
+        settingsResult,
+        meResult,
+      }),
       authenticatedUser: Array.isArray(meResult?.data) ? meResult.data[0] || null : meResult?.data || null,
       database: getMetadataDatabaseContext(metadata, tables),
       counts: {
@@ -779,14 +819,14 @@ server.tool(
   'discover_query_capabilities',
   [
     'Discover Enfyra query/filter/deep-fetch capabilities for the live instance.',
-    'Optionally pass tableName to include columns, relations, primary key, route paths, and examples for that table.',
+    'Prefer passing tableName. Without tableName this returns only generic query rules. Run broad discovery tools sequentially; do not call multiple broad discovery tools in parallel.',
   ].join(' '),
   {
     tableName: z.string().optional().describe('Optional table name to summarize query fields and relation/deep capabilities.'),
   },
   async ({ tableName }) => {
-    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
-    const routesResult = await fetchAPI(ENFYRA_API_URL, '/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000');
+    const metadata = await discoveryFetch('/metadata');
+    const routesResult = await discoveryFetch('/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000');
     const tables = normalizeTables(metadata);
     const routes = summarizeRoutes(routesResult);
     const table = tableName ? tables.find((item) => item.name === tableName) : null;
@@ -796,6 +836,8 @@ server.tool(
       : [];
 
     const payload = {
+      targetInstance: targetInstance(),
+      partialErrors: collectPartialErrors({ metadata, routesResult }),
       operators: {
         filter: FILTER_OPERATORS,
         fieldPermissionConditions: FIELD_PERMISSION_CONDITION_OPERATORS,
@@ -859,32 +901,52 @@ server.tool(
   'discover_script_contexts',
   [
     'Discover runtime script contexts and macro availability for handlers, hooks, flows, websocket scripts, GraphQL, packages, and extensions.',
-    'Use before writing dynamic JavaScript logic so the model does not mix context variables across surfaces.',
+    'Use before writing dynamic JavaScript logic so the model does not mix context variables across surfaces. This tool is static and safe to call alone; avoid running it in parallel with other broad discovery calls.',
   ].join(' '),
   {},
   async () => {
     const payload = {
+      targetInstance: targetInstance(),
       transformer: {
         rule: 'Dynamic server scripts are transformed before sandbox execution. Macros expand to $ctx paths; comments are not transformed.',
-        preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use @BODY/@QUERY/@PARAMS/@USER/@REPOS/@CACHE/@HELPERS/@STORAGE/@SOCKET/@TRIGGER/@DATA/@ERROR/@ENV/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
+        preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use macros such as @BODY/@QUERY/@PARAMS/@USER/@REQ/@RES/@REPOS/@CACHE/@HELPERS/@FETCH/@STORAGE/@UPLOADED_FILE/@SOCKET/@TRIGGER/@DATA/@ERROR/@STATUS/@ENV/@PKGS/@LOGS/@SHARE/@API/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
         coreMacros: {
-          '@BODY': '$ctx.$body',
-          '@QUERY': '$ctx.$query',
-          '@PARAMS': '$ctx.$params',
-          '@USER': '$ctx.$user',
-          '@ENV': '$ctx.$env',
-          '@REPOS': '$ctx.$repos',
           '@CACHE': '$ctx.$cache',
+          '@REPOS': '$ctx.$repos',
           '@HELPERS': '$ctx.$helpers',
           '@STORAGE': '$ctx.$storage',
-          '@SOCKET': '$ctx.$socket',
+          '@FETCH': '$ctx.$helpers.$fetch',
+          '@LOGS': '$ctx.$logs',
+          '@BODY': '$ctx.$body',
+          '@ENV': '$ctx.$env',
           '@DATA': '$ctx.$data',
+          '@PARAMS': '$ctx.$params',
+          '@QUERY': '$ctx.$query',
+          '@USER': '$ctx.$user',
+          '@REQ': '$ctx.$req',
+          '@RES': '$ctx.$res',
+          '@SHARE': '$ctx.$share',
+          '@API': '$ctx.$api',
+          '@UPLOADED_FILE': '$ctx.$uploadedFile',
+          '@PKGS': '$ctx.$pkgs',
+          '@SOCKET': '$ctx.$socket',
+          '@TRIGGER': '$ctx.$trigger',
+          '@FLOW': '$ctx.$flow',
+          '@FLOW_PAYLOAD': '$ctx.$flow.$payload',
+          '@FLOW_LAST': '$ctx.$flow.$last',
+          '@FLOW_META': '$ctx.$flow.$meta',
+          '@THROW400': "$ctx.$throw['400']",
+          '@THROW401': "$ctx.$throw['401']",
+          '@THROW403': "$ctx.$throw['403']",
+          '@THROW404': "$ctx.$throw['404']",
+          '@THROW409': "$ctx.$throw['409']",
+          '@THROW422': "$ctx.$throw['422']",
+          '@THROW429': "$ctx.$throw['429']",
+          '@THROW500': "$ctx.$throw['500']",
+          '@THROW503': "$ctx.$throw['503']",
+          '@THROW': '$ctx.$throw',
           '@STATUS': '$ctx.$statusCode',
           '@ERROR': '$ctx.$error',
-          '@PKGS': '$ctx.$pkgs',
-          '@LOGS': '$ctx.$logs',
-          '@SHARE': '$ctx.$share',
-          '@TRIGGER(name,payload)': '$ctx.$trigger(name,payload)',
         },
         flowMacros: {
           '@FLOW': '$ctx.$flow',
@@ -900,6 +962,8 @@ server.tool(
         },
         throws: '@THROW400 through @THROW503 and @THROW map to $ctx.$throw helpers.',
         helpers: {
+          core: '$ctx.$helpers includes $bcrypt.hash/compare, autoSlug(text), $fetch, $sleep(ms) capped by the runtime, and $crypto. HTTP and GraphQL contexts also expose $jwt through $ctx.$helpers.',
+          fetch: '@FETCH maps to $ctx.$helpers.$fetch for outbound HTTP calls from server scripts. Keep secrets in encrypted fields instead of embedding them in sourceCode.',
           crypto: '$ctx.$helpers.$crypto exposes bounded runtime crypto helpers: randomUUID(), randomBytes(size, encoding), sha256(value, encoding), hmacSha256(value, secret, encoding), and generateSshKeyPair(comment). Use generateSshKeyPair for SSH key material. Do not use legacy $ctx.$helpers.$ssh.',
           files: '$ctx.$storage.$upload and $ctx.$storage.$update accept file: @UPLOADED_FILE for request uploads and stream from the server temp file path. $ctx.$storage.$registerFile creates a enfyra_file record for an object that already exists in storage without uploading bytes. Use buffer only for small generated/transformed files; do not use @UPLOADED_FILE.buffer.',
         },
@@ -908,7 +972,7 @@ server.tool(
       contexts: {
         preHook: {
           runs: 'Before handler.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REPOS', '@CACHE', '@HELPERS', '@STORAGE', '@THROW*', '@SOCKET emit helpers'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REQ', '@REPOS', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@THROW*', '@SOCKET global emit helpers/roomSize'],
           queryContract: '@QUERY.filter is initialized as an object. When adding RLS/scope filters in pre-hooks, merge directly with _and; do not add defensive type checks around @QUERY.filter.',
           projectionContract: 'For canonical table reads, preserve client-controlled query shape. Do not override @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, @QUERY.aggregate, or debugMode. RLS should only merge security constraints into @QUERY.filter.',
           rlsPattern: 'For relation-scoped reads, mutate @QUERY.filter instead of returning data. Example: const incomingFilter = @QUERY.filter; const scope = { memberships: { member: { id: { _eq: @USER.id } } } }; @QUERY.filter = Object.keys(incomingFilter).length ? { _and: [incomingFilter, scope] } : scope;',
@@ -916,28 +980,28 @@ server.tool(
         },
         handler: {
           runs: 'Main route logic, or canonical CRUD if no handler overrides.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main', '@REPOS.<table>', '@CACHE', '@HELPERS', '@STORAGE', '@PKGS', '@SOCKET emit helpers', '@TRIGGER'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REQ', '@RES when response streaming is available', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main', '@REPOS.<table>', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@PKGS', '@SOCKET global emit helpers/roomSize', '@TRIGGER'],
           queryContract: 'When a handler wraps a canonical table read, pass through client fields/deep/sort/page/limit/meta/aggregate/debugMode unless the route is a clearly custom summary or workflow endpoint.',
           returnBehavior: 'Return value becomes response body unless post-hook changes it.',
         },
         postHook: {
           runs: 'After handler, including error path.',
-          data: ['@DATA', '@STATUS', '@ERROR', '@BODY', '@QUERY', '@USER', '@CACHE', '@SHARE', '@API'],
+          data: ['@DATA', '@STATUS', '@ERROR', '@BODY', '@QUERY', '@PARAMS', '@USER', '@REQ', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@SHARE', '@API'],
           returnBehavior: 'Mutate @DATA/$ctx.$data or return a non-undefined replacement response.',
         },
         flowStep: {
           runs: 'Inside flow execution or admin flow step test.',
-          data: ['@FLOW_PAYLOAD', '@FLOW_LAST', '@FLOW', '@FLOW_META', '#table_name', '@CACHE', '@HELPERS', '@STORAGE', '@SOCKET', '@TRIGGER'],
+          data: ['@BODY payload', '@USER if provided', '@FLOW_PAYLOAD', '@FLOW_LAST', '@FLOW', '@FLOW_META', '#table_name', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@SOCKET global emit helpers/roomSize', '@TRIGGER'],
           resultBehavior: 'Step return value is injected into @FLOW.<step.key> and @FLOW_LAST.',
           branching: 'Condition steps use JavaScript truthy/falsy result; child branch is true/false.',
         },
         websocketConnection: {
           runs: 'Socket.IO connection handler.',
-          data: ['@BODY connection info', '@USER if authenticated', '@SOCKET reply/join/leave/disconnect/emit helpers'],
+          data: ['@BODY connection info', '@DATA connection info', '@REQ websocket request metadata', '@API request metadata', '@USER if authenticated', '@HELPERS', '@FETCH', '@SOCKET reply/join/leave/disconnect/emit helpers/roomSize'],
         },
         websocketEvent: {
           runs: 'Socket.IO event handler.',
-          data: ['@BODY event payload', '@USER if authenticated', '@SOCKET reply/join/leave/disconnect/emit helpers'],
+          data: ['@BODY event payload', '@DATA event payload', '@REQ websocket request metadata', '@API request metadata', '@USER if authenticated', '@HELPERS', '@FETCH', '@SOCKET reply/join/leave/disconnect/emit helpers/roomSize'],
           resultBehavior: 'Client ack receives queued state first; handler result is emitted asynchronously as ws:result/ws:error with requestId.',
         },
         graphqlResolver: {
@@ -959,7 +1023,7 @@ server.tool(
           wrongSingleRecordAccess: 'Do not use result.data.id, do not return result.data when one object is expected, and do not assume create/update returns the bare row object.',
           countPattern: 'To count records in custom code, do not fetch full rows. Use const result = await @REPOS.main.find({ fields: "id", limit: 1, meta: filter ? "filterCount" : "totalCount", ...(filter ? { filter } : {}) }); then read result.meta.filterCount or result.meta.totalCount.',
         },
-        socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast, but cannot reply/join/leave/disconnect/emitToCurrentRoom/broadcastToRoom because there is no bound socket. emitToRoom requires an explicit gateway path: emitToRoom(path, room, event, data).',
+        socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast and roomSize, but cannot reply/join/leave/disconnect/emitToCurrentRoom/broadcastToRoom because there is no bound socket. emitToRoom requires an explicit gateway path: emitToRoom(path, room, event, data). roomSize(room) counts sockets in that room across registered gateways.',
         packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
         files: 'Upload helpers are on $storage; raw create_record on enfyra_file is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the enfyra_file record without uploading bytes. Use buffer only for small generated files.',
       },
@@ -1012,17 +1076,24 @@ server.tool(
   },
 );
 
-server.tool('query_table', 'Query any route-backed table. Default response is minimal; pass fields explicitly for detail.', {
+server.tool('query_table', 'Query any route-backed table. Response is minimal unless fields is explicit. Every call must pass either limit or all=true.', {
   tableName: z.string().describe('Table name to query'),
   filter: z.string().optional().describe('Filter object as JSON string. Examples: \'{"status": {"_eq": "active"}}\''),
   sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
   page: z.number().optional().describe('Page number (default: 1)'),
-  limit: z.number().optional().describe('Items per page. Default: 10. Use count_records for counts.'),
+  limit: z.number().int().min(0).optional().describe('Items per page. Required unless all=true. Do not invent arbitrary limits for "all"; use all=true instead. Use count_records for counts.'),
+  all: z.boolean().optional().default(false).describe('Return all matching rows by sending REST limit=0. Use this when the user asks for all rows or a complete list.'),
   fields: z.array(z.string()).optional().describe('Fields to select. If omitted, MCP selects only the table primary key to avoid oversized responses.'),
   meta: z.string().optional().describe('Optional REST meta request, e.g. "totalCount", "filterCount", or aggregate modes supported by the route. Use count_records for simple counts.'),
   deep: z.string().optional().describe('Optional deep relation fetch object as JSON string. Keys must be relation propertyName values.'),
   aggregate: z.string().optional().describe('Optional aggregate object as JSON string, keyed by real fields/relations. Results are returned in response.meta.aggregate when supported.'),
-}, async ({ tableName, filter, sort, page, limit, fields, meta, deep, aggregate }) => {
+}, async ({ tableName, filter, sort, page, limit, all, fields, meta, deep, aggregate }) => {
+  if (!all && limit === undefined) {
+    throw new Error('query_table requires either limit or all=true. Do not rely on implicit default page sizes.');
+  }
+  if (all && limit !== undefined) {
+    throw new Error('query_table accepts either all=true or limit, not both.');
+  }
   validateTableName(tableName);
   validateFilter(filter);
   parseJsonArg(deep, undefined);
@@ -1036,7 +1107,8 @@ server.tool('query_table', 'Query any route-backed table. Default response is mi
   if (meta) queryParams.set('meta', meta);
   if (deep) queryParams.set('deep', deep);
   if (aggregate) queryParams.set('aggregate', aggregate);
-  queryParams.set('limit', String(limit || 10));
+  const effectiveLimit = all ? 0 : limit;
+  queryParams.set('limit', String(effectiveLimit));
   queryParams.set('fields', selectedFields.join(','));
 
   const query = queryParams.toString();
@@ -1046,7 +1118,8 @@ server.tool('query_table', 'Query any route-backed table. Default response is mi
     success: result?.success,
     tableName,
     fields: selectedFields,
-    limit: limit || 10,
+    limit: effectiveLimit,
+    all: !!all,
     queryOptions: {
       meta: meta || null,
       deep: deep ? parseJsonArg(deep, null) : null,
@@ -1661,6 +1734,51 @@ async function collectRestDefinitionState() {
   };
 }
 
+async function collectFeatureSearchState() {
+  const metadata = await discoveryFetch('/metadata');
+  const routesResult = await discoveryFetch('/enfyra_route?limit=500');
+  const handlersResult = await discoveryFetch('/enfyra_route_handler?limit=500');
+  const preHooksResult = await discoveryFetch('/enfyra_pre_hook?limit=500');
+  const postHooksResult = await discoveryFetch('/enfyra_post_hook?limit=500');
+  const routePermissionsResult = await discoveryFetch('/enfyra_route_permission?limit=500');
+  const guardsResult = await discoveryFetch('/enfyra_guard?limit=500');
+  const guardRulesResult = await discoveryFetch('/enfyra_guard_rule?limit=500');
+  const fieldPermissionsResult = await discoveryFetch('/enfyra_field_permission?limit=500');
+  const columnRulesResult = await discoveryFetch('/enfyra_column_rule?limit=500');
+  const methodsResult = await discoveryFetch('/enfyra_method?limit=100');
+  const methodIdNameMap = Object.fromEntries(
+    unwrapData(methodsResult).map((method) => [String(getId(method)), method.name]),
+  );
+
+  return {
+    metadata,
+    tables: normalizeTables(metadata),
+    routes: unwrapData(routesResult),
+    handlers: unwrapData(handlersResult),
+    preHooks: unwrapData(preHooksResult),
+    postHooks: unwrapData(postHooksResult),
+    routePermissions: unwrapData(routePermissionsResult),
+    guards: unwrapData(guardsResult),
+    guardRules: unwrapData(guardRulesResult),
+    fieldPermissions: unwrapData(fieldPermissionsResult),
+    columnRules: unwrapData(columnRulesResult),
+    methodIdNameMap,
+    partialErrors: collectPartialErrors({
+      metadata,
+      routesResult,
+      handlersResult,
+      preHooksResult,
+      postHooksResult,
+      routePermissionsResult,
+      guardsResult,
+      guardRulesResult,
+      fieldPermissionsResult,
+      columnRulesResult,
+      methodsResult,
+    }),
+  };
+}
+
 function enrichRoute(route, state) {
   const routeId = getId(route);
   const routeHandlers = state.handlers
@@ -1814,14 +1932,20 @@ server.tool(
   'inspect_feature',
   [
     'Search live REST/system metadata for a feature name, route path, table, handler, hook, guard, or permission.',
-    'Use when the user mentions a capability and you need to find where it lives before editing.',
+    'Use when the user mentions a capability and you need to find where it lives before editing. Keep the query specific; broad searches return bounded summaries.',
   ].join(' '),
   {
     query: z.string().describe('Feature keyword, table name, route path, handler text, hook name, or guard name'),
+    limit: z.number().int().positive().max(25).optional().default(8).describe('Maximum matches returned per section. Default 8 to keep output small.'),
   },
-  async ({ query }) => {
-    const state = await collectRestDefinitionState();
-    const q = query.toLowerCase();
+  async ({ query, limit }) => {
+    const rawQuery = String(query || '').trim();
+    if (rawQuery.length < 2) {
+      throw new Error('inspect_feature query must be at least 2 characters. Use a table name, route path, event name, or specific feature keyword.');
+    }
+    const max = Math.max(1, Math.min(Number(limit || 8), 25));
+    const state = await collectFeatureSearchState();
+    const q = rawQuery.toLowerCase();
     const matchesText = (value) => JSON.stringify(value ?? '').toLowerCase().includes(q);
     const tableMatches = state.tables.filter((table) => matchesText({
       name: table.name,
@@ -1841,7 +1965,10 @@ server.tool(
     ];
 
     const payload = {
-      query,
+      targetInstance: targetInstance(),
+      query: rawQuery,
+      limit: max,
+      partialErrors: state.partialErrors,
       counts: {
         tables: tableMatches.length,
         routes: routeMatches.length,
@@ -1851,13 +1978,14 @@ server.tool(
         guards: guardMatches.length,
         permissions: permissionMatches.length,
       },
-      tables: tableMatches.map(summarizeTable).slice(0, 20),
-      routes: routeMatches.map((route) => enrichRoute(route, state)).slice(0, 20),
-      handlers: handlerMatches.slice(0, 20),
-      preHooks: preHookMatches.slice(0, 20),
-      postHooks: postHookMatches.slice(0, 20),
-      guards: guardMatches.slice(0, 20),
-      permissions: permissionMatches.slice(0, 20),
+      tables: tableMatches.slice(0, max).map(summarizeTable),
+      routes: routeMatches.slice(0, max).map((route) => enrichRoute(route, state)),
+      handlers: handlerMatches.slice(0, max),
+      preHooks: preHookMatches.slice(0, max),
+      postHooks: postHookMatches.slice(0, max),
+      guards: guardMatches.slice(0, max),
+      permissions: permissionMatches.slice(0, max),
+      detailHint: 'For a specific match, call inspect_table, inspect_route, trace_metadata_usage, or get_script_source instead of broadening this search.',
     };
 
     return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
@@ -2014,11 +2142,18 @@ server.tool(
   },
 );
 
-server.tool('get_all_routes', 'List route definitions with minimal fields. Call inspect_route for handlers/hooks/permissions detail.', {
+server.tool('get_all_routes', 'List route definitions with minimal fields. Every call must pass either limit or all=true. Call inspect_route for handlers/hooks/permissions detail.', {
   includeDisabled: z.boolean().optional().default(false).describe('Include disabled routes'),
   search: z.string().optional().describe('Optional path or table substring filter. Use this before creating a route to check duplicates.'),
-  limit: z.number().optional().describe('Maximum routes returned after search. Default 50 to keep response small.'),
-}, async ({ includeDisabled, search, limit }) => {
+  limit: z.number().int().positive().optional().describe('Maximum routes returned after search. Required unless all=true. Do not invent arbitrary limits for "all"; use all=true instead.'),
+  all: z.boolean().optional().default(false).describe('Return all matched routes. Use this when the user asks for all routes or a complete route list.'),
+}, async ({ includeDisabled, search, limit, all }) => {
+  if (!all && limit === undefined) {
+    throw new Error('get_all_routes requires either limit or all=true. Do not rely on implicit default page sizes.');
+  }
+  if (all && limit !== undefined) {
+    throw new Error('get_all_routes accepts either all=true or limit, not both.');
+  }
   const filter = includeDisabled ? {} : { isEnabled: { _eq: true } };
   const queryParams = new URLSearchParams({
     filter: JSON.stringify(filter),
@@ -2026,7 +2161,6 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Call 
     limit: '1000',
   });
   const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_route?${queryParams.toString()}`);
-  const routeLimit = limit || 50;
   const q = search ? search.toLowerCase() : null;
   const allRoutes = summarizeRoutes(result);
   const matchedRoutes = q
@@ -2035,12 +2169,14 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Call 
         mainTable: route.mainTable,
       }).toLowerCase().includes(q))
     : allRoutes;
+  const routeLimit = all ? matchedRoutes.length : limit;
   const payload = {
     statusCode: result?.statusCode,
     success: result?.success,
     totalRouteCount: allRoutes.length,
     matchedRouteCount: matchedRoutes.length,
     returnedRouteCount: Math.min(matchedRoutes.length, routeLimit),
+    all: !!all,
     search: search || null,
     routes: matchedRoutes.slice(0, routeLimit),
     detailHint: matchedRoutes.length > routeLimit

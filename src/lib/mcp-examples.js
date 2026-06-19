@@ -154,6 +154,96 @@ onUnmounted(() => {
         ],
       },
       {
+        name: 'Next client provider for authenticated realtime',
+        code: `"use client"
+
+// app/realtime-provider.tsx
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { io, type Socket } from "socket.io-client"
+
+type RealtimeContextValue = {
+  socket: Socket | null
+  isConnected: boolean
+}
+
+const RealtimeContext = createContext<RealtimeContextValue>({
+  socket: null,
+  isConnected: false
+})
+
+export function RealtimeProvider({
+  user,
+  children
+}: {
+  user: { id: string | number } | null
+  children: React.ReactNode
+}) {
+  const socketRef = useRef<Socket | null>(null)
+  const [isConnected, setConnected] = useState(false)
+
+  useEffect(() => {
+    if (!user) {
+      socketRef.current?.disconnect()
+      socketRef.current = null
+      setConnected(false)
+      return
+    }
+
+    if (socketRef.current) return
+
+    const socket = io("/chat", {
+      path: "/socket.io",
+      withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 30000
+    })
+
+    socket.on("connect", () => setConnected(true))
+    socket.on("disconnect", () => setConnected(false))
+    socketRef.current = socket
+
+    return () => {
+      socket.off("connect")
+      socket.off("disconnect")
+      socket.disconnect()
+      socketRef.current = null
+      setConnected(false)
+    }
+  }, [user])
+
+  const value = useMemo(
+    () => ({ socket: socketRef.current, isConnected }),
+    [isConnected]
+  )
+
+  return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>
+}
+
+export function useRealtime() {
+  return useContext(RealtimeContext)
+}
+
+// app/chat/page.tsx
+// const { socket } = useRealtime()
+// useEffect(() => {
+//   if (!socket) return
+//   const onMessage = event => {
+//     // Update local UI state, then debounce REST refresh if full state is needed.
+//   }
+//   socket.on("chat:message", onMessage)
+//   return () => socket.off("chat:message", onMessage)
+// }, [socket])`,
+        notes: [
+          'Create the Socket.IO client once in a top-level client provider after the current user is known.',
+          'Use the websocket namespace path from live metadata, such as /chat, and keep the transport path as /socket.io.',
+          'Proxy /socket.io through Next rewrites to the Enfyra app bridge /ws/socket.io so cookies remain same-origin.',
+          'Pages/components should only subscribe/unsubscribe listeners; they should not create independent socket connections.',
+          'Disconnect the singleton socket when the current user/session clears.',
+        ],
+      },
+      {
         name: 'OAuth provider setup values',
         code: `// Enfyra OAuth config row, stored in enfyra_oauth_config.
 {
@@ -375,15 +465,20 @@ create_column({
           'Always pass fields when you need more than ids; query_table without fields intentionally returns only the primary key.',
           'Use inspect_table first when you do not know valid column names or relation propertyName values.',
           'Use count_records when only the count is needed.',
+          'When the user asks for all matching rows, pass all: true instead of choosing an arbitrary page size such as 30 or 50.',
         ],
       },
       {
         name: 'List current user conversations through RLS',
-        code: `GET /enfyra/chat_conversation?fields=id,kind,title,lastMessage.id,lastMessage.text,lastMessage.createdAt&limit=0`,
+        code: `query_table({
+  tableName: "chat_conversation",
+  fields: ["id", "kind", "title", "lastMessage.id", "lastMessage.text", "lastMessage.createdAt"],
+  all: true
+})`,
         notes: [
           'Use a conversation read pre-hook/RLS boundary so the route only returns conversations visible to @USER.',
           'lastMessage is a relation to chat_message; do not duplicate preview fields on chat_conversation.',
-          'limit=0 means load all matching conversation rows.',
+          'all: true tells MCP to send REST limit=0 and load all matching conversation rows.',
           'Do not fetch messages for every conversation on initial list load; load messages after selecting a conversation.',
         ],
       },

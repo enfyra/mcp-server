@@ -168,7 +168,7 @@ For normal apps and demos, enter the app/admin URL such as `http://localhost:300
 
 Use `get_enfyra_examples` from the MCP tool list when asking an LLM to generate implementation patterns. It returns focused examples for:
 
-- SSR app auth, OAuth, and proxy setup
+- SSR app auth and proxy setup
 - schema, columns, relations, indexes, and validation
 - query filters, sorting, fields, deep relations, and aggregates
 - handlers, hooks, permissions, and RLS
@@ -176,30 +176,6 @@ Use `get_enfyra_examples` from the MCP tool list when asking an LLM to generate 
 - flows
 - files and storage
 - Enfyra admin extensions
-
-## OAuth Setup
-
-OAuth has three different URLs:
-
-| URL | Meaning |
-|-----|---------|
-| Provider callback URL | `{ENFYRA_API_URL}/auth/{provider}/callback` |
-| Enfyra `redirectUri` | Must exactly match the provider callback URL |
-| App `redirect` query | Where Enfyra sends the browser after cookies are set |
-
-Example Google callback when `ENFYRA_API_URL=http://localhost:3000/api`:
-
-```text
-http://localhost:3000/api/auth/google/callback
-```
-
-Start OAuth from the app proxy:
-
-```text
-/enfyra/auth/google?redirect=<absoluteReturnUrl>&cookieBridgePrefix=/enfyra
-```
-
-`appCallbackUrl` is only for manual-token apps that intentionally read token query parameters. SSR apps should prefer proxy-owned cookies.
 
 ## Runtime Safety
 
@@ -216,7 +192,7 @@ The MCP server includes safety guards for LLM callers:
 
 ## Query Notes
 
-Use explicit `fields` in read tools. Include mode is the default, such as `fields=id,email`. Any excluded field switches that scope to exclude mode: `fields=-compiledCode` returns all readable fields except `compiledCode`, and `fields=id,-compiledCode` still means all except `compiledCode`. Dotted exclusions such as `fields=-owner.avatar` work for relation fields when the relation exists in metadata.
+Use explicit `fields` in read tools. Include mode is the default, such as `fields=id,email`. Any excluded field switches that scope to exclude mode: `fields=-compiledCode` returns all readable fields except `compiledCode`, and `fields=id,-compiledCode` still means all except `compiledCode`. Dotted exclusions such as `fields=-owner.avatar` work for relation fields when the relation exists in metadata. Every list/query call must pass either `limit` for a bounded page or `all: true` for a complete list. When a caller needs every matching row, pass `all: true` to `query_table` or `get_all_routes`; the tool sends REST `limit=0` instead of making the model choose an arbitrary page size like 30 or 50.
 
 ## Enfyra URL Pattern
 
