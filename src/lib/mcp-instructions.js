@@ -24,6 +24,7 @@ export function buildMcpServerInstructions(apiBaseUrl) {
     `GraphQL endpoints: \`${graphqlHttpUrl}\` and \`${graphqlSchemaUrl}\`.`,
     '',
     '### Work Flow',
+    '- For a quick target/base sanity check, call `get_enfyra_api_context`; do not call broad discovery just to confirm which instance this MCP is connected to.',
     '- Discover before deciding. For architecture/capability questions call `discover_enfyra_system`; for DB/pk/runtime/cache context call `discover_runtime_context`; for filters/deep/sort/relation query shape call `discover_query_capabilities`. Run broad discovery tools sequentially, not in parallel.',
     '- Inspect narrowly. Use `inspect_table`, `inspect_route`, and `inspect_feature` for the table/route/feature being changed instead of loading broad metadata.',
     '- Load examples only when needed. Before generating schemas, app connection code, OAuth, Socket.IO, handlers/hooks, flows, files, guards, permissions, or extensions, call `get_enfyra_examples` with the matching category.',

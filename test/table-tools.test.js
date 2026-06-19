@@ -483,6 +483,7 @@ test('server instructions stay compact and route details to tools', () => {
 
   assert.ok(Buffer.byteLength(instructions, 'utf8') < 12000);
   assert.match(instructions, /Load examples only when needed/);
+  assert.match(instructions, /get_enfyra_api_context/);
   assert.match(instructions, /Run broad discovery tools sequentially, not in parallel/);
   assert.match(instructions, /fetch only the relevant live context or example category/);
   assert.doesNotMatch(instructions, /#### Injected Vue API functions/);
@@ -495,6 +496,17 @@ test('discovery tools report target instance and avoid unbounded broad searches'
   assert.match(entry, /function targetInstance\(\)/);
   assert.match(entry, /source: 'ENFYRA_API_URL environment variable used by this MCP server process'/);
   assert.match(entry, /targetInstance: targetInstance\(\)/);
+  assert.match(entry, /Use this as the cheap first target sanity check/);
+  assert.match(entry, /Do not use this only to confirm the API base/);
+  assert.match(entry, /function jsonContent\(payload/);
+  assert.match(entry, /routeSamples: sample\(routes, 25\)/);
+  assert.match(entry, /tableSamples: sample\(tableNames, 40\)/);
+  assert.match(entry, /adminRoutes: sample\(adminRoutes/);
+  assert.match(entry, /publicRoutes: sample\(publicRoutes/);
+  assert.match(entry, /relationFkColumnNames/);
+  assert.match(entry, /hiddenRelationColumnCount/);
+  assert.match(entry, /discoveryFetch\(`\/metadata\/\$\{encodeURIComponent\(tableName\)\}`\)/);
+  assert.doesNotMatch(entry, /\n\s+tableNames,\n\s+routes,\n/);
   assert.match(entry, /DISCOVERY_FETCH_TIMEOUT_MS = 12000/);
   assert.match(entry, /partialErrors: collectPartialErrors/);
   assert.match(entry, /async function collectFeatureSearchState\(\)/);
@@ -585,7 +597,7 @@ test('script context discovery documents runtime macro and helper surface', () =
   assert.match(instructions, /Call `discover_script_contexts` for exact per-surface availability/);
 });
 
-test('SSR app examples include Nuxt and Next connection patterns', () => {
+test('SSR app examples include Nuxt Next and Angular connection patterns', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
 
   assert.match(examples, /Nuxt routeRules for REST and Socket\.IO/);
@@ -593,6 +605,13 @@ test('SSR app examples include Nuxt and Next connection patterns', () => {
   assert.match(examples, /Next client provider for authenticated realtime/);
   assert.match(examples, /Create the Socket\.IO client once in a top-level client provider/);
   assert.match(examples, /Proxy \/socket\.io through Next rewrites to the Enfyra app bridge \/ws\/socket\.io/);
+  assert.match(examples, /Angular dev proxy for REST and Socket\.IO/);
+  assert.match(examples, /"pathRewrite": \{/);
+  assert.match(examples, /provideHttpClient\(withInterceptors\(\[enfyraCredentialsInterceptor\]\)\)/);
+  assert.match(examples, /req\.clone\(\{ withCredentials: true \}\)/);
+  assert.match(examples, /Angular HttpClient auth service and route guard/);
+  assert.match(examples, /Angular singleton Socket\.IO realtime service/);
+  assert.match(examples, /Do not create a new socket per routed component/);
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {

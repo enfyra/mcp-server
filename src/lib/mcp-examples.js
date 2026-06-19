@@ -48,6 +48,47 @@ export default nextConfig`,
         ],
       },
       {
+        name: 'Angular dev proxy for REST and Socket.IO',
+        code: `// src/proxy.conf.json
+{
+  "/enfyra/**": {
+    "target": "https://demo.enfyra.io/api",
+    "secure": true,
+    "changeOrigin": true,
+    "pathRewrite": {
+      "^/enfyra": ""
+    }
+  },
+  "/socket.io/**": {
+    "target": "https://demo.enfyra.io/api/ws",
+    "secure": true,
+    "changeOrigin": true,
+    "ws": true
+  }
+}
+
+// angular.json
+{
+  "projects": {
+    "app": {
+      "architect": {
+        "serve": {
+          "options": {
+            "proxyConfig": "src/proxy.conf.json"
+          }
+        }
+      }
+    }
+  }
+}`,
+        notes: [
+          'Browser code still calls /enfyra/login, /enfyra/me, /enfyra/logout, and /enfyra/<table>.',
+          'The /enfyra proxy strips the prefix before forwarding to the Enfyra API origin.',
+          'The /socket.io proxy forwards to the Enfyra app bridge /ws/socket.io while keeping the browser transport path as /socket.io.',
+          'Restart ng serve after changing proxy.conf.json.',
+        ],
+      },
+      {
         name: 'Password login and current user fetch',
         code: `await fetch("/enfyra/login", {
   method: "POST",
@@ -154,6 +195,85 @@ onUnmounted(() => {
         ],
       },
       {
+        name: 'Angular HttpClient auth service and route guard',
+        code: `// app.config.ts
+import { ApplicationConfig, inject } from "@angular/core"
+import { provideRouter, CanActivateFn, Router } from "@angular/router"
+import { HttpInterceptorFn, provideHttpClient, withInterceptors } from "@angular/common/http"
+import { catchError, map, of } from "rxjs"
+
+import { routes } from "./app.routes"
+import { EnfyraAuthService } from "./enfyra-auth.service"
+
+export const enfyraCredentialsInterceptor: HttpInterceptorFn = (req, next) => {
+  if (!req.url.startsWith("/enfyra/")) return next(req)
+  return next(req.clone({ withCredentials: true }))
+}
+
+export const requireUserGuard: CanActivateFn = () => {
+  const auth = inject(EnfyraAuthService)
+  const router = inject(Router)
+
+  return auth.loadMe().pipe(
+    map(user => user ? true : router.createUrlTree(["/login"])),
+    catchError(() => of(router.createUrlTree(["/login"])))
+  )
+}
+
+export const appConfig: ApplicationConfig = {
+  providers: [
+    provideHttpClient(withInterceptors([enfyraCredentialsInterceptor])),
+    provideRouter(routes)
+  ]
+}
+
+// enfyra-auth.service.ts
+import { Injectable, signal } from "@angular/core"
+import { HttpClient } from "@angular/common/http"
+import { Observable, tap } from "rxjs"
+
+type EnfyraUser = { id: string | number; email?: string }
+
+@Injectable({ providedIn: "root" })
+export class EnfyraAuthService {
+  readonly user = signal<EnfyraUser | null>(null)
+
+  constructor(private readonly http: HttpClient) {}
+
+  login(email: string, password: string): Observable<unknown> {
+    return this.http.post("/enfyra/login", { email, password, remember: true }).pipe(
+      tap(() => this.loadMe().subscribe())
+    )
+  }
+
+  loadMe(): Observable<EnfyraUser | null> {
+    return this.http.get<EnfyraUser | null>("/enfyra/me").pipe(
+      tap(user => this.user.set(user))
+    )
+  }
+
+  logout(): Observable<unknown> {
+    return this.http.post("/enfyra/logout", {}).pipe(
+      tap(() => this.user.set(null))
+    )
+  }
+
+  startGoogleOAuth(returnPath = "/") {
+    const redirect = new URL(returnPath, window.location.origin)
+    const url = new URL("/enfyra/auth/google", window.location.origin)
+    url.searchParams.set("redirect", redirect.toString())
+    url.searchParams.set("cookieBridgePrefix", "/enfyra")
+    window.location.href = url.toString()
+  }
+}`,
+        notes: [
+          'Use HttpClient with a credentials interceptor for /enfyra/* calls so cookies are sent consistently.',
+          'The guard is only for user experience; Enfyra route permissions and server-side owner checks remain authoritative.',
+          'Keep the current user in an Angular service or store; do not read JWTs from cookies or URLs.',
+          'OAuth starts at the app proxy path and returns through the cookie bridge before the Angular route loads /enfyra/me.',
+        ],
+      },
+      {
         name: 'Next client provider for authenticated realtime',
         code: `"use client"
 
@@ -241,6 +361,64 @@ export function useRealtime() {
           'Proxy /socket.io through Next rewrites to the Enfyra app bridge /ws/socket.io so cookies remain same-origin.',
           'Pages/components should only subscribe/unsubscribe listeners; they should not create independent socket connections.',
           'Disconnect the singleton socket when the current user/session clears.',
+        ],
+      },
+      {
+        name: 'Angular singleton Socket.IO realtime service',
+        code: `// enfyra-realtime.service.ts
+import { Injectable, computed, effect, signal } from "@angular/core"
+import { io, Socket } from "socket.io-client"
+
+import { EnfyraAuthService } from "./enfyra-auth.service"
+
+@Injectable({ providedIn: "root" })
+export class EnfyraRealtimeService {
+  private socket: Socket | null = null
+  private readonly connected = signal(false)
+  readonly isConnected = computed(() => this.connected())
+
+  constructor(private readonly auth: EnfyraAuthService) {
+    effect(() => {
+      const user = this.auth.user()
+      if (user) this.connect()
+      else this.disconnect()
+    })
+  }
+
+  connect() {
+    if (this.socket) return this.socket
+
+    this.socket = io("/chat", {
+      path: "/socket.io",
+      withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 30000
+    })
+
+    this.socket.on("connect", () => this.connected.set(true))
+    this.socket.on("disconnect", () => this.connected.set(false))
+    return this.socket
+  }
+
+  disconnect() {
+    this.socket?.disconnect()
+    this.socket = null
+    this.connected.set(false)
+  }
+
+  onMessage(handler: (event: unknown) => void) {
+    const activeSocket = this.connect()
+    activeSocket.on("chat:message", handler)
+    return () => activeSocket.off("chat:message", handler)
+  }
+}`,
+        notes: [
+          'Create one app-level Socket.IO connection after auth is known.',
+          'Use the websocket namespace path from live metadata, such as /chat, and keep the transport path as /socket.io.',
+          'Components subscribe with onMessage and call the returned cleanup function in ngOnDestroy.',
+          'Do not create a new socket per routed component.',
         ],
       },
       {

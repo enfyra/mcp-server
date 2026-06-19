@@ -192,6 +192,21 @@ function getMetadataDatabaseContext(metadata, tables) {
 
 function summarizeTable(table) {
   if (!table) return null;
+  const relationFkColumnNames = new Set((table.relations || []).flatMap((relation) => {
+    const propertyName = relation.propertyName;
+    return propertyName
+      ? [
+          `${propertyName}Id`,
+          `${propertyName}_id`,
+          relation.fkCol,
+          relation.fkColumn,
+          relation.foreignKeyColumn,
+        ].filter(Boolean).map((name) => String(name).toLowerCase())
+      : [];
+  }));
+  const modelFacingColumns = (table.columns || []).filter((column) => (
+    column.isPrimary || !relationFkColumnNames.has(String(column.name || '').toLowerCase())
+  ));
   return {
     id: table.id ?? table._id,
     name: table.name,
@@ -199,7 +214,7 @@ function summarizeTable(table) {
     primaryKey: getPrimaryColumn(table)?.name || null,
     validateBody: table.validateBody,
     graphqlEnabled: table.graphqlEnabled,
-    columns: (table.columns || []).map((column) => ({
+    columns: modelFacingColumns.map((column) => ({
       id: column.id ?? column._id,
       name: column.name,
       type: column.type,
@@ -209,6 +224,7 @@ function summarizeTable(table) {
       isUpdatable: column.isUpdatable !== false,
       isEncrypted: column.isEncrypted === true,
     })),
+    hiddenRelationColumnCount: (table.columns || []).length - modelFacingColumns.length,
     relations: (table.relations || []).map((relation) => ({
       id: relation.id ?? relation._id,
       propertyName: relation.propertyName,
@@ -389,6 +405,10 @@ function collectPartialErrors(results) {
   return Object.entries(results)
     .filter(([, result]) => result?.error)
     .map(([name, result]) => ({ name, error: result.error }));
+}
+
+function jsonContent(payload, { pretty = false } = {}) {
+  return { content: [{ type: 'text', text: JSON.stringify(payload, null, pretty ? 2 : 0) }] };
 }
 
 async function getMetadataTables() {
@@ -615,7 +635,7 @@ server.tool('get_all_metadata', 'Get concise metadata summary for all tables. Us
         ...summarizeMetadata(result, { search, limit }),
         detailHint: 'Default response is capped and minimal. Call get_table_metadata({ tableName }) or inspect_table({ tableName }) for columns, relations, and route context.',
       };
-  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  return jsonContent(payload);
 });
 
 server.tool('get_table_metadata', 'Get concise metadata for a specific table by name', {
@@ -632,7 +652,7 @@ server.tool('get_table_metadata', 'Get concise metadata for a specific table by 
         table: summarizeTable(table),
         queryHint: `Use query_table({ tableName: "${tableName}", fields: [...] }) for records. query_table without fields returns only the primary key.`,
       };
-  return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+  return jsonContent(payload);
 });
 
 server.tool(
@@ -646,7 +666,7 @@ server.tool(
   },
   async ({ category }) => {
     const result = getExamples(category);
-    return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+    return jsonContent(result);
   },
 );
 
@@ -655,6 +675,7 @@ server.tool(
   [
     'Call this first when you need to understand the live Enfyra instance.',
     'Returns a concise capability map from live metadata/routes/method rows, including schema management, REST route behavior, GraphQL enablement, and relation handling.',
+    'Do not use this only to confirm the API base; use get_enfyra_api_context for that cheaper target check.',
     'Run broad discovery tools sequentially; do not call multiple broad discovery tools in parallel.',
   ].join(' '),
   {},
@@ -672,6 +693,13 @@ server.tool(
     const tableDefinition = tables.find((table) => table?.name === 'enfyra_table');
     const gqlDefinition = tables.find((table) => table?.name === 'enfyra_graphql');
     const routeTableList = [...routeTables].sort();
+    const noRouteTableList = noRouteTables.sort();
+    const sample = (items, max = 40) => ({
+      total: items.length,
+      returned: Math.min(items.length, max),
+      items: items.slice(0, max),
+      truncated: items.length > max,
+    });
 
     const payload = {
       targetInstance: targetInstance(),
@@ -692,10 +720,12 @@ server.tool(
       rest: {
         routePattern: 'Dynamic REST routes expose GET/POST at /<route-path> and PATCH/DELETE at /<route-path>/:id; there is no GET /<route-path>/:id.',
         publicAccess: 'publicMethods controls anonymous REST access per route/method; otherwise Bearer JWT + routePermissions apply.',
-        routeTables: routeTableList,
-        noRouteTables,
+        routeTables: sample(routeTableList),
+        noRouteTables: sample(noRouteTableList),
         canonicalCrudTools: 'query_table/create_record/update_record/delete_record use dynamic REST routes and only work for route-backed tables.',
         customRouteWorkflow: 'For a new endpoint use create_route without mainTableId, then create_handler/create_pre_hook/create_post_hook. Do not create a table just to get a path.',
+        routeSamples: sample(routes, 25),
+        detailHint: 'Use get_all_routes({ search, limit }) or inspect_route({ path }) for route details. Use inspect_table({ tableName }) for table detail.',
       },
       schemaManagement: {
         createTable: 'POST /enfyra_table supports isSingleRecord at create time and supports columns and relations arrays in the same cascade call. MCP create_table exposes isSingleRecord, columns, and relations directly. It does not accept alias at create time; table name drives the default route/schema behavior.',
@@ -723,11 +753,10 @@ server.tool(
           : 'Use update_table graphqlEnabled, then reload_graphql if needed.',
         gqlDefinitionColumns: (gqlDefinition?.columns || []).map((column) => column.name),
       },
-      tableNames,
-      routes,
+      tableSamples: sample(tableNames, 40),
     };
 
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+    return jsonContent(payload);
   },
 );
 
@@ -754,6 +783,12 @@ server.tool(
     const routeTables = new Set(routes.map((route) => route.mainTable).filter(Boolean));
     const adminRoutes = routes.filter((route) => route.path?.startsWith('/admin'));
     const publicRoutes = routes.filter((route) => route.publicMethods?.length);
+    const sample = (items, max = 25) => ({
+      total: items.length,
+      returned: Math.min(items.length, max),
+      items: items.slice(0, max),
+      truncated: items.length > max,
+    });
 
     const payload = {
       targetInstance: targetInstance(),
@@ -789,12 +824,12 @@ server.tool(
       methods: (methodsResult?.data || []).map((method) => ({ id: method.id || method._id, name: method.name })),
       routeRuntime: {
         routePattern: 'GET/POST /<route-path>; PATCH/DELETE /<route-path>/:id; no dynamic GET /<route-path>/:id.',
-        adminRoutes: adminRoutes.map((route) => route.path).sort(),
-        publicRoutes: publicRoutes.map((route) => ({
+        adminRoutes: sample(adminRoutes.map((route) => route.path).sort()),
+        publicRoutes: sample(publicRoutes.map((route) => ({
           path: route.path,
           mainTable: route.mainTable,
           publicMethods: route.publicMethods,
-        })),
+        }))),
       },
       cacheAndCluster: {
         metadataMutationReloads: 'Metadata-backed mutations emit cache invalidation; admin reload endpoints exist for metadata/routes/graphql/guards/all.',
@@ -811,7 +846,7 @@ server.tool(
         'MCP can test flow steps and websocket scripts through admin test endpoints, but not prove every production queue/client path without a real end-to-end client.',
       ].filter(Boolean),
     };
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+    return jsonContent(payload);
   },
 );
 
@@ -825,12 +860,21 @@ server.tool(
     tableName: z.string().optional().describe('Optional table name to summarize query fields and relation/deep capabilities.'),
   },
   async ({ tableName }) => {
-    const metadata = await discoveryFetch('/metadata');
-    const routesResult = await discoveryFetch('/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000');
-    const tables = normalizeTables(metadata);
+    const metadata = tableName
+      ? await discoveryFetch(`/metadata/${encodeURIComponent(tableName)}`)
+      : null;
+    const routesResult = tableName
+      ? await discoveryFetch('/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000')
+      : { data: [] };
+    const tableFromMetadata = tableName && !metadata?.error
+      ? metadata?.data?.table || metadata?.data || metadata?.table || metadata
+      : null;
+    const tables = tableName
+      ? (tableFromMetadata ? [tableFromMetadata] : [])
+      : [];
     const routes = summarizeRoutes(routesResult);
     const table = tableName ? tables.find((item) => item.name === tableName) : null;
-    const primaryKey = table ? getPrimaryColumn(table)?.name || 'id' : inferPrimaryKeyContext(tables).dominantPrimaryKey || 'id';
+    const primaryKey = table ? getPrimaryColumn(table)?.name || 'id' : 'id';
     const tableRoutes = tableName
       ? routes.filter((route) => route.mainTable === tableName)
       : [];
@@ -866,7 +910,9 @@ server.tool(
         ],
       },
       backendNotes: {
-        primaryKey: 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
+        primaryKey: tableName
+          ? 'Use this table metadata primary column when available.'
+          : 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
         relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
         relationCascadeFkContract: 'When creating relations through create_table/create_relation/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms.',
         graphql: 'GraphQL query args also accept filter/sort/page/limit, but GraphQL requires Bearer auth and table enablement via enfyra_graphql.',
@@ -893,7 +939,7 @@ server.tool(
       discoveryRule: 'When building a query, inspect table metadata first, then use relation propertyName and primary column from that metadata.',
     };
 
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+    return jsonContent(payload);
   },
 );
 
@@ -1033,7 +1079,7 @@ server.tool(
       },
     };
 
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+    return jsonContent(payload);
   },
 );
 
@@ -1045,6 +1091,7 @@ server.tool(
   'get_enfyra_api_context',
   [
     'Returns the resolved API base URL for this MCP session (env ENFYRA_API_URL).',
+    'Use this as the cheap first target sanity check before broad discovery or mutations.',
     'Use when the user asks which HTTP endpoint or full URL applies: combine enfyraApiUrl with paths from server instructions (GET/POST /{table}, PATCH/DELETE /{table}/{id}, no GET /{table}/{id}).',
     'Auth: publicMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
     'If path might differ from table name, use get_all_routes before asserting a URL.',
@@ -1056,6 +1103,7 @@ server.tool(
     const base = ENFYRA_API_URL.replace(/\/$/, '');
     const gql = buildGraphqlUrls(ENFYRA_API_URL);
     const payload = {
+      targetInstance: targetInstance(),
       enfyraApiUrl: base,
       graphqlHttpUrl: gql.graphqlHttpUrl,
       graphqlSchemaUrl: gql.graphqlSchemaUrl,
@@ -1072,7 +1120,7 @@ server.tool(
       pathResolution: 'Confirm route path with get_all_routes or metadata — path may not equal table name.',
       note: 'Full tool→HTTP mapping is in MCP server instructions (shown to the model at connect).',
     };
-    return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
+    return jsonContent(payload);
   },
 );
 
