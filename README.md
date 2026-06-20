@@ -183,10 +183,13 @@ The MCP server includes safety guards for LLM callers:
 
 - Generic record mutations validate fields against live metadata.
 - Script-backed records validate `sourceCode` through `/admin/script/validate` before saving.
+- `validate_dynamic_script` checks handler, hook, flow, websocket, GraphQL, and bootstrap script source without saving.
+- `validate_extension_code` checks Enfyra admin extension code through `/enfyra_extension/preview` without saving.
 - `compiledCode` is generated from `sourceCode` and may differ textually because macros are expanded; the MCP server never accepts hand-written `compiledCode`.
 - Relation tools reject physical FK/junction names.
 - Generated code should use relation property names such as `conversation`, `sender`, and `member` instead of physical FK fields such as `conversationId`, `senderId`, or `memberId`.
 - Custom route tools reject `mainTableId` unless the route is the canonical table route.
+- Platform operation tools such as `create_api_endpoint`, `set_route_public_methods`, `set_table_graphql`, `ensure_guard`, `ensure_field_permission`, `ensure_column_rule`, `ensure_websocket_event`, `ensure_flow_step`, and `ensure_menu_extension_page` resolve metadata ids and validate code before saving.
 - Schema changes are serialized.
 - Destructive deletes return a preview before requiring `confirm=true`.
 

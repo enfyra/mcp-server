@@ -21,8 +21,10 @@ import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
 import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instructions.js';
 import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
 import { registerTableTools } from './lib/table-tools.js';
+import { registerPlatformOperationTools } from './lib/platform-operation-tools.js';
 import { prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
 import { validateMainTableRoutePath } from './lib/route-guards.js';
+import { installColumnarToolFormatter, jsonContent } from './lib/response-format.js';
 import {
   findRoutePermission,
   mergeMethodNames,
@@ -407,10 +409,6 @@ function collectPartialErrors(results) {
     .map(([name, result]) => ({ name, error: result.error }));
 }
 
-function jsonContent(payload, { pretty = false } = {}) {
-  return { content: [{ type: 'text', text: JSON.stringify(payload, null, pretty ? 2 : 0) }] };
-}
-
 async function getMetadataTables() {
   const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
   return {
@@ -616,6 +614,7 @@ const server = new McpServer(
     instructions: buildMcpServerInstructions(ENFYRA_API_URL),
   },
 );
+installColumnarToolFormatter(server);
 
 // ============================================================================
 // METADATA TOOLS
@@ -2843,6 +2842,7 @@ server.tool(
 
 // Register table tools
 registerTableTools(server, ENFYRA_API_URL);
+registerPlatformOperationTools(server, ENFYRA_API_URL);
 
 // ============================================================================
 // CACHE & SYSTEM TOOLS

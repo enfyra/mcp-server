@@ -996,22 +996,20 @@ ensure_route_access({
       },
       {
         name: 'Publish read-only route',
-        code: `update_record({
-  tableName: "enfyra_route",
-  id: "<route_id>",
-  data: {
-    publicMethods: [{ id: "<GET_method_id_from_list_methods>" }]
-  }
+        code: `set_route_public_methods({
+  path: "/articles",
+  methods: ["GET"],
+  mode: "merge"
 })`,
         notes: [
-          'Method ids are instance data. Use list_methods or inspect_route output to resolve the GET method id first.',
+          'Use set_route_public_methods instead of raw enfyra_route updates; the tool resolves method ids and validates that GET is available.',
           'publicMethods controls anonymous route access. Route permissions are not for public access.',
           'Route permissions apply when the method is not public.',
         ],
       },
       {
         name: 'Rate limit anonymous requests by IP',
-        code: `create_guard({
+        code: `ensure_guard({
   name: "Public signup IP rate limit",
   path: "/newsletter_signup",
   methods: ["POST"],
@@ -1042,7 +1040,7 @@ test_rest_endpoint({
       },
       {
         name: 'Rate limit authenticated users',
-        code: `create_guard({
+        code: `ensure_guard({
   name: "Project create per-user limit",
   path: "/projects",
   methods: ["POST"],
@@ -1064,7 +1062,7 @@ test_rest_endpoint({
       },
       {
         name: 'Restrict an admin-only route to office IPs',
-        code: `create_guard({
+        code: `ensure_guard({
   name: "Admin reports office allowlist",
   path: "/admin/reports",
   methods: ["GET", "POST"],
@@ -1086,7 +1084,7 @@ test_rest_endpoint({
       },
       {
         name: 'Column rule for email format',
-        code: `create_column_rule({
+        code: `ensure_column_rule({
   tableName: "enfyra_user",
   columnName: "email",
   ruleType: "format",
@@ -1101,10 +1099,12 @@ test_rest_endpoint({
       },
       {
         name: 'Field permission condition',
-        code: `create_field_permission({
+        code: `ensure_field_permission({
   tableName: "project",
-  fieldName: "internal_notes",
+  columnName: "internal_notes",
   action: "read",
+  effect: "allow",
+  roleName: "user",
   condition: JSON.stringify({
     owner: { id: { _eq: "@USER.id" } }
   })

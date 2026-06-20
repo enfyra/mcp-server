@@ -464,6 +464,35 @@ test('mcp server exposes metadata usage tracing for production script edits', ()
   assert.match(entry, /gateway\.path/);
 });
 
+test('mcp server exposes route platform operation tools', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.js', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+
+  assert.match(entry, /registerPlatformOperationTools\(server, ENFYRA_API_URL\)/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_route_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]set_route_public_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]create_api_endpoint['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]validate_dynamic_script['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]validate_extension_code['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]set_table_graphql['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_column_rule['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_field_permission['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_guard['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_gateway['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_event['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_flow['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu_extension_page['"]/);
+  assert.match(platformTools, /validateScriptSourceIfPresent/);
+  assert.match(instructions, /Prefer business operation tools over raw metadata CRUD/);
+  assert.match(instructions, /validate_dynamic_script/);
+  assert.match(instructions, /ensure_websocket_event/);
+  assert.match(instructions, /create_api_endpoint/);
+  assert.match(instructions, /set_route_public_methods/);
+  assert.match(instructions, /ensure_route_methods/);
+});
+
 test('test_flow_step uses unified admin test runner', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
   assert.match(entry, /'test_flow_step'/);
@@ -498,7 +527,7 @@ test('discovery tools report target instance and avoid unbounded broad searches'
   assert.match(entry, /targetInstance: targetInstance\(\)/);
   assert.match(entry, /Use this as the cheap first target sanity check/);
   assert.match(entry, /Do not use this only to confirm the API base/);
-  assert.match(entry, /function jsonContent\(payload/);
+  assert.match(entry, /installColumnarToolFormatter\(server\)/);
   assert.match(entry, /routeSamples: sample\(routes, 25\)/);
   assert.match(entry, /tableSamples: sample\(tableNames, 40\)/);
   assert.match(entry, /adminRoutes: sample\(adminRoutes/);
