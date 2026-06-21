@@ -1,6 +1,6 @@
 {
   "name": "@enfyra/mcp-server",
-  "version": "0.0.98",
+  "version": "0.0.109",
   "description": "MCP server for Enfyra - manage Enfyra instances from MCP-compatible coding tools",
   "type": "module",
   "license": "MIT",

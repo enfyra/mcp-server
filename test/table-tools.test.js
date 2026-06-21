@@ -8,6 +8,8 @@ import {
   buildColumnDefinition,
   fetchTableWithDetails,
   normalizeRelationForTablePatch,
+  registerTableTools,
+  resolveTableIdentifierFromMetadata,
   resolveRelationTargetsFromMetadata,
   resolveTableFromMetadata,
   resolveTableFromMetadataByName,
@@ -24,11 +26,30 @@ import {
   validateMethodsForRoute,
 } from '../src/lib/route-permission-tools.js';
 
+test('platform operation module imports cleanly', async () => {
+  const module = await import('../src/lib/platform-operation-tools.js');
+  assert.equal(typeof module.registerPlatformOperationTools, 'function');
+});
+
 function jsonResponse(body, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+function createToolHarness() {
+  const tools = new Map();
+  return {
+    tool(name, description, schema, handler) {
+      tools.set(name, { description, schema, handler });
+    },
+    get(name) {
+      const tool = tools.get(name);
+      assert.ok(tool, `Expected tool ${name} to be registered`);
+      return tool;
+    },
+  };
 }
 
 test('fetchTableWithDetails reads full columns from metadata instead of enfyra_table nested fields', async () => {
@@ -139,6 +160,18 @@ test('resolveTableFromMetadataByName supports table name and alias', () => {
   const metadata = { data: { tables: [{ id: true, name: 'enfyra_column' }, { id: 2, alias: 'Posts' }] } };
   assert.equal(resolveTableFromMetadataByName(metadata, 'enfyra_column')?.id, true);
   assert.equal(resolveTableFromMetadataByName(metadata, 'Posts')?.id, 2);
+});
+
+test('resolveTableIdentifierFromMetadata supports ids, names, and aliases', () => {
+  const metadata = { data: { tables: [{ id: 4, name: 'enfyra_user' }, { id: 9, name: 'post', alias: 'Posts' }] } };
+
+  assert.equal(resolveTableIdentifierFromMetadata(metadata, 4), 4);
+  assert.equal(resolveTableIdentifierFromMetadata(metadata, 'post'), 9);
+  assert.equal(resolveTableIdentifierFromMetadata(metadata, 'Posts'), 9);
+  assert.throws(
+    () => resolveTableIdentifierFromMetadata(metadata, 'missing_table', 'targetTableId'),
+    /targetTableId "missing_table" was not found/
+  );
 });
 
 test('resolveRelationTargetsFromMetadata converts table names to ids before schema mutation', () => {
@@ -287,6 +320,119 @@ test('fetchAPI retries once after stale exchanged token is rejected', async () =
     assert.deepEqual(result, { data: [{ id: 1 }] });
     assert.equal(exchangeCount, 2);
     assert.equal(calls.filter((call) => call.url.endsWith('/me')).length, 2);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('get_all_tables applies search and explicit all contract', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+
+  global.fetch = async (url, init = {}) => {
+    if (String(url).endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
+    }
+    if (String(url).endsWith('/metadata')) {
+      return jsonResponse({
+        data: {
+          tables: [
+            { id: 1, name: 'enfyra_user', alias: 'Users', description: 'System users', columns: [], relations: [] },
+            { id: 2, name: 'mcp_project', description: 'Test project', columns: [{ id: 1 }], relations: [] },
+            { id: 3, name: 'mcp_issue', description: 'Test issue', columns: [], relations: [{ id: 9 }] },
+          ],
+        },
+      });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await assert.rejects(
+      () => server.get('get_all_tables').handler({}),
+      /requires either limit or all=true/
+    );
+
+    const result = await server.get('get_all_tables').handler({ search: 'mcp_', all: true });
+    const payload = JSON.parse(result.content[0].text);
+
+    assert.equal(payload.matchedTableCount, 2);
+    assert.equal(payload.returnedTableCount, 2);
+    assert.match(result.content[0].text, /mcp_project/);
+    assert.doesNotMatch(result.content[0].text, /enfyra_user/);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('create_relation resolves table names before schema patch', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let patchedBody = null;
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
+    }
+    if (urlText.endsWith('/metadata')) {
+      return jsonResponse({
+        data: {
+          tables: [
+            {
+              id: 9,
+              name: 'mcp_issue',
+              columns: [{ id: 1, name: 'title', type: 'varchar' }],
+              relations: patchedBody?.relations || [],
+            },
+            {
+              id: 4,
+              name: 'enfyra_user',
+              alias: 'Users',
+              columns: [{ id: 2, name: 'email', type: 'varchar' }],
+              relations: [],
+            },
+          ],
+        },
+      });
+    }
+    if (urlText.includes('/enfyra_table?')) {
+      return jsonResponse({
+        data: [{
+          id: 9,
+          name: 'mcp_issue',
+          columns: [{ id: 1, name: 'title', type: 'varchar' }],
+          relations: patchedBody?.relations || [],
+        }],
+      });
+    }
+    if (urlText.endsWith('/enfyra_table/9') && init.method === 'PATCH') {
+      patchedBody = JSON.parse(init.body);
+      patchedBody.relations = patchedBody.relations.map((relation, index) => ({ id: index + 20, ...relation }));
+      return jsonResponse({ data: [{ id: 9, name: 'mcp_issue', relations: patchedBody.relations }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await server.get('create_relation').handler({
+      sourceTableId: 'mcp_issue',
+      targetTableId: 'enfyra_user',
+      type: 'many-to-one',
+      propertyName: 'owner',
+      onDelete: 'SET NULL',
+    });
+
+    assert.equal(patchedBody.relations[0].targetTable, 4);
+    assert.equal(patchedBody.relations[0].propertyName, 'owner');
   } finally {
     resetTokens();
     global.fetch = originalFetch;
@@ -466,31 +612,93 @@ test('mcp server exposes metadata usage tracing for production script edits', ()
 
 test('mcp server exposes route platform operation tools', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const tableTools = readFileSync(new URL('../src/lib/table-tools.js', import.meta.url), 'utf8');
   const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.js', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
 
   assert.match(entry, /registerPlatformOperationTools\(server, ENFYRA_API_URL\)/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_route_methods['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]set_route_public_methods['"]/);
+  assert.doesNotMatch(tableTools, /server\.tool\(\s*['"]add_column['"]/);
+  assert.doesNotMatch(tableTools, /server\.tool\(\s*['"]remove_column['"]/);
+  assert.doesNotMatch(tableTools, /server\.tool\(\s*['"]add_relation['"]/);
+  assert.doesNotMatch(tableTools, /server\.tool\(\s*['"]remove_relation['"]/);
+  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_route_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]add_route_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]replace_route_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]remove_route_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]enable_route['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]disable_route['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]delete_route['"]/);
+  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]set_route_public_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]public_route_methods['"]/);
+  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]set_public_route_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]private_route_methods['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]api_endpoint_workflow['"]/);
+  assert.match(platformTools, /nextSteps/);
+  assert.match(platformTools, /applyAll/);
+  assert.match(platformTools, /delete_route\(\{ routeId:/);
+  assert.doesNotMatch(platformTools, /delete_record\(\{ tableName: "enfyra_route_handler"/);
   assert.match(platformTools, /server\.tool\(\s*['"]create_api_endpoint['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]validate_dynamic_script['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]validate_extension_code['"]/);
+  assert.match(entry, /server\.tool\(\s*['"]get_permission_profile['"]/);
+  assert.match(entry, /MCP_PERMISSION_REQUIREMENTS/);
+  assert.match(entry, /\/admin\/script\/validate/);
+  assert.match(entry, /\/admin\/test\/run/);
+  assert.match(entry, /\/admin\/flow\/trigger\/:id/);
   assert.match(platformTools, /server\.tool\(\s*['"]set_table_graphql['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_column_rule['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_field_permission['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_guard['"]/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_column_rule['"]/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_field_permission['"]/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_route_permission['"]/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_guard['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_gateway['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_event['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_flow['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu_extension_page['"]/);
+  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_flow['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_manual_flow['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_scheduled_flow['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]choose_flow_step_tool['"]/);
+  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_script_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_condition_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_query_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_create_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_update_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_delete_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_http_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_sleep_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_trigger_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_log_flow_step['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_page_extension['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_global_extension['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_widget_extension['"]/);
+  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_menu_extension_page['"]/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_menu['"]/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_extension['"]/);
+  assert.match(platformTools, /sourceCode/);
+  assert.match(platformTools, /stepOrder/);
+  assert.match(platformTools, /triggerType/);
+  assert.doesNotMatch(platformTools, /connectionHandlerScript/);
+  assert.doesNotMatch(platformTools, /handlerScript/);
+  assert.doesNotMatch(platformTools, /\/admin\/reload\/flows/);
+  assert.doesNotMatch(platformTools, /\/admin\/reload\/websockets/);
   assert.match(platformTools, /validateScriptSourceIfPresent/);
-  assert.match(instructions, /Prefer business operation tools over raw metadata CRUD/);
+  assert.match(instructions, /Prefer the most specific business operation tool over raw metadata CRUD/);
   assert.match(instructions, /validate_dynamic_script/);
-  assert.match(instructions, /ensure_websocket_event/);
+  assert.match(instructions, /get_permission_profile/);
+  assert.match(instructions, /non-root API tokens/);
+  assert.match(instructions, /\/admin\/script\/validate/);
+  assert.match(instructions, /websocket tools/);
+  assert.match(instructions, /api_endpoint_workflow/);
   assert.match(instructions, /create_api_endpoint/);
-  assert.match(instructions, /set_route_public_methods/);
-  assert.match(instructions, /ensure_route_methods/);
+  assert.match(instructions, /public_route_methods/);
+  assert.match(instructions, /add_route_methods/);
+  assert.match(instructions, /enable_route/);
+  assert.match(instructions, /enfyra_route\.isEnabled/);
+  assert.match(instructions, /GraphQL table data requires Bearer auth/);
+  assert.match(instructions, /ensure_page_extension/);
 });
 
 test('test_flow_step uses unified admin test runner', () => {
@@ -641,6 +849,20 @@ test('SSR app examples include Nuxt Next and Angular connection patterns', () =>
   assert.match(examples, /Angular HttpClient auth service and route guard/);
   assert.match(examples, /Angular singleton Socket\.IO realtime service/);
   assert.match(examples, /Do not create a new socket per routed component/);
+});
+
+test('OAuth setup examples guide provider console callback configuration', () => {
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+
+  assert.match(examples, /'oauth-setup'/);
+  assert.match(examples, /Google OAuth setup workflow/);
+  assert.match(examples, /Ask for the app\/admin URL/);
+  assert.match(examples, /Authorized redirect URIs/);
+  assert.match(examples, /\/api\/auth\/google\/callback/);
+  assert.match(examples, /enfyra_oauth_config/);
+  assert.match(examples, /Do not ask the user to choose or type the callback URL manually/);
+  assert.match(instructions, /category: "oauth-setup"/);
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {

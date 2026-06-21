@@ -169,6 +169,7 @@ For normal apps and demos, enter the app/admin URL such as `http://localhost:300
 Use `get_enfyra_examples` from the MCP tool list when asking an LLM to generate implementation patterns. It returns focused examples for:
 
 - SSR app auth and proxy setup
+- OAuth provider setup
 - schema, columns, relations, indexes, and validation
 - query filters, sorting, fields, deep relations, and aggregates
 - handlers, hooks, permissions, and RLS
@@ -186,16 +187,17 @@ The MCP server includes safety guards for LLM callers:
 - `validate_dynamic_script` checks handler, hook, flow, websocket, GraphQL, and bootstrap script source without saving.
 - `validate_extension_code` checks Enfyra admin extension code through `/enfyra_extension/preview` without saving.
 - `compiledCode` is generated from `sourceCode` and may differ textually because macros are expanded; the MCP server never accepts hand-written `compiledCode`.
-- Relation tools reject physical FK/junction names.
+- JSON responses include `compressionStats` with estimated token savings. Arrays of objects are converted to columnar form only when the compact shape is smaller than raw JSON.
+- Relation tools reject physical FK/junction names and resolve table ids from exact table names or aliases before schema mutation.
 - Generated code should use relation property names such as `conversation`, `sender`, and `member` instead of physical FK fields such as `conversationId`, `senderId`, or `memberId`.
 - Custom route tools reject `mainTableId` unless the route is the canonical table route.
-- Platform operation tools such as `create_api_endpoint`, `set_route_public_methods`, `set_table_graphql`, `ensure_guard`, `ensure_field_permission`, `ensure_column_rule`, `ensure_websocket_event`, `ensure_flow_step`, and `ensure_menu_extension_page` resolve metadata ids and validate code before saving.
+- Platform operation tools such as `api_endpoint_workflow`, `create_api_endpoint`, `enable_route`, `disable_route`, `delete_route`, `public_route_methods`, `add_route_methods`, `set_table_graphql`, `ensure_guard`, `ensure_field_permission`, `ensure_column_rule`, `ensure_websocket_event`, `choose_flow_step_tool`, fixed-type flow step tools, `ensure_menu`, `ensure_page_extension`, `ensure_global_extension`, and `ensure_widget_extension` resolve metadata ids and validate code before saving.
 - Schema changes are serialized.
 - Destructive deletes return a preview before requiring `confirm=true`.
 
 ## Query Notes
 
-Use explicit `fields` in read tools. Include mode is the default, such as `fields=id,email`. Any excluded field switches that scope to exclude mode: `fields=-compiledCode` returns all readable fields except `compiledCode`, and `fields=id,-compiledCode` still means all except `compiledCode`. Dotted exclusions such as `fields=-owner.avatar` work for relation fields when the relation exists in metadata. Every list/query call must pass either `limit` for a bounded page or `all: true` for a complete list. When a caller needs every matching row, pass `all: true` to `query_table` or `get_all_routes`; the tool sends REST `limit=0` instead of making the model choose an arbitrary page size like 30 or 50.
+Use explicit `fields` in read tools. Include mode is the default, such as `fields=id,email`. Any excluded field switches that scope to exclude mode: `fields=-compiledCode` returns all readable fields except `compiledCode`, and `fields=id,-compiledCode` still means all except `compiledCode`. Dotted exclusions such as `fields=-owner.avatar` work for relation fields when the relation exists in metadata. Every list/query call must pass either `limit` for a bounded page or `all: true` for a complete list. When a caller needs every matching row, pass `all: true` to `query_table`, `get_all_routes`, or `get_all_tables`; the tool should not choose an arbitrary page size like 30 or 50.
 
 ## Enfyra URL Pattern
 
@@ -227,10 +229,16 @@ Do not create custom login/logout/me routes that manually set Enfyra token cooki
 
 ## Tool Summary
 
-The MCP server exposes tools for metadata discovery, examples, query/CRUD, method management, route access audit/grant, routes, handlers, hooks, tables, columns, relations, cache reloads, logs, users, roles, packages, menus, extensions, scripts, flows, websocket, files, and `get_enfyra_api_context`.
+The MCP server exposes tools for metadata discovery, examples, query/CRUD, method management, route lifecycle, route access audit/grant, routes, handlers, hooks, tables, columns, relations, cache reloads, logs, users, roles, packages, menus, extensions, scripts, flows, websocket, files, and `get_enfyra_api_context`.
+
+Routes have two separate controls. `isEnabled` controls runtime registration: disabled routes return `404`. Use `enable_route` and `disable_route` for this lifecycle. `publicMethods` controls anonymous access for enabled routes; use `public_route_methods` and `private_route_methods` for that access boundary.
+
+Admin app page paths and API paths are different surfaces. A page extension path such as `/cloud/projects/:id` is a UI route unless an enabled Enfyra API route with that exact path exists. Use `test_rest_endpoint` only for actual API routes under `ENFYRA_API_URL`; verify page extensions through the app URL/browser or extension/menu metadata.
 
 For authenticated route access, use `audit_route_access` before changing permissions and `ensure_route_access` to grant access by route path plus role/user. For production script edits, use `trace_metadata_usage`, `get_script_source`, and `patch_script_source` so changes are targeted, hash-checked, and validated.
 
 ## Security
+
+Treat permission and security as the first step for every change: decide public/private methods, authenticated route access, owner/tenant scope, and field exposure before creating handlers, flows, extensions, or UI.
 
 API calls use exchanged JWTs and Enfyra permissions are still enforced server-side. Keep `ENFYRA_API_TOKEN` out of committed config unless the project intentionally uses environment interpolation or another secret-management path.

@@ -457,6 +457,84 @@ window.location.href = url.toString()`,
       },
     ],
   },
+  'oauth-setup': {
+    title: 'OAuth provider setup',
+    useWhen: 'Use when configuring Google or another OAuth provider for an Enfyra-backed app.',
+    examples: [
+      {
+        name: 'Google OAuth setup workflow',
+        code: `// 1. Ask for the public app/admin URL, not the API URL.
+// Example input from the user:
+const appUrl = "https://demo.enfyra.io"
+
+// 2. Derive the Enfyra API base and provider callback.
+const apiBase = appUrl.replace(/\\/$/, "") + "/api"
+const googleCallbackUrl = apiBase + "/auth/google/callback"
+
+// 3. Tell the user to paste this exact value into Google Cloud Console:
+// APIs & Services -> Credentials -> OAuth 2.0 Client -> Authorized redirect URIs
+// https://demo.enfyra.io/api/auth/google/callback
+
+// 4. After the user provides Google client id/secret, save Enfyra config:
+create_record({
+  tableName: "enfyra_oauth_config",
+  body: JSON.stringify({
+    provider: "google",
+    clientId: "<google-client-id>",
+    clientSecret: "<google-client-secret>",
+    redirectUri: googleCallbackUrl,
+    isEnabled: true
+  })
+})`,
+        notes: [
+          'Ask for the app/admin URL such as https://demo.enfyra.io; derive the API base by appending /api.',
+          'The provider callback is {appUrl}/api/auth/{provider}/callback and must exactly match the Authorized redirect URI in Google Cloud Console.',
+          'Do not ask the user to choose or type the callback URL manually once the app URL is known; compute it and show the exact value to paste.',
+          'The OAuth callback is the Enfyra provider callback, not the final app page.',
+          'When starting OAuth from a browser app, use the same-origin proxy route with redirect and cookieBridgePrefix as shown in ssr-app-auth examples.',
+        ],
+      },
+      {
+        name: 'Browser OAuth start URL after setup',
+        code: `const returnUrl = new URL("/dashboard", window.location.origin)
+const oauthUrl = new URL("/enfyra/auth/google", window.location.origin)
+oauthUrl.searchParams.set("redirect", returnUrl.toString())
+oauthUrl.searchParams.set("cookieBridgePrefix", "/enfyra")
+window.location.href = oauthUrl.toString()`,
+        notes: [
+          'This is the browser start URL through the app proxy; it is different from the Google Authorized redirect URI.',
+          'After Enfyra finishes the Google callback, it bridges cookies through /enfyra/auth/set-cookies and returns to the absolute redirect URL.',
+          'After return, call /enfyra/me to load the user.',
+        ],
+      },
+      {
+        name: 'Update an existing Google OAuth config',
+        code: `const existing = await query_table({
+  tableName: "enfyra_oauth_config",
+  filter: JSON.stringify({ provider: { _eq: "google" } }),
+  fields: ["id", "provider", "redirectUri", "isEnabled"],
+  limit: 1
+})
+
+// If a row exists, update it instead of creating a duplicate.
+update_record({
+  tableName: "enfyra_oauth_config",
+  id: "<existing-config-id>",
+  body: JSON.stringify({
+    clientId: "<google-client-id>",
+    clientSecret: "<google-client-secret>",
+    redirectUri: "https://demo.enfyra.io/api/auth/google/callback",
+    isEnabled: true
+  })
+})`,
+        notes: [
+          'Inspect first so setup is idempotent.',
+          'Use the current system table name enfyra_oauth_config.',
+          'Never expose the client secret back in app code or documentation.',
+        ],
+      },
+    ],
+  },
   'schema-relations': {
     title: 'Tables, columns, relations, cascade, and indexes',
     useWhen: 'Use when creating or changing persisted data models.',
@@ -989,20 +1067,20 @@ ensure_route_access({
   description: "Authenticated users can list and create their own orders."
 })`,
         notes: [
+          'Start with the security boundary: choose public/private methods, role or user route access, owner/tenant scope, and field exposure before writing handler or UI logic.',
           'Use route permissions for authenticated access. The tool resolves role and method ids, validates the route available methods, merges existing methods, and reloads routes.',
           'Handlers or pre-hooks must still enforce owner or tenant scope; route permission only lets the request pass RoleGuard.',
           'Use publicMethods only for anonymous public access.',
         ],
       },
       {
-        name: 'Publish read-only route',
-        code: `set_route_public_methods({
+        name: 'Make a read-only route public',
+        code: `public_route_methods({
   path: "/articles",
-  methods: ["GET"],
-  mode: "merge"
+  methods: ["GET"]
 })`,
         notes: [
-          'Use set_route_public_methods instead of raw enfyra_route updates; the tool resolves method ids and validates that GET is available.',
+          'Use public_route_methods instead of raw enfyra_route updates; the tool resolves method ids and validates that GET is available.',
           'publicMethods controls anonymous route access. Route permissions are not for public access.',
           'Route permissions apply when the method is not public.',
         ],
@@ -1314,17 +1392,18 @@ return order && order.total > 1000`,
       {
         name: 'Split a provisioning workflow into focused steps',
         code: `[
-  { "key": "load_project", "stepOrder": 10, "type": "script" },
+  { "key": "load_project", "stepOrder": 10, "type": "query" },
   { "key": "reserve_capacity", "stepOrder": 20, "type": "script" },
-  { "key": "create_database_user", "stepOrder": 30, "type": "script" },
+  { "key": "create_database_user", "stepOrder": 30, "type": "http" },
   { "key": "apply_database_guardrails", "stepOrder": 40, "type": "script" },
-  { "key": "start_container", "stepOrder": 50, "type": "script" },
-  { "key": "apply_container_guardrails", "stepOrder": 60, "type": "script" },
-  { "key": "check_health", "stepOrder": 70, "type": "script" },
-  { "key": "finalize_project", "stepOrder": 80, "type": "script" }
+  { "key": "start_container", "stepOrder": 50, "type": "http" },
+  { "key": "check_health", "stepOrder": 60, "type": "http" },
+  { "key": "finalize_project", "stepOrder": 70, "type": "update" },
+  { "key": "write_audit_log", "stepOrder": 80, "type": "log" }
 ]`,
         notes: [
-          'Prefer operation-sized flow steps with clear keys over one large script that performs SSH, Docker, DB, API, email, and finalization work together.',
+          'Prefer the fixed-type flow step tool that matches each operation before falling back to script.',
+          'Use choose_flow_step_tool when the right step type is unclear.',
           'Each step should return only ids, booleans, status keys, or small counters that later steps need.',
           'When refactoring an existing flow, add or extract adjacent focused enfyra_flow_step rows instead of making an oversized sourceCode block longer.',
         ],
@@ -1339,6 +1418,21 @@ return order && order.total > 1000`,
         notes: [
           'Step configs are JSON; script steps use code strings.',
           'Use public-safe URLs for HTTP steps.',
+        ],
+      },
+      {
+        name: 'Flow create/update/delete step configs',
+        code: `// ensure_create_flow_step
+{ "table": "todo", "data": { "title": "Review", "status": "open" } }
+
+// ensure_update_flow_step
+{ "table": "todo", "id": "@FLOW_PAYLOAD.todoId", "data": { "status": "done" } }
+
+// ensure_delete_flow_step
+{ "table": "todo", "id": "@FLOW_PAYLOAD.todoId" }`,
+        notes: [
+          'Use fixed CRUD flow step tools for single-record writes.',
+          'Use script only when a step must coordinate multiple records, compute complex data, or call packages.',
         ],
       },
     ],
@@ -1417,7 +1511,7 @@ update_method({
       },
       {
         name: 'Create menu then extension',
-        code: `create_menu({
+        code: `ensure_menu({
   label: "Reports",
   type: "Menu",
   path: "/reports",
@@ -1433,8 +1527,7 @@ update_method({
 })
 
 // Read the created menu id from the tool response, then:
-create_extension({
-  type: "page",
+ensure_page_extension({
   name: "ReportsPage",
   description: "Reports dashboard",
   menuId: "<created-menu-id>",
@@ -1445,13 +1538,14 @@ create_extension({
           'Menu provides navigation; extension provides content.',
           'Use enfyra_menu.label, not title.',
           'Sensitive admin menus should include a permission condition at creation time.',
-          'For page extensions, create the menu first and pass menuId to create_extension.',
+          'For page extensions, create the menu first with ensure_menu and pass its id to ensure_page_extension.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',
           'Use variant: "minimal" for operational pages unless a larger header is intentionally needed.',
           'Do not put ordinary KPI cards in PageHeader.stats; render metrics in the extension body.',
           'Put page-level actions in useHeaderActionRegistry or useSubHeaderActionRegistry, destructure register first, then call it with one action or an array.',
           'Page extensions should be full-bleed by default and responsive from the first version.',
           'The extension root is already inside Enfyra admin page main; do not add root-level page padding.',
+          'Page extension paths are admin app UI routes. Do not verify them with test_rest_endpoint against ENFYRA_API_URL unless inspect_route shows an API route with the same path.',
           'After saving, open Enfyra admin tabs should update through the server/Enfyra admin UI realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',
         ],
       },
@@ -1488,8 +1582,7 @@ function openLatest() {
 </script>
 \`
 
-create_extension({
-  type: "widget",
+ensure_widget_extension({
   name: "ReportStatusWidget",
   description: "Report status summary cards",
   code: reportStatusWidgetCode,
@@ -1497,8 +1590,7 @@ create_extension({
 })
 
 // Read the created widget record id, then embed it from the page extension.
-create_extension({
-  type: "page",
+ensure_page_extension({
   name: "ReportsPage",
   menuId: "<reports-menu-id>",
   code: "<template><section class=\\"min-h-full w-full space-y-4\\"><Widget :id=\\"<report-status-widget-id>\\" :total=\\"totalReports\\" :rows=\\"reportRows\\" :open-details=\\"openReportDetails\\" @refresh=\\"refresh\\" /><Widget :id=\\"<report-table-widget-id>\\" :rows=\\"reportRows\\" @refresh=\\"refresh\\" /></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); const totalReports = ref(0); const reportRows = ref([]); function refresh() {} function openReportDetails(row) { navigateTo('/data/report?filter=' + encodeURIComponent(JSON.stringify({ id: { _eq: row.id } }))) }</script>",
@@ -1574,8 +1666,7 @@ onUnmounted(() => {
 </script>
 \`
 
-create_extension({
-  type: "global",
+ensure_global_extension({
   name: "NotificationBellGlobal",
   description: "Registers the app-wide notification bell in the account panel",
   code: notificationBellCode,
@@ -1719,7 +1810,7 @@ registerHeaderActions([
       {
         name: 'Plan an admin dashboard as multiple pages',
         code: `// Recommended menu shape for an operations surface:
-create_menu({
+ensure_menu({
   type: "Dropdown Menu",
   label: "Operations",
   path: "/operations",

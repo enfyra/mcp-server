@@ -3,6 +3,7 @@
  */
 import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
+import { jsonContent } from './response-format.js';
 
 let schemaQueue = Promise.resolve();
 
@@ -41,6 +42,19 @@ export function resolveTableFromMetadataByName(metadata, tableName) {
   if (!tableName) return null;
   return normalizeTablesFromMetadata(metadata)
     .find((table) => table?.name === tableName || table?.alias === tableName) || null;
+}
+
+export function resolveTableIdentifierFromMetadata(metadata, tableRef, label = 'table') {
+  const resolvedTable = normalizeTablesFromMetadata(metadata)
+    .find((table) => (
+      String(getId(table)) === String(tableRef) ||
+      table?.name === tableRef ||
+      table?.alias === tableRef
+    ));
+  if (!resolvedTable) {
+    throw new Error(`${label} "${tableRef}" was not found in metadata. Pass an existing table id, name, or alias from get_all_tables/inspect_table.`);
+  }
+  return getId(resolvedTable);
 }
 
 /**
@@ -145,6 +159,14 @@ export function normalizeRelationForTablePatch(relation) {
       : mappedBy;
   }
   return normalized;
+}
+
+function assertNoForbiddenRelationKeys(args) {
+  for (const key of FORBIDDEN_RELATION_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(args, key)) {
+      throw new Error(`create_relation must not include physical column field "${key}". Use sourceTableId/targetTableId and relation propertyName only; Enfyra derives FK and junction columns.`);
+    }
+  }
 }
 
 export function sanitizeExistingRelationForTablePatch(relation) {
@@ -307,27 +329,32 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     });
   }
 
-  async function appendRelationToTable({ sourceTableId, targetTableId, type, propertyName, inversePropertyName, mappedBy, isNullable, onDelete, description }) {
+  async function appendRelationToTable(args) {
     return withSchemaQueue(async () => {
-    const tableData = await fetchTableWithDetails(ENFYRA_API_URL, sourceTableId);
+    assertNoForbiddenRelationKeys(args);
+    const { sourceTableId, targetTableId, type, propertyName, inversePropertyName, mappedBy, isNullable, onDelete, description } = args;
+    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+    const resolvedSourceTableId = resolveTableIdentifierFromMetadata(metadata, sourceTableId, 'sourceTableId');
+    const resolvedTargetTableId = resolveTableIdentifierFromMetadata(metadata, targetTableId, 'targetTableId');
+    const tableData = await fetchTableWithDetails(ENFYRA_API_URL, resolvedSourceTableId);
     if (!tableData) {
-      return { content: [{ type: 'text', text: `Error: Table with ID ${sourceTableId} not found.` }] };
+      return { content: [{ type: 'text', text: `Error: Table ${sourceTableId} not found.` }] };
     }
     const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
     const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
-    const newRelation = { targetTable: targetTableId, type, propertyName };
+    const newRelation = { targetTable: resolvedTargetTableId, type, propertyName };
     if (inversePropertyName !== undefined) newRelation.inversePropertyName = inversePropertyName || null;
     if (mappedBy !== undefined) newRelation.mappedBy = mappedBy;
     if (isNullable !== undefined) newRelation.isNullable = isNullable;
     if (onDelete !== undefined) newRelation.onDelete = onDelete;
     if (description !== undefined) newRelation.description = description;
-    const result = await patchTableAutoConfirm(ENFYRA_API_URL, sourceTableId, { relations: [...existingRelations, newRelation] });
-    await verifyRelationCascade(ENFYRA_API_URL, sourceTableId, beforeIds, {
+    const result = await patchTableAutoConfirm(ENFYRA_API_URL, resolvedSourceTableId, { relations: [...existingRelations, newRelation] });
+    await verifyRelationCascade(ENFYRA_API_URL, resolvedSourceTableId, beforeIds, {
       action: 'create',
       propertyName,
     });
     return {
-      content: [{ type: 'text', text: `Relation created: ${propertyName} (${type}) from table ${sourceTableId} → ${targetTableId}.\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
+      content: [{ type: 'text', text: `Relation created: ${propertyName} (${type}) from table ${resolvedSourceTableId} → ${resolvedTargetTableId}.\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
     };
     });
   }
@@ -354,7 +381,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           targetColumn: target,
           preservedColumnIds: beforeIds.filter((id) => id !== String(columnId)),
           destructive: true,
-          next: 'Call delete_column/remove_column again with confirm=true to drop the physical column and metadata.',
+          next: 'Call delete_column again with confirm=true to drop the physical column and metadata.',
         }, null, 2) }],
       };
     }
@@ -396,7 +423,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           targetRelation: target,
           preservedRelationIds: beforeIds.filter((id) => id !== String(relationId)),
           destructive: true,
-          next: 'Call delete_relation/remove_relation again with confirm=true to drop relation metadata and any derived FK/junction structures.',
+          next: 'Call delete_relation again with confirm=true to drop relation metadata and any derived FK/junction structures.',
         }, null, 2) }],
       };
     }
@@ -434,8 +461,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   };
 
   const relationCreateSchema = {
-    sourceTableId: z.string().describe('Source table ID (the table that owns the FK for many-to-one).'),
-    targetTableId: z.string().describe('Target table ID.'),
+    sourceTableId: z.string().describe('Source table id, exact table name, or alias. For many-to-one, this is the table that owns the relation property.'),
+    targetTableId: z.string().describe('Target table id, exact table name, or alias. MCP resolves names/aliases to ids before mutation.'),
     type: z.enum(['many-to-one', 'one-to-many', 'one-to-one', 'many-to-many']).describe('Relation type.'),
     propertyName: z.string().describe('Property name on source table (e.g., "customer", "items").'),
     inversePropertyName: z.string().optional().describe('Property name on target table for bidirectional relation (e.g., "orders"). Omit unless the reverse field is truly needed.'),
@@ -443,6 +470,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     isNullable: z.boolean().optional().default(true).describe('Whether the relation is nullable.'),
     onDelete: z.enum(['CASCADE', 'SET NULL', 'RESTRICT']).optional().default('SET NULL').describe('On delete behavior.'),
     description: z.string().optional().describe('Relation description.'),
+    fkCol: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
+    fkColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
+    foreignKeyColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
+    sourceColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
+    targetColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
+    junctionSourceColumn: z.never().optional().describe('Forbidden. Use relation property names only; Enfyra derives junction columns.'),
+    junctionTargetColumn: z.never().optional().describe('Forbidden. Use relation property names only; Enfyra derives junction columns.'),
   };
 
   const columnDeleteSchema = {
@@ -461,13 +495,45 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'get_all_tables',
-    'Get all table definitions in the system',
-    {},
-    async () => {
-      const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_table?limit=500');
-      return {
-        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-      };
+    'List table definitions from metadata. Every call must pass either limit or all=true. Use search to narrow by table name or alias.',
+    {
+      limit: z.number().int().positive().optional().describe('Maximum tables returned after search. Required unless all=true.'),
+      all: z.boolean().optional().describe('Return all matched tables. Use this when a complete table list is required.'),
+      search: z.string().optional().describe('Optional table name, alias, or description substring filter.'),
+    },
+    async ({ limit, all, search }) => {
+      if (!all && limit === undefined) {
+        throw new Error('get_all_tables requires either limit or all=true. Do not invent arbitrary limits for complete table lists; use all=true.');
+      }
+      const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+      const needle = search?.trim().toLowerCase();
+      const tables = normalizeTablesFromMetadata(metadata)
+        .map((table) => ({
+          id: getId(table),
+          name: table.name ?? null,
+          alias: table.alias ?? null,
+          description: table.description ?? null,
+          isSingleRecord: table.isSingleRecord ?? null,
+          columnCount: Array.isArray(table.columns) ? table.columns.length : null,
+          relationCount: Array.isArray(table.relations) ? table.relations.length : null,
+          routeBacked: Boolean(table.route || table.routeId || table.path),
+        }))
+        .filter((table) => {
+          if (!needle) return true;
+          return [table.name, table.alias, table.description]
+            .some((value) => String(value || '').toLowerCase().includes(needle));
+        });
+      const returnedTables = all ? tables : tables.slice(0, limit);
+      return jsonContent({
+        action: 'get_all_tables',
+        totalTableCount: normalizeTablesFromMetadata(metadata).length,
+        matchedTableCount: tables.length,
+        returnedTableCount: returnedTables.length,
+        all: Boolean(all),
+        search: search || null,
+        tables: returnedTables,
+        detailHint: 'Use inspect_table with a table id/name for columns, relations, indexes, routes, permissions, and GraphQL state.',
+      });
     }
   );
 
@@ -558,7 +624,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       alias: z.string().optional().describe('New table alias.'),
       description: z.string().optional().describe('New description.'),
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record table (e.g., settings/config).'),
-      graphqlEnabled: z.boolean().optional().describe('Enable or disable GraphQL for this table by syncing enfyra_graphql.isEnabled. GraphQL still requires Bearer auth.'),
+      graphqlEnabled: z.boolean().optional().describe('Enable or disable GraphQL for this table by syncing enfyra_graphql.isEnabled. GraphQL table data still requires Bearer auth; anonymous root or schema probes may return 200.'),
       indexes: z.string().optional().describe('Complete JSON array of logical index field groups to store on enfyra_table.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear.'),
       uniques: z.string().optional().describe('Complete JSON array of logical unique field groups to store on enfyra_table.uniques. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current uniques; pass [] to clear.'),
     },
@@ -630,18 +696,6 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     {
       ...columnCreateSchema,
     },
-    appendColumnToTable
-  );
-
-  server.tool(
-    'add_column',
-    [
-      'Alias for create_column. Add a column to an existing table through the canonical enfyra_table cascade.',
-      'Use this for schema additions, including hidden secret fields with isPublished=false.',
-      'Reads full table metadata and skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
-      'Run schema changes sequentially — migration locks DB per operation.',
-    ].join(' '),
-    columnCreateSchema,
     appendColumnToTable
   );
 
@@ -722,24 +776,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     removeColumnFromTable
   );
 
-  server.tool(
-    'remove_column',
-    [
-      'Alias for delete_column. Remove a column through the canonical enfyra_table cascade.',
-      'This drops the physical column. Confirm destructive schema changes before calling.',
-      'Reads full table metadata and skips non-persisted generated/derived column metadata without id/_id when rebuilding the table columns payload.',
-      'Run schema changes sequentially — migration locks DB per operation.',
-    ].join(' '),
-    columnDeleteSchema,
-    removeColumnFromTable
-  );
-
   // ─── CREATE RELATION ───
 
   server.tool(
     'create_relation',
     [
       'Create a relation between two tables (many-to-one, one-to-many, one-to-one, many-to-many).',
+      'sourceTableId and targetTableId may be table ids, exact table names, or aliases; MCP resolves them from metadata before mutation.',
       'For many-to-one: a physical FK column is created on the source table. For one-to-many: the FK is on the target (inverse relation). This physical FK is derived by Enfyra and hidden from app schema/forms.',
       'Never ask the user for physical FK column names and never send fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. The public API uses relation propertyName only.',
       'Run sequentially — DB migration locks per operation.',
@@ -747,17 +790,6 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     {
       ...relationCreateSchema,
     },
-    appendRelationToTable
-  );
-
-  server.tool(
-    'add_relation',
-    [
-      'Alias for create_relation. Add a relation through the canonical enfyra_table cascade.',
-      'Use relation propertyName only; never provide physical FK or junction column names.',
-      'Run schema changes sequentially — migration locks DB per operation.',
-    ].join(' '),
-    relationCreateSchema,
     appendRelationToTable
   );
 
@@ -776,13 +808,4 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     removeRelationFromTable
   );
 
-  server.tool(
-    'remove_relation',
-    [
-      'Alias for delete_relation. Remove a relation through the canonical enfyra_table cascade.',
-      'This can drop FK columns or junction tables. Confirm destructive schema changes before calling.',
-    ].join(' '),
-    relationDeleteSchema,
-    removeRelationFromTable
-  );
 }

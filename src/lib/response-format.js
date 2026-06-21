@@ -1,5 +1,6 @@
 const RESPONSE_FORMAT = 'json+columnar-v1';
 const COLUMNAR_FORMAT = 'columnar-v1';
+const COMPRESSION_STATS_FIELD = 'compressionStats';
 
 function isPlainObject(value) {
   if (!value || typeof value !== 'object') return false;
@@ -50,19 +51,88 @@ function toColumnar(value, seen = new WeakSet()) {
   return output;
 }
 
-export function formatJsonPayload(payload) {
-  const formatted = toColumnar(payload);
-  if (!isPlainObject(formatted)) {
+function safeJsonStringify(value) {
+  const seen = new WeakSet();
+  return JSON.stringify(value, (_key, entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    if (seen.has(entry)) return '[Circular]';
+    seen.add(entry);
+    return entry;
+  });
+}
+
+function estimateTokens(jsonText) {
+  if (!jsonText) return 0;
+  return Math.ceil(jsonText.length / 4);
+}
+
+function buildCompressionStats(originalPayload, candidatePayload, selectedPayload, applied) {
+  const originalTokens = estimateTokens(safeJsonStringify(originalPayload));
+  const candidateTokens = estimateTokens(safeJsonStringify(candidatePayload));
+  const responseTokens = estimateTokens(safeJsonStringify(selectedPayload));
+  const candidateSavedTokens = originalTokens - candidateTokens;
+  const candidateSavedPercent = originalTokens > 0
+    ? Number(((candidateSavedTokens / originalTokens) * 100).toFixed(2))
+    : 0;
+  const savedTokens = originalTokens - responseTokens;
+  const savedPercent = originalTokens > 0
+    ? Number(((savedTokens / originalTokens) * 100).toFixed(2))
+    : 0;
+  return {
+    originalTokens,
+    compactTokens: responseTokens,
+    savedTokens,
+    savedPercent,
+    applied,
+    candidateCompactTokens: candidateTokens,
+    candidateSavedTokens,
+    candidateSavedPercent,
+  };
+}
+
+function attachCompressionStats(originalPayload, candidatePayload, selectedPayload, applied) {
+  if (
+    isPlainObject(selectedPayload)
+    && selectedPayload.responseFormat === RESPONSE_FORMAT
+    && selectedPayload[COMPRESSION_STATS_FIELD]
+  ) {
+    return selectedPayload;
+  }
+  return {
+    ...selectedPayload,
+    [COMPRESSION_STATS_FIELD]: buildCompressionStats(originalPayload, candidatePayload, selectedPayload, applied),
+  };
+}
+
+function wrapPayload(payload) {
+  if (!isPlainObject(payload)) {
     return {
       responseFormat: RESPONSE_FORMAT,
-      value: formatted,
+      value: payload,
     };
   }
-  if (formatted.responseFormat === RESPONSE_FORMAT) return formatted;
   return {
     responseFormat: RESPONSE_FORMAT,
-    ...formatted,
+    ...payload,
   };
+}
+
+export function formatJsonPayload(payload) {
+  if (
+    isPlainObject(payload)
+    && payload.responseFormat === RESPONSE_FORMAT
+    && payload[COMPRESSION_STATS_FIELD]
+  ) {
+    return payload;
+  }
+
+  const originalPayload = wrapPayload(payload);
+  const columnarPayload = wrapPayload(toColumnar(payload));
+  const originalTokens = estimateTokens(safeJsonStringify(originalPayload));
+  const candidateTokens = estimateTokens(safeJsonStringify(columnarPayload));
+  const shouldApplyColumnar = candidateTokens < originalTokens;
+  const selectedPayload = shouldApplyColumnar ? columnarPayload : originalPayload;
+  return attachCompressionStats(originalPayload, columnarPayload, selectedPayload, shouldApplyColumnar);
 }
 
 export function jsonContent(payload, { pretty = false } = {}) {

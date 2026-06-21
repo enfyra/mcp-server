@@ -64,7 +64,7 @@ const CAPABILITY_AREAS = [
   {
     area: 'GraphQL',
     tables: ['enfyra_graphql'],
-    workflow: 'Enable per table through enfyra_graphql or update_table graphqlEnabled. GraphQL requires Bearer auth.',
+    workflow: 'Enable per table through enfyra_graphql or update_table graphqlEnabled. GraphQL table data requires Bearer auth; anonymous root or schema probes may return 200 without exposing table data.',
   },
   {
     area: 'Files and storage',
@@ -112,6 +112,73 @@ const FILTER_OPERATORS = [
   '_and',
   '_or',
   '_not',
+];
+
+const DEFAULT_ME_PERMISSION_FIELDS = [
+  'id',
+  'email',
+  'isRootAdmin',
+  'role.id',
+  'role.name',
+  'role.routePermissions.id',
+  'role.routePermissions.isEnabled',
+  'role.routePermissions.methods.id',
+  'role.routePermissions.methods.name',
+  'role.routePermissions.route.id',
+  'role.routePermissions.route.path',
+  'role.routePermissions.allowedUsers.id',
+  'allowedRoutePermissions.id',
+  'allowedRoutePermissions.isEnabled',
+  'allowedRoutePermissions.methods.id',
+  'allowedRoutePermissions.methods.name',
+  'allowedRoutePermissions.route.id',
+  'allowedRoutePermissions.route.path',
+  'allowedRoutePermissions.allowedUsers.id',
+];
+
+const MCP_PERMISSION_REQUIREMENTS = [
+  {
+    area: 'script validation',
+    tools: ['validate_dynamic_script', 'create_handler', 'create_pre_hook', 'create_post_hook', 'patch_script_source', 'update_script_source', 'ensure_script_flow_step', 'ensure_condition_flow_step', 'ensure_websocket_event'],
+    route: '/admin/script/validate',
+    methods: ['POST'],
+  },
+  {
+    area: 'flow and websocket test runner',
+    tools: ['run_admin_test', 'test_flow_step'],
+    route: '/admin/test/run',
+    methods: ['POST'],
+  },
+  {
+    area: 'manual flow trigger',
+    tools: ['trigger_flow'],
+    route: '/admin/flow/trigger/:id',
+    methods: ['POST'],
+  },
+  {
+    area: 'route cache reload',
+    tools: ['reload_routes', 'enable_route', 'disable_route', 'delete_route', 'public_route_methods', 'private_route_methods', 'add_route_methods', 'replace_route_methods', 'remove_route_methods', 'ensure_route_access'],
+    route: '/admin/reload/routes',
+    methods: ['POST'],
+  },
+  {
+    area: 'metadata cache reload',
+    tools: ['reload_metadata'],
+    route: '/admin/reload/metadata',
+    methods: ['POST'],
+  },
+  {
+    area: 'GraphQL cache reload',
+    tools: ['reload_graphql', 'set_table_graphql'],
+    route: '/admin/reload/graphql',
+    methods: ['POST'],
+  },
+  {
+    area: 'full cache reload',
+    tools: ['reload_all'],
+    route: '/admin/reload',
+    methods: ['POST'],
+  },
 ];
 
 const FIELD_PERMISSION_CONDITION_OPERATORS = [
@@ -300,6 +367,94 @@ function firstDataRecord(result) {
 
 function resultRecordId(result) {
   return getId(firstDataRecord(result));
+}
+
+function normalizePermissionRoute(routePath) {
+  const value = String(routePath || '').trim();
+  return value.startsWith('/') ? value : `/${value}`;
+}
+
+function methodNames(permission) {
+  return normalizeMethodNames((permission?.methods || []).map((method) => method?.name || method));
+}
+
+function permissionAllowedUserIds(permission) {
+  return (permission?.allowedUsers || []).map((user) => String(refId(user))).filter(Boolean);
+}
+
+function permissionMatchesUser(permission, userId) {
+  const allowed = permissionAllowedUserIds(permission);
+  if (!allowed.length) return true;
+  return userId ? allowed.includes(String(userId)) : false;
+}
+
+function directPermissionMatchesUser(permission, userId) {
+  const allowed = permissionAllowedUserIds(permission);
+  return userId ? allowed.includes(String(userId)) : false;
+}
+
+function userHasRoutePermission(user, routePath, method) {
+  if (!user) return false;
+  if (user.isRootAdmin) return true;
+
+  const normalizedRoute = normalizePermissionRoute(routePath);
+  const normalizedMethod = String(method || '').toUpperCase();
+  const userId = getId(user);
+  const directPermissions = user.allowedRoutePermissions || [];
+  const rolePermissions = user.role?.routePermissions || [];
+
+  const matchesRouteAndMethod = (permission) => (
+    permission?.isEnabled !== false
+    && permission?.route?.path === normalizedRoute
+    && methodNames(permission).includes(normalizedMethod)
+  );
+
+  return directPermissions.some((permission) => (
+    matchesRouteAndMethod(permission)
+    && directPermissionMatchesUser(permission, userId)
+  )) || rolePermissions.some((permission) => (
+    matchesRouteAndMethod(permission)
+    && permissionMatchesUser(permission, userId)
+  ));
+}
+
+function summarizePermissionProfile(user) {
+  const requirements = MCP_PERMISSION_REQUIREMENTS.map((requirement) => {
+    const methods = requirement.methods.map((method) => ({
+      method,
+      allowed: userHasRoutePermission(user, requirement.route, method),
+    }));
+    return {
+      ...requirement,
+      methods,
+      allowed: methods.every((item) => item.allowed),
+    };
+  });
+
+  return {
+    user: user ? {
+      id: getId(user),
+      email: user.email || null,
+      isRootAdmin: !!user.isRootAdmin,
+      role: user.role ? {
+        id: getId(user.role),
+        name: user.role.name || null,
+      } : null,
+    } : null,
+    permissionModel: {
+      sameAsAdminUi: 'Mirrors Enfyra admin usePermissions(): root admin passes; otherwise direct allowedRoutePermissions are checked before role.routePermissions.',
+      publicMethods: 'Anonymous REST access is controlled by route.publicMethods; this profile only reports authenticated route permissions for the configured token.',
+    },
+    mcpRequirements: requirements,
+    missingRequirements: requirements
+      .filter((item) => !item.allowed)
+      .map((item) => ({
+        area: item.area,
+        route: item.route,
+        methods: item.methods.filter((method) => !method.allowed).map((method) => method.method),
+        tools: item.tools,
+      })),
+  };
 }
 
 function parseJsonArg(value, fallback = undefined) {
@@ -746,7 +901,7 @@ server.tool(
         endpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`,
         schemaEndpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql-schema`,
         enablement: 'A table appears in GraphQL when enfyra_graphql has an enabled row for that table. REST route availableMethods does not enable GraphQL.',
-        auth: 'GraphQL currently requires Authorization: Bearer <accessToken>; REST publicMethods does not make GraphQL anonymous.',
+        auth: 'GraphQL table data requires Authorization: Bearer <accessToken>; REST publicMethods do not make GraphQL table data anonymous. Anonymous root/schema probes may still return 200.',
         management: routeTables.has('enfyra_graphql')
           ? 'Use update_table graphqlEnabled or create/update records on enfyra_graphql, then reload_graphql if needed.'
           : 'Use update_table graphqlEnabled, then reload_graphql if needed.',
@@ -914,7 +1069,7 @@ server.tool(
           : 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
         relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
         relationCascadeFkContract: 'When creating relations through create_table/create_relation/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms.',
-        graphql: 'GraphQL query args also accept filter/sort/page/limit, but GraphQL requires Bearer auth and table enablement via enfyra_graphql.',
+        graphql: 'GraphQL query args also accept filter/sort/page/limit. Table data requires Bearer auth and table enablement via enfyra_graphql; anonymous root/schema probes may still return 200.',
       },
       table: tableName
         ? {
@@ -1052,7 +1207,7 @@ server.tool(
         graphqlResolver: {
           runs: 'Generated GraphQL resolver delegates to dynamic repo/query services.',
           data: ['GraphQL request context', 'Bearer auth user', 'dynamic repositories'],
-          caveat: 'REST publicMethods do not make GraphQL anonymous.',
+          caveat: 'REST publicMethods do not make GraphQL table data anonymous.',
         },
         extensionVueSfc: {
           runs: 'Frontend extension code, not server sandbox.',
@@ -1095,7 +1250,7 @@ server.tool(
     'Auth: publicMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
     'If path might differ from table name, use get_all_routes before asserting a URL.',
     'Same mapping as MCP tool → HTTP: query_table=GET /table?..., create_record=POST /table, update_record=PATCH /table/id, delete_record=DELETE /table/id.',
-    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via enfyra_graphql/update_table graphqlEnabled and send Bearer auth.',
+    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via enfyra_graphql/update_table graphqlEnabled and send Bearer auth for table data queries. Anonymous root/schema probes may still return 200.',
   ].join(' '),
   {},
   async () => {
@@ -1113,7 +1268,7 @@ server.tool(
       },
       auth: {
         publicMethods: 'If the HTTP method is public for that route, no Bearer required; else Bearer JWT and routePermissions apply.',
-        graphql: 'GraphQL currently requires Bearer auth; route publicMethods do not make GraphQL anonymous.',
+        graphql: 'GraphQL table data requires Bearer auth; route publicMethods do not make GraphQL table data anonymous. Anonymous root/schema probes may still return 200.',
         mcp: 'This server uses admin credentials from env for tools (fetchAPI).',
       },
       pathResolution: 'Confirm route path with get_all_routes or metadata — path may not equal table name.',
@@ -2130,6 +2285,7 @@ server.tool(
   [
     'Execute a real REST request against the configured Enfyra API base.',
     'Use this after inspecting a route or changing handlers/hooks/guards. Pass paths like /enfyra_table?limit=1, not external URLs.',
+    'Do not use this for admin app page/menu routes such as /cloud/projects/:id unless inspect_route confirms an API route with that exact path.',
   ].join(' '),
   {
     method: z.string().optional().default('GET').describe('HTTP method name. Must exist in enfyra_method.name for Enfyra route-backed calls.'),
@@ -2469,137 +2625,6 @@ server.tool(
 );
 
 server.tool(
-  'create_column_rule',
-  [
-    'Create a REST body validation rule for a table column.',
-    'Use inspect_table first to confirm validateBody, column type, and existing rules. Rule value is JSON; common shape is {"v": ...}.',
-  ].join(' '),
-  {
-    tableName: z.string().describe('Table name or alias'),
-    columnName: z.string().describe('Column name'),
-    ruleType: z.enum(['min', 'max', 'minLength', 'maxLength', 'pattern', 'format', 'minItems', 'maxItems', 'custom']).describe('Validation rule type'),
-    value: z.string().optional().describe('Rule payload JSON, e.g. {"v":10} or {"v":"email"}'),
-    message: z.string().optional().describe('Custom validation error message'),
-    description: z.string().optional().describe('Admin note'),
-    isEnabled: z.boolean().optional().default(true).describe('Enable the rule immediately'),
-  },
-  async ({ tableName, columnName, ruleType, value, message, description, isEnabled }) => {
-    const { tables } = await getMetadataTables();
-    const table = resolveTableOrThrow(tables, tableName);
-    const column = resolveFieldOrThrow(table, columnName, 'column');
-    const body = {
-      ruleType,
-      value: parseJsonArg(value, null),
-      message,
-      description,
-      isEnabled,
-      column: { id: getId(column) },
-    };
-    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_column_rule', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    return { content: [{ type: 'text', text: `Column rule created for ${table.name}.${column.name}.\n${JSON.stringify(result, null, 2)}` }] };
-  },
-);
-
-server.tool(
-  'create_field_permission',
-  [
-    'Create a field permission for one column or relation.',
-    'Exactly one of columnName or relationName is required. Scope requires roleId or allowedUserIds. Conditions use the field permission condition DSL, not the full query DSL.',
-  ].join(' '),
-  {
-    tableName: z.string().describe('Table name or alias'),
-    columnName: z.string().optional().describe('Column name to protect'),
-    relationName: z.string().optional().describe('Relation propertyName to protect'),
-    action: z.enum(['read', 'create', 'update']).default('read').describe('Action this permission applies to'),
-    effect: z.enum(['allow', 'deny']).default('allow').describe('Allow or deny this field action'),
-    roleId: z.union([z.string(), z.number()]).optional().describe('Role id scope'),
-    allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Specific user ids scope'),
-    condition: z.string().optional().describe('Optional condition JSON using field permission condition DSL'),
-    description: z.string().optional().describe('Admin note'),
-    isEnabled: z.boolean().optional().default(true).describe('Enable immediately'),
-  },
-  async ({ tableName, columnName, relationName, action, effect, roleId, allowedUserIds, condition, description, isEnabled }) => {
-    if (!!columnName === !!relationName) throw new Error('Provide exactly one of columnName or relationName');
-    if (!roleId && (!allowedUserIds || allowedUserIds.length === 0)) {
-      throw new Error('Provide roleId or allowedUserIds');
-    }
-    const { tables } = await getMetadataTables();
-    const table = resolveTableOrThrow(tables, tableName);
-    const body = {
-      isEnabled,
-      description,
-      action,
-      effect,
-      condition: parseJsonArg(condition, null),
-      ...(roleId ? { role: { id: roleId } } : {}),
-      ...(allowedUserIds?.length ? { allowedUsers: allowedUserIds.map((id) => ({ id })) } : {}),
-    };
-    if (columnName) {
-      body.column = { id: getId(resolveFieldOrThrow(table, columnName, 'column')) };
-    } else {
-      body.relation = { id: getId(resolveFieldOrThrow(table, relationName, 'relation')) };
-    }
-    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_field_permission', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    return { content: [{ type: 'text', text: `Field permission created on ${table.name}.${columnName || relationName}.\n${JSON.stringify(result, null, 2)}` }] };
-  },
-);
-
-server.tool(
-  'create_route_permission',
-  [
-    'Create route access permission for a route and REST methods.',
-    'Use this when a non-root role/user should access an authenticated route. publicMethods are for public access; route permissions are for authenticated role/user access.',
-  ].join(' '),
-  {
-    path: z.string().optional().describe('Route path, e.g. /enfyra_user'),
-    routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
-    methods: z.array(z.string()).describe('REST method names this permission allows. Each value must exist in enfyra_method.name.'),
-    roleId: z.union([z.string(), z.number()]).optional().describe('Role id scope'),
-    allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Specific user ids scope'),
-    description: z.string().optional().describe('Admin note'),
-    isEnabled: z.boolean().optional().default(true).describe('Enable immediately'),
-  },
-  async ({ path, routeId, methods, roleId, allowedUserIds, description, isEnabled }) => {
-    if (!path && !routeId) throw new Error('Provide path or routeId');
-    if (!roleId && (!allowedUserIds || allowedUserIds.length === 0)) {
-      throw new Error('Provide roleId or allowedUserIds');
-    }
-    const routes = await fetchAll('/enfyra_route?limit=1000');
-    const route = routes.find((item) => (
-      routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
-    ));
-    if (!route) throw new Error(`Route not found: ${routeId || path}`);
-    const methodMap = await getMethodMap();
-    const body = {
-      isEnabled,
-      description,
-      route: { id: getId(route) },
-      methods: resolveMethodIds(methodMap, methods),
-      ...(roleId ? { role: { id: roleId } } : {}),
-      ...(allowedUserIds?.length ? { allowedUsers: allowedUserIds.map((id) => ({ id })) } : {}),
-    };
-    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_route_permission', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    const routeReload = await reloadRoutesResult();
-    return { content: [{ type: 'text', text: JSON.stringify({
-      action: 'created',
-      kind: 'route_permission',
-      route: route.path,
-      routeReload,
-      result,
-    }, null, 2) }] };
-  },
-);
-
-server.tool(
   'audit_route_access',
   [
     'Audit route access for one or more routes.',
@@ -2772,74 +2797,6 @@ server.tool(
   },
 );
 
-server.tool(
-  'create_guard',
-  [
-    'Create a metadata guard with optional rules for REST request gating.',
-    'Root guards attach to one route by path/routeId or globally with isGlobal. pre_auth runs before JWT and only has IP/route context; post_auth runs after auth and can use user id.',
-    'Rule types: rate_limit_by_ip, rate_limit_by_user, rate_limit_by_route, ip_whitelist, ip_blacklist. Rate limits use {"maxRequests":number,"perSeconds":number}; IP lists use {"ips":["127.0.0.1","10.0.0.0/24"]}.',
-    'Do not use rate_limit_by_user or userIds on pre_auth guards. Create risky global/IP whitelist guards disabled first, then inspect and test before enabling.',
-  ].join(' '),
-  {
-    name: z.string().describe('Guard name'),
-    position: z.enum(['pre_auth', 'post_auth']).default('pre_auth').describe('Execution position for root guard. pre_auth has only IP/route context; post_auth also has authenticated user id.'),
-    routeId: z.union([z.string(), z.number()]).optional().describe('Optional route id'),
-    path: z.string().optional().describe('Optional route path'),
-    methods: z.array(z.string()).optional().describe('Method names this guard applies to. Empty means all configured behavior for route/global.'),
-    combinator: z.enum(['and', 'or']).default('and').describe('How child guards/rules combine'),
-    priority: z.number().optional().default(0).describe('Lower runs first'),
-    isGlobal: z.boolean().optional().default(false).describe('Apply globally instead of one route'),
-    isEnabled: z.boolean().optional().default(false).describe('Enable immediately. Default false to avoid accidental lockout.'),
-    description: z.string().optional().describe('Admin note'),
-    rules: z.string().optional().describe('Optional rules JSON array: [{type, config, priority?, isEnabled?, description?, userIds?}]. Supported types: rate_limit_by_ip, rate_limit_by_user, rate_limit_by_route, ip_whitelist, ip_blacklist.'),
-  },
-  async ({ name, position, routeId, path, methods, combinator, priority, isGlobal, isEnabled, description, rules }) => {
-    let route = null;
-    if (!isGlobal && (routeId || path)) {
-      const routes = await fetchAll('/enfyra_route?limit=1000');
-      route = routes.find((item) => (
-        routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
-      ));
-      if (!route) throw new Error(`Route not found: ${routeId || path}`);
-    }
-    const methodMap = await getMethodMap();
-    const guardBody = {
-      name,
-      position,
-      combinator,
-      priority,
-      isGlobal,
-      isEnabled,
-      description,
-      ...(route ? { route: { id: getId(route) } } : {}),
-      ...(methods?.length ? { methods: resolveMethodIds(methodMap, methods) } : {}),
-    };
-    const guard = await fetchAPI(ENFYRA_API_URL, '/enfyra_guard', {
-      method: 'POST',
-      body: JSON.stringify(guardBody),
-    });
-    const ruleInputs = parseJsonArg(rules, []);
-    const createdRules = [];
-    for (const rule of ruleInputs) {
-      const ruleBody = {
-        type: rule.type,
-        config: rule.config,
-        priority: rule.priority ?? 0,
-        isEnabled: rule.isEnabled ?? true,
-        description: rule.description,
-        guard: { id: resultRecordId(guard) },
-        ...(Array.isArray(rule.userIds) && rule.userIds.length ? { users: rule.userIds.map((id) => ({ id })) } : {}),
-      };
-      createdRules.push(await fetchAPI(ENFYRA_API_URL, '/enfyra_guard_rule', {
-        method: 'POST',
-        body: JSON.stringify(ruleBody),
-      }));
-    }
-    await fetchAPI(ENFYRA_API_URL, '/admin/reload/guards', { method: 'POST' }).catch(() => {});
-    return { content: [{ type: 'text', text: `Guard created. Guard cache reloaded.\n${JSON.stringify({ guard, rules: createdRules }, null, 2)}` }] };
-  },
-);
-
 // Register table tools
 registerTableTools(server, ENFYRA_API_URL);
 registerPlatformOperationTools(server, ENFYRA_API_URL);
@@ -2932,6 +2889,22 @@ server.tool('get_current_user', 'Get current authenticated user info', {}, async
   const result = await fetchAPI(ENFYRA_API_URL, '/me');
   return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
 });
+
+server.tool(
+  'get_permission_profile',
+  [
+    'Inspect the current token permission profile using the same route-permission model as Enfyra admin UI usePermissions().',
+    'Use this before debugging 403s or before relying on admin helper tools with a non-root API token.',
+    'Reports which MCP tool groups need route permissions such as /admin/script/validate, /admin/test/run, /admin/flow/trigger/:id, and reload endpoints.',
+  ].join(' '),
+  {},
+  async () => {
+    const fields = DEFAULT_ME_PERMISSION_FIELDS.join(',');
+    const result = await fetchAPI(ENFYRA_API_URL, `/me?fields=${encodeURIComponent(fields)}`);
+    const user = firstDataRecord(result);
+    return jsonContent(summarizePermissionProfile(user));
+  },
+);
 
 server.tool('get_all_roles', 'Get all role definitions', {}, async () => {
   const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_role?limit=100');
@@ -3051,69 +3024,6 @@ server.tool(
         text: `Package "${name}@${pkgVersion}" installed successfully (type: ${type}).\n${JSON.stringify(result, null, 2)}`,
       }],
     };
-  },
-);
-
-// ============================================================================
-// MENU & EXTENSION TOOLS
-// ============================================================================
-
-server.tool('create_menu', 'Create a menu item in the navigation. Use permission JSON for sensitive menu visibility; successful writes should trigger the app menu reload contract.', {
-  label: z.string().describe('Menu label'),
-  type: z.enum(['Menu', 'Dropdown Menu']).default('Menu').describe('Menu type: "Menu" for leaf items, "Dropdown Menu" for items with children'),
-  icon: z.string().optional().describe('Lucide icon name'),
-  path: z.string().optional().describe('App route path for a clickable menu item, e.g. "/reports".'),
-  externalUrl: z.string().optional().describe('External URL for a menu item when the backend supports external links.'),
-  order: z.number().optional().default(0).describe('Display order'),
-  isEnabled: z.boolean().optional().default(true).describe('Enable menu'),
-  description: z.string().optional().describe('Menu description'),
-  permission: z.string().optional().describe('Optional menu visibility permission JSON object string, e.g. {"or":[{"route":"/reports","methods":["GET"]}]}'),
-}, async (data) => {
-  const body = { ...data };
-  if (body.permission !== undefined) {
-    body.permission = parseJsonArg(body.permission);
-    if (!body.permission || typeof body.permission !== 'object' || Array.isArray(body.permission)) {
-      throw new Error('permission must be a JSON object string.');
-    }
-  }
-  if (body.path && !body.path.startsWith('/')) {
-    body.path = '/' + body.path;
-  }
-  const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_menu', { method: 'POST', body: JSON.stringify(body) });
-  const created = firstDataRecord(result);
-  return { content: [{ type: 'text', text: `Menu created (ID: ${getId(created)}):\n${JSON.stringify(result, null, 2)}` }] };
-});
-
-server.tool(
-  'create_extension',
-  [
-    'Create an extension (Vue SFC page, widget, or global shell extension). Code must be Vue SFC: <template>...</template> + <script setup>...</script> — NO imports, use globals (ref, useToast, useApi, UButton, etc).',
-    'For type=page: create menu first (create_menu), get id, then pass menuId. For type=widget: no menu, embed via <Widget>. For type=global: no menu, the Enfyra admin UI mounts it invisibly at shell level for registries/realtime. Server auto-compiles and should emit realtime reload to open Enfyra admin tabs. See extension rules in MCP instructions.',
-  ].join(' '),
-  {
-    name: z.string().describe('Extension name (unique)'),
-    type: z.enum(['page', 'widget', 'global']).describe('Extension type: page = full page linked to menu; widget = embed via Widget component; global = shell-level lifecycle component'),
-    code: z.string().describe('Vue SFC string — <template> + <script setup>, NO import statements'),
-    menuId: z.string().optional().describe('Required for type=page — enfyra_menu id from create_menu. Omit for widget/global'),
-    isEnabled: z.boolean().optional().default(true).describe('Enable extension'),
-    description: z.string().optional().describe('Extension description'),
-    version: z.string().optional().default('1.0.0').describe('Extension version'),
-  },
-  async (data) => {
-    const body = { ...data };
-    if (body.type === 'page' && !body.menuId) {
-      throw new Error('menuId is required for type=page. Create or find a enfyra_menu record first.');
-    }
-    if (body.type !== 'page' && body.menuId) {
-      throw new Error('menuId is only valid for type=page. Omit menuId for widget/global extensions.');
-    }
-    if (body.menuId) {
-      body.menu = { id: body.menuId };
-      delete body.menuId;
-    }
-    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_extension', { method: 'POST', body: JSON.stringify(body) });
-    const created = firstDataRecord(result);
-    return { content: [{ type: 'text', text: `Extension created (ID: ${getId(created)}). Open Enfyra admin tabs should update through the realtime reload contract.\n${JSON.stringify(result, null, 2)}` }] };
   },
 );
 
