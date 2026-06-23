@@ -326,6 +326,48 @@ test('fetchAPI retries once after stale exchanged token is rejected', async () =
   }
 });
 
+test('fetchAPI refreshes short-lived exchanged tokens before expiry', async () => {
+  const originalFetch = global.fetch;
+  const originalNow = Date.now;
+  const calls = [];
+  let now = Date.parse('2026-06-22T12:00:00.000Z');
+  let exchangeCount = 0;
+
+  Date.now = () => now;
+  global.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), headers: init.headers || [] });
+    if (String(url).endsWith('/auth/token/exchange')) {
+      exchangeCount += 1;
+      return jsonResponse({ accessToken: `jwt-${exchangeCount}`, expTime: now + 60_000 });
+    }
+    if (String(url).endsWith('/me')) {
+      const authHeader = Array.isArray(init.headers)
+        ? init.headers.find(([key]) => key === 'Authorization')?.[1]
+        : init.headers?.Authorization;
+      return jsonResponse({ authHeader });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'efy_pat_test');
+
+    assert.deepEqual(await fetchAPI('https://example.test/api', '/me'), { authHeader: 'Bearer jwt-1' });
+    now = Date.parse('2026-06-22T12:00:39.000Z');
+    assert.deepEqual(await fetchAPI('https://example.test/api', '/me'), { authHeader: 'Bearer jwt-1' });
+    now = Date.parse('2026-06-22T12:00:41.000Z');
+    assert.deepEqual(await fetchAPI('https://example.test/api', '/me'), { authHeader: 'Bearer jwt-2' });
+
+    assert.equal(exchangeCount, 2);
+    assert.equal(calls.filter((call) => call.url.endsWith('/auth/token/exchange')).length, 2);
+  } finally {
+    resetTokens();
+    Date.now = originalNow;
+    global.fetch = originalFetch;
+  }
+});
+
 test('get_all_tables applies search and explicit all contract', async () => {
   const originalFetch = global.fetch;
   const server = createToolHarness();
@@ -615,6 +657,7 @@ test('mcp server exposes route platform operation tools', () => {
   const tableTools = readFileSync(new URL('../src/lib/table-tools.js', import.meta.url), 'utf8');
   const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.js', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
 
   assert.match(entry, /registerPlatformOperationTools\(server, ENFYRA_API_URL\)/);
   assert.doesNotMatch(tableTools, /server\.tool\(\s*['"]add_column['"]/);
@@ -685,6 +728,31 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(platformTools, /\/admin\/reload\/flows/);
   assert.doesNotMatch(platformTools, /\/admin\/reload\/websockets/);
   assert.match(platformTools, /validateScriptSourceIfPresent/);
+  assert.match(platformTools, /get_extension_theme_contract/);
+  assert.match(platformTools, /border-\[var\(--border-default\)\]/);
+  assert.match(platformTools, /Do not inject global CSS/);
+  assert.match(platformTools, /theme guards/);
+  assert.match(platformTools, /runtime-configurable/);
+  assert.match(platformTools, /app color picker/);
+  assert.match(platformTools, /For Nuxt UI components, choose color="primary" by semantic intent/);
+  assert.match(platformTools, /eapp-identity-surface/);
+  assert.match(platformTools, /larger entity\/feature blocks/);
+  assert.match(platformTools, /Nuxt UI secondary is still a valid semantic color/);
+  assert.match(platformTools, /eapp-accent-\*/);
+  assert.match(platformTools, /bg-primary\/10/);
+  assert.match(platformTools, /PageHeader gradient must be "none"/);
+  assert.match(platformTools, /Do not pass ui\.content: "surface-card"/);
+  assert.match(platformTools, /md:grid-cols-2 xl:grid-cols-3/);
+  assert.match(examples, /surface-card p-4/);
+  assert.match(examples, /eapp-identity-surface/);
+  assert.match(examples, /eapp-identity-soft/);
+  assert.match(examples, /eapp-identity-solid/);
+  assert.match(examples, /gradient: 'none'/);
+  assert.match(examples, /color: 'neutral'/);
+  assert.match(examples, /Do not use Nuxt UI neutral semantic classes/);
+  assert.doesNotMatch(examples, /gradient: 'cyan'/);
+  assert.doesNotMatch(examples, /<p class=\\["']text-sm text-muted/);
+  assert.doesNotMatch(examples, /grid gap-4 md:grid-cols-3/);
   assert.match(instructions, /Prefer the most specific business operation tool over raw metadata CRUD/);
   assert.match(instructions, /validate_dynamic_script/);
   assert.match(instructions, /get_permission_profile/);
@@ -699,6 +767,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(instructions, /enfyra_route\.isEnabled/);
   assert.match(instructions, /GraphQL table data requires Bearer auth/);
   assert.match(instructions, /ensure_page_extension/);
+  assert.match(instructions, /get_extension_theme_contract/);
 });
 
 test('test_flow_step uses unified admin test runner', () => {

@@ -1531,7 +1531,7 @@ ensure_page_extension({
   name: "ReportsPage",
   description: "Reports dashboard",
   menuId: "<created-menu-id>",
-  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-3\\"><UCard><p class=\\"text-sm text-muted\\">Total</p><p class=\\"mt-2 text-2xl font-semibold\\">0</p></UCard></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); const { register: registerHeaderActions } = useHeaderActionRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); registerHeaderActions([{ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', onClick: () => {}, order: 0 }])</script>",
+  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-2 xl:grid-cols-3\\"><article class=\\"eapp-identity-surface rounded-[var(--radius-panel)] border p-4\\"><div class=\\"flex items-start justify-between gap-3\\"><div><p class=\\"text-sm font-medium text-[var(--text-tertiary)]\\">Total</p><p class=\\"mt-2 text-2xl font-semibold text-[var(--text-primary)]\\">0</p></div><span class=\\"eapp-identity-soft rounded-[var(--radius-pill)] px-2 py-0.5 text-xs font-semibold\\">Current</span></div></article></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); const { register: registerHeaderActions } = useHeaderActionRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'none', variant: 'minimal' }); registerHeaderActions([{ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', color: 'neutral', variant: 'outline', onClick: () => {}, order: 80 }])</script>",
   isEnabled: true
 })`,
         notes: [
@@ -1539,12 +1539,21 @@ ensure_page_extension({
           'Use enfyra_menu.label, not title.',
           'Sensitive admin menus should include a permission condition at creation time.',
           'For page extensions, create the menu first with ensure_menu and pass its id to ensure_page_extension.',
+          'Call get_extension_theme_contract before writing or reviewing page/widget/global extension UI.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',
           'Use variant: "minimal" for operational pages unless a larger header is intentionally needed.',
           'Do not put ordinary KPI cards in PageHeader.stats; render metrics in the extension body.',
           'Put page-level actions in useHeaderActionRegistry or useSubHeaderActionRegistry, destructure register first, then call it with one action or an array.',
           'Page extensions should be full-bleed by default and responsive from the first version.',
           'The extension root is already inside Enfyra admin page main; do not add root-level page padding.',
+          'Use existing eApp theme variables for panels, rows, badges, borders, controls, radius, and text. Pair border/divide utilities with border-[var(--border-default)] or divide-[var(--border-default)] so light and dark themes stay consistent.',
+          'Treat primary color as runtime-configurable by the app color picker. For Nuxt UI components, choose color="primary" by semantic intent; for custom extension blocks, choose eapp-identity-surface for larger tinted blocks, eapp-identity-soft for compact chips, eapp-identity-solid for fills, or eapp-identity-text for icons by intent instead of choosing Tailwind color utilities.',
+          'Use PageHeader gradient: "none" for generated operational pages unless the user explicitly asks for a decorative page accent; do not hardcode cyan/violet/purple/blue/green gradients.',
+          'For general card grids inside the shell, use md:grid-cols-2 xl:grid-cols-3 instead of lg:grid-cols-3 because the desktop sidebar leaves tablet-width content at 1024px.',
+          'Do not use Nuxt UI neutral semantic classes such as bg-default, text-muted, text-dimmed, border-default, or divide-default inside extension code; use eApp tokens/classes.',
+          'Do not pass ui.content: "surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller content classes should only append z-index or width.',
+          'Do not inject global CSS, create theme guards, redefine the app palette, or solve one extension by overriding the whole app shell.',
+          'Keep list selection local and fetch detail rows only; do not refetch the whole list after a row click unless the list data changed.',
           'Page extension paths are admin app UI routes. Do not verify them with test_rest_endpoint against ENFYRA_API_URL unless inspect_route shows an API route with the same path.',
           'After saving, open Enfyra admin tabs should update through the server/Enfyra admin UI realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',
         ],
@@ -1554,16 +1563,19 @@ ensure_page_extension({
         code: `// Create reusable/bulky sections as widget extension records first.
 const reportStatusWidgetCode = \`
 <template>
-  <section class="rounded-xl border border-default bg-default p-4">
+  <section class="surface-card p-4">
     <div class="flex items-start justify-between gap-3">
       <div>
-        <p class="text-sm text-muted">Total reports</p>
-        <p class="mt-2 text-2xl font-semibold">{{ total }}</p>
-        <p class="mt-1 text-xs text-muted">{{ latestLabel }}</p>
+        <p class="text-sm font-medium text-[var(--text-tertiary)]">Total reports</p>
+        <p class="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{{ total }}</p>
+        <p class="mt-1 text-xs text-[var(--text-tertiary)]">{{ latestLabel }}</p>
       </div>
       <UButton type="button" color="neutral" variant="outline" @click.stop.prevent="emit('refresh')">Refresh</UButton>
     </div>
-    <UButton v-if="hasLatest" type="button" class="mt-3" color="primary" variant="soft" @click.stop.prevent="openLatest">Open latest</UButton>
+    <div class="mt-3 h-1.5 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--surface-muted)]">
+      <div class="eapp-identity-solid h-full" :style="{ width: progressWidth }"></div>
+    </div>
+    <UButton v-if="hasLatest" type="button" class="mt-3" color="primary" variant="solid" @click.stop.prevent="openLatest">Open latest</UButton>
   </section>
 </template>
 
@@ -1576,6 +1588,7 @@ const props = defineProps({
 const emit = defineEmits(['refresh'])
 const hasLatest = computed(() => props.rows.length > 0)
 const latestLabel = computed(() => hasLatest.value ? 'Latest: ' + (props.rows[0]?.title || props.rows[0]?.id || 'Untitled') : 'No reports yet')
+const progressWidth = computed(() => hasLatest.value ? '100%' : '0%')
 function openLatest() {
   if (typeof props.openDetails === 'function' && props.rows[0]) props.openDetails(props.rows[0])
 }
@@ -1593,7 +1606,7 @@ ensure_widget_extension({
 ensure_page_extension({
   name: "ReportsPage",
   menuId: "<reports-menu-id>",
-  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><Widget :id=\\"<report-status-widget-id>\\" :total=\\"totalReports\\" :rows=\\"reportRows\\" :open-details=\\"openReportDetails\\" @refresh=\\"refresh\\" /><Widget :id=\\"<report-table-widget-id>\\" :rows=\\"reportRows\\" @refresh=\\"refresh\\" /></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'cyan', variant: 'minimal' }); const totalReports = ref(0); const reportRows = ref([]); function refresh() {} function openReportDetails(row) { navigateTo('/data/report?filter=' + encodeURIComponent(JSON.stringify({ id: { _eq: row.id } }))) }</script>",
+  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><Widget :id=\\"<report-status-widget-id>\\" :total=\\"totalReports\\" :rows=\\"reportRows\\" :open-details=\\"openReportDetails\\" @refresh=\\"refresh\\" /><Widget :id=\\"<report-table-widget-id>\\" :rows=\\"reportRows\\" @refresh=\\"refresh\\" /></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'none', variant: 'minimal' }); const totalReports = ref(0); const reportRows = ref([]); function refresh() {} function openReportDetails(row) { navigateTo('/data/report?filter=' + encodeURIComponent(JSON.stringify({ id: { _eq: row.id } }))) }</script>",
   isEnabled: true
 })`,
         notes: [
@@ -1734,7 +1747,7 @@ registerPageHeader({
   title: 'Report detail',
   description: 'Review status, schedule, and delivery history.',
   leadingIcon: 'lucide:file-text',
-  gradient: 'cyan',
+  gradient: 'none',
   variant: 'minimal'
 })
 
@@ -1762,8 +1775,8 @@ registerHeaderActions([
     id: 'refresh-report',
     label: 'Refresh',
     icon: 'lucide:refresh-cw',
-    color: 'primary',
-    variant: 'solid',
+    color: 'neutral',
+    variant: 'outline',
     order: 2,
     onClick: refresh
   }
@@ -1771,9 +1784,10 @@ registerHeaderActions([
 </script>`,
         notes: [
           'Use PageHeader for the title strip; do not render a duplicate header inside extension body.',
+          'Use gradient: "none" for generated operational pages; hardcoded named gradients are decorative and should be explicit user intent.',
           'Back/navigation actions should be neutral ghost so they read as navigation, not a primary operation.',
           'Visible secondary operations should be neutral outline; soft is only for low-emphasis chrome actions.',
-          'The main page action should be primary solid.',
+          'The main page mutation action should be primary solid; refresh is neutral outline unless refresh is the actual primary workflow.',
           'Do not choose soft only because it looks acceptable in dark mode; light mode must remain clear too.',
         ],
       },

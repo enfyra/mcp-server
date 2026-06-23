@@ -286,6 +286,63 @@ function jsonText(payload) {
   return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 }
 
+function getExtensionThemeContract() {
+  return {
+    action: 'extension_theme_contract',
+    useBefore: [
+      'Call this before writing or reviewing Enfyra admin page, widget, or global extension UI.',
+      'Then call validate_extension_code or an ensure_*_extension tool before saving.',
+    ],
+    layout: [
+      'The extension is already mounted inside the Enfyra app shell. Do not add a duplicate page header, centered page wrapper, or root-level page padding.',
+      'Page extensions should be full-bleed, responsive, and split large operations into focused pages or UTabs.',
+      'Use usePageHeaderRegistry for the shell title and useHeaderActionRegistry/useSubHeaderActionRegistry for page actions.',
+      'For detail/form workflows that should stay left-aligned with empty space on the right, wrap the body in eapp-page-constrained; use eapp-page-constrained-wide only when the workflow genuinely needs more width.',
+      'Card/list grids inside the default shell must account for the 280px desktop sidebar. Do not switch general card grids to three columns at lg; use md:grid-cols-2 xl:grid-cols-3 unless a local container proves three columns have enough width.',
+    ],
+    theme: [
+      'Use existing eApp theme variables/classes, not hardcoded light or dark colors. The app theme source of truth is CSS variables, including --brand-*, --surface-*, --card-*, --control-*, --action-*, --badge-*, --radius-*, --border-*, and --text-*.',
+      'Primary color is runtime-configurable through the app color picker. For Nuxt UI components, choose color="primary" by semantic intent and let the app map it through the primary contract; do not choose a concrete palette. For custom extension blocks, choose semantic intent classes, not colors: use eapp-identity-surface for larger entity/feature blocks, tiles, or cards that need a tinted/dark surface matching the shell; add eapp-identity-surface-hover when that block is clickable. Use eapp-identity-soft for compact selected entity chips, pills, small icon tiles, and identity callouts; add eapp-identity-soft-hover when compact surfaces are clickable; use eapp-identity-solid only for primary identity fills; use eapp-identity-text for identity icons or inline text. The eapp-accent-* aliases are still available for the same runtime-primary intent, but eapp-identity-* is preferred when the UI element represents an entity or feature identity.',
+      'Nuxt UI secondary is still a valid semantic color when the product intentionally wants a secondary action or state. Do not use color="secondary", from-secondary-*, bg-secondary-*, text-secondary-*, or cyan/purple/green palette utilities merely to approximate an entity accent; use eapp-identity-* and let the app decide the color.',
+      'Do not make custom extension blocks with Tailwind palette utilities or raw primary utilities such as text-primary, bg-primary/10, border-primary, ring-primary/20, from-cyan-*, text-violet-*, bg-green-*, or dark:bg-zinc-950. The app owns how eapp-identity-* and eapp-accent-* map to the active color picker value.',
+      'Use UButton color="primary" only for the single main action for the current scope. Refresh, back, navigation, filters, and secondary actions should be neutral variants unless they are the main mutation.',
+      'PageHeader gradient must be "none" for generated operational extensions unless the user explicitly asks for a decorative page accent. Do not hardcode cyan, violet, purple, blue, or green PageHeader gradients to force color variety.',
+      'Do not inject global CSS, create theme guards, redefine the app palette, or solve one extension by overriding the whole app shell.',
+      'For panels/cards, prefer surface-card, surface-card-hover, surface-muted, or explicit token classes such as bg-[var(--card-bg)] border-[var(--card-border)] shadow-[var(--card-shadow)]. Use text-[var(--text-primary|secondary|tertiary)] for copy.',
+      'Never use Nuxt UI neutral semantic classes such as bg-default, bg-muted, border-default, divide-default, text-muted, text-dimmed, or hardcoded dark palettes such as dark:bg-zinc-950, bg-slate-*, text-gray-*, border-black, or black.',
+      'Never use bare border/divide-y for panels or rows: pair them with border-[var(--border-default)] or divide-[var(--border-default)].',
+      'Use radius tokens or mapped rounded utilities consistently: --radius-card for cards, --radius-panel for nested panels, --radius-control for buttons/inputs, --radius-subcontrol for compact inner controls, and --radius-pill for pills.',
+      'Status colors must remain readable in both themes. Use UBadge or badge tokens for non-primary statuses such as --badge-success-soft-*, --badge-warning-soft-*, --badge-danger-soft-*, --badge-info-soft-*, and --badge-neutral-soft-* instead of neon translucent colors.',
+      'Keep dark and light contrast comparable. Do not make dark mode more neon or lower-contrast than light mode; prefer muted soft backgrounds with clear text and visible borders.',
+    ],
+    components: [
+      'Use Nuxt UI/eApp components for normal controls: UButton, UInput, UTextarea, USelectMenu/USelect, USwitch, UCheckbox, UTabs, UBadge, UModal, and CommonDrawer when available.',
+      'Buttons should have stable geometry: hover may change color, border, or shadow but must not move the button or resize its content. Disabled buttons keep disabled cursor/visual state.',
+      'Inputs and textareas should not add hover movement or decorative hover states; focus, invalid, disabled, and loading states must be explicit.',
+      'Dynamic extensions resolve UModal to the app CommonModal. Do not pass ui.content: "surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller ui.content should only append z-index, width, or max-width classes.',
+      'Use CommonDrawer for side-panel editing. Open drawers immediately on user action and render loading/error/content inside the drawer instead of waiting for fetch before opening.',
+      'Use UBadge or token-backed badge spans for status. Keep badges legible in both themes with tokenized background, text, and border.',
+    ],
+    loadingAndLists: [
+      'For first load of card/list pages, render calm skeleton cards with a slow pulse. For subsequent pagination/filter refreshes, keep the card shells mounted and skeletonize card content until the new list is ready.',
+      'Keep pagination inside the same transition/loading branch as the list. Do not show pagination before the list content has left loading.',
+      'Use bounded pagination for operational lists. Do not replace pagination with arbitrary fixed caps such as 30 or 50.',
+      'Empty states should use an app-matched card surface with compact icon tile, title, and description; do not use huge blank white panels or naked UEmpty chrome on page surfaces.',
+    ],
+    interaction: [
+      'Every mutating button needs pending/disabled state, success/error feedback, and must close or update its modal when the operation completes.',
+      'Do not refetch broad lists after selecting one row. Keep local selection state and fetch only the detail or mutation result needed.',
+      'Customer-facing toasts must describe the operation. Do not surface raw job ids, flow ids, or worker ids.',
+    ],
+    security: [
+      'Decide route permission, owner scope, and field exposure before writing UI or backend logic.',
+      'UI checks are only guidance; handlers/hooks must independently enforce owner/root-admin authorization.',
+      'Use the most specific business route or MCP tool. Do not write directly to raw tables when a domain route exists.',
+    ],
+    compactExample: '<template><section class="min-h-full w-full space-y-4"><div class="surface-card"><div class="border-b border-[var(--border-default)] px-4 py-3"><h2 class="text-base font-semibold text-[var(--text-primary)]">Title</h2><p class="text-sm text-[var(--text-tertiary)]">Short operational context.</p></div><div class="p-4"><article class="eapp-identity-surface rounded-[var(--radius-panel)] border p-4"><div class="flex items-center gap-3"><span class="eapp-identity-soft rounded-[var(--radius-control)] p-2"><span class="eapp-identity-text">◆</span></span><span class="text-sm font-medium text-[var(--text-primary)]">Identity block</span></div></article></div><div class="divide-y divide-[var(--border-default)]"><button class="flex w-full cursor-pointer items-center justify-between px-4 py-3 text-left transition-colors hover:bg-[var(--surface-muted)] disabled:cursor-not-allowed disabled:opacity-60"><span class="text-sm font-medium text-[var(--text-primary)]">Row</span><span class="eapp-identity-soft rounded-[var(--radius-pill)] px-2 py-0.5 text-xs font-semibold">Open</span></button></div><div class="h-1.5 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--surface-muted)]"><div class="eapp-identity-solid h-full w-1/2"></div></div></div></section></template>',
+  };
+}
+
 function parseJsonObjectArg(name, value, fallback = {}) {
   if (value === undefined || value === null || value === '') return fallback;
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -979,6 +1036,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     [
       'Validate Enfyra admin extension code before saving it to enfyra_extension.',
       'Use this for Vue SFC page/widget/global extension code. It calls /enfyra_extension/preview and does not save anything.',
+      'Call get_extension_theme_contract first when generating or reviewing UI.',
     ].join(' '),
     {
       code: z.string().describe('Vue SFC or compiled extension bundle code.'),
@@ -988,6 +1046,13 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       action: 'extension_code_validated',
       validation: await validateExtensionCode(ENFYRA_API_URL, code, name),
     }),
+  );
+
+  server.tool(
+    'get_extension_theme_contract',
+    'Return the concise Enfyra admin extension UI/theme/security contract. Call before writing or reviewing extension UI.',
+    {},
+    async () => jsonText(getExtensionThemeContract()),
   );
 
   server.tool(
@@ -1824,7 +1889,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'ensure_page_extension',
-    'Business operation: create or update one page extension attached to an existing menu. Validates extension code before save.',
+    'Business operation: create or update one page extension attached to an existing menu. Validates extension code before save. Call get_extension_theme_contract first for UI work.',
     {
       name: z.string().describe('Extension unique name.'),
       code: z.string().describe('Vue SFC extension code.'),
@@ -1841,7 +1906,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'ensure_global_extension',
-    'Business operation: create or update one global shell extension. Validates extension code before save and rejects menu coupling.',
+    'Business operation: create or update one global shell extension. Validates extension code before save and rejects menu coupling. Call get_extension_theme_contract first for UI work.',
     {
       name: z.string().describe('Extension unique name.'),
       code: z.string().describe('Vue SFC extension code.'),
@@ -1857,7 +1922,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'ensure_widget_extension',
-    'Business operation: create or update one widget extension. Validates extension code before save and rejects menu coupling.',
+    'Business operation: create or update one widget extension. Validates extension code before save and rejects menu coupling. Call get_extension_theme_contract first for UI work.',
     {
       name: z.string().describe('Extension unique name.'),
       code: z.string().describe('Vue SFC extension code.'),

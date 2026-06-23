@@ -8,13 +8,25 @@ let accessToken = null;
 let refreshToken = null;
 let tokenExpiry = null; // expTime từ server (milliseconds)
 let isRefreshing = false;
+let exchangePromise = null;
 
 // Config
 let API_URL = 'http://localhost:3000/api';
 let API_TOKEN = '';
 
-// Refresh buffer: refresh token 1 minute before expiry
-const TOKEN_REFRESH_BUFFER = 60000;
+const TOKEN_REFRESH_BUFFER = 20000;
+
+function normalizeExpiry(expTime) {
+  if (expTime == null) return Infinity;
+  if (typeof expTime === 'number') return expTime < 1_000_000_000_000 ? expTime * 1000 : expTime;
+  if (typeof expTime === 'string' && expTime.trim()) {
+    const numeric = Number(expTime);
+    if (Number.isFinite(numeric)) return numeric < 1_000_000_000_000 ? numeric * 1000 : numeric;
+    const parsed = Date.parse(expTime);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return Infinity;
+}
 
 /**
  * Initialize auth module with config
@@ -25,7 +37,7 @@ export function initAuth(apiUrl, apiToken = '') {
 }
 
 /**
- * Check if token needs refresh (expires within 1 minute)
+ * Check if token needs refresh (expires within the refresh buffer)
  */
 export function needsRefresh() {
   if (tokenExpiry === Infinity) return false;
@@ -60,27 +72,37 @@ export async function exchangeApiToken(url, apiToken) {
     throw new Error('API token required');
   }
 
-  console.error('[Auth] Exchanging API token...');
-  const response = await fetch(`${apiUrl}/auth/token/exchange`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ apiToken: token }),
-  });
+  if (exchangePromise) return exchangePromise;
 
-  if (!response.ok) {
-    throw new Error(`API token exchange failed: ${await response.text()}`);
+  exchangePromise = (async () => {
+    console.error('[Auth] Exchanging API token...');
+    const response = await fetch(`${apiUrl}/auth/token/exchange`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiToken: token }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`API token exchange failed: ${await response.text()}`);
+    }
+
+    const data = await response.json();
+    accessToken = data.accessToken || data.access_token;
+    refreshToken = null;
+    tokenExpiry = normalizeExpiry(data.expTime ?? data.exp_time ?? data.expiresAt ?? data.expires_at);
+
+    const expiryLabel = tokenExpiry === Infinity
+      ? 'no expiration'
+      : new Date(tokenExpiry).toISOString();
+    console.error(`[Auth] API token exchanged, access token expires at ${expiryLabel}`);
+    return accessToken;
+  })();
+
+  try {
+    return await exchangePromise;
+  } finally {
+    exchangePromise = null;
   }
-
-  const data = await response.json();
-  accessToken = data.accessToken || data.access_token;
-  refreshToken = null;
-  tokenExpiry = data.expTime == null ? Infinity : data.expTime;
-
-  const expiryLabel = tokenExpiry === Infinity
-    ? 'no expiration'
-    : new Date(tokenExpiry).toISOString();
-  console.error(`[Auth] API token exchanged, access token expires at ${expiryLabel}`);
-  return accessToken;
 }
 
 /**
@@ -119,7 +141,7 @@ export async function refreshAccessToken(url) {
     const data = await response.json();
     accessToken = data.accessToken || data.access_token;
     refreshToken = data.refreshToken || data.refresh_token;
-    tokenExpiry = data.expTime;
+    tokenExpiry = normalizeExpiry(data.expTime ?? data.exp_time ?? data.expiresAt ?? data.expires_at);
 
     console.error(`[Auth] Token refreshed, expires at ${new Date(tokenExpiry).toISOString()}`);
     return accessToken;
