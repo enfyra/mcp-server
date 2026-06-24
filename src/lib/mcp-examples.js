@@ -586,9 +586,28 @@ update_record({
         notes: [
           'Use enfyra_user as the user table.',
           'Use table ids for targetTable when already known; MCP can also resolve exact table names such as "enfyra_user" before schema mutation.',
-          'Do not add inverse relations on enfyra_user unless the user explicitly asks.',
+          'Do not add inverse relations on enfyra_user unless a concrete user-to-record response, UI, or deep query will use it.',
+          'Do not add inverse relations just because a parent table exists. If messages are read by querying chat_message with conversation/member filters, conversation.messages and user.messages are not needed.',
           'createdAt, updatedAt, and custom date/datetime/timestamp fields already get auto-generated single-field indexes; add only compound indexes needed by hot filters.',
           'Do not provide physical FK column names; Enfyra derives them.',
+        ],
+      },
+      {
+        name: 'Add an inverse only for a planned parent child-list query',
+        code: `create_relation({
+  sourceTableId: "chat_message",
+  targetTableId: "chat_conversation",
+  propertyName: "conversation",
+  inversePropertyName: "messages",
+  type: "many-to-one",
+  isNullable: false,
+  onDelete: "CASCADE"
+})`,
+        notes: [
+          'Use inversePropertyName only when the parent table will actually expose, deep-load, count, or sort by that child collection.',
+          'For example, conversation.messages is justified if a conversation detail response loads the latest message page with deep.messages limit/sort, or if a list sorts by _max(messages.createdAt).',
+          'If the app only filters chat_message by conversation.id, omit inversePropertyName and keep the schema one-directional.',
+          'Before creating an inverse, inspect existing relations and state why the reverse traversal is needed.',
         ],
       },
       {
@@ -1531,7 +1550,7 @@ ensure_page_extension({
   name: "ReportsPage",
   description: "Reports dashboard",
   menuId: "<created-menu-id>",
-  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-2 xl:grid-cols-3\\"><article class=\\"eapp-identity-surface rounded-[var(--radius-panel)] border p-4\\"><div class=\\"flex items-start justify-between gap-3\\"><div><p class=\\"text-sm font-medium text-[var(--text-tertiary)]\\">Total</p><p class=\\"mt-2 text-2xl font-semibold text-[var(--text-primary)]\\">0</p></div><span class=\\"eapp-identity-soft rounded-[var(--radius-pill)] px-2 py-0.5 text-xs font-semibold\\">Current</span></div></article></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); const { register: registerHeaderActions } = useHeaderActionRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'none', variant: 'minimal' }); registerHeaderActions([{ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', color: 'neutral', variant: 'outline', onClick: () => {}, order: 80 }])</script>",
+  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-2 xl:grid-cols-3\\"><article class=\\"eapp-surface-card p-4\\"><div class=\\"flex items-start justify-between gap-3\\"><div><p class=\\"text-sm font-medium eapp-text-tertiary\\">Total</p><p class=\\"mt-2 text-2xl font-semibold eapp-text-primary\\">0</p></div><span class=\\"eapp-primary-soft eapp-radius-control p-2\\"><span class=\\"eapp-primary-text\\">◆</span></span></div><div class=\\"mt-3 h-1.5 overflow-hidden eapp-radius-pill eapp-surface-muted\\"><div class=\\"eapp-primary-solid h-full w-1/2\\"></div></div></article><article class=\\"eapp-primary-surface eapp-radius-panel border p-4\\"><p class=\\"text-sm font-semibold eapp-text-primary\\">Selected report</p><p class=\\"mt-1 text-sm eapp-text-tertiary\\">Only selected/current identity blocks use identity surface.</p></article></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); const { register: registerHeaderActions } = useHeaderActionRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'none', variant: 'minimal' }); registerHeaderActions([{ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', color: 'neutral', variant: 'outline', onClick: () => {}, order: 80 }])</script>",
   isEnabled: true
 })`,
         notes: [
@@ -1546,12 +1565,15 @@ ensure_page_extension({
           'Put page-level actions in useHeaderActionRegistry or useSubHeaderActionRegistry, destructure register first, then call it with one action or an array.',
           'Page extensions should be full-bleed by default and responsive from the first version.',
           'The extension root is already inside Enfyra admin page main; do not add root-level page padding.',
-          'Use existing eApp theme variables for panels, rows, badges, borders, controls, radius, and text. Pair border/divide utilities with border-[var(--border-default)] or divide-[var(--border-default)] so light and dark themes stay consistent.',
-          'Treat primary color as runtime-configurable by the app color picker. For Nuxt UI components, choose color="primary" by semantic intent; for custom extension blocks, choose eapp-identity-surface for larger tinted blocks, eapp-identity-soft for compact chips, eapp-identity-solid for fills, or eapp-identity-text for icons by intent instead of choosing Tailwind color utilities.',
+          'Use eApp theme class tokens for panels, rows, badges, borders, controls, radius, and text. Generated extension templates should prefer eapp-surface-*, eapp-text-*, eapp-radius-*, eapp-divide-y, and eapp-primary-* over raw CSS variable utilities.',
+          'Treat primary color as runtime-configurable by the app color picker. For Nuxt UI components, choose color="primary" by semantic intent. For custom extension UI, decide whether each element is neutral surface, runtime-primary identity, or status: regular panels/KPI cards/list rows use eapp-surface-card/eapp-surface-muted/eapp-surface-hover/eapp-divide-y and eapp-text-* classes, while selected/current identity blocks, primary tiles, progress fills, primary icons, and primary CTA fills use eapp-primary-surface, eapp-primary-soft, eapp-primary-subtle, eapp-primary-solid, or eapp-primary-text so the color picker controls them.',
+          'Decision cases: normal decorative accents, feature icons, non-state tiles, active tabs, progress fills, selected segments, and primary actions use runtime primary/identity classes; true semantic states use their matching status colors such as error, warning, success, or info; large ordinary surfaces stay neutral and carry only small badges/icons for status; selected/current entity blocks may use eapp-primary-surface.',
+          'Pattern examples: KPI/metric cards should be eapp-surface-card with a small eapp-primary-soft icon tile; selected/current entity cards may use eapp-primary-surface; progress bars use eapp-surface-muted tracks plus eapp-primary-solid fills; list rows use eapp-surface-card/eapp-divide-y/eapp-surface-hover and only small chips inside; primary scope actions use UButton color="primary" variant="solid"; secondary actions use neutral variants.',
+          'Status colors belong only in UBadge/UAlert semantic colors or eapp-status-*-soft/text/border classes for badges, small icons, or short status text. Do not read --badge-* variables directly in extension templates. Do not color large panels, alert-like success blocks, KPI cards, list containers, or attention/reconciliation blocks green/yellow/red because of state; keep the block neutral and place the status badge/icon inside.',
           'Use PageHeader gradient: "none" for generated operational pages unless the user explicitly asks for a decorative page accent; do not hardcode cyan/violet/purple/blue/green gradients.',
           'For general card grids inside the shell, use md:grid-cols-2 xl:grid-cols-3 instead of lg:grid-cols-3 because the desktop sidebar leaves tablet-width content at 1024px.',
-          'Do not use Nuxt UI neutral semantic classes such as bg-default, text-muted, text-dimmed, border-default, or divide-default inside extension code; use eApp tokens/classes.',
-          'Do not pass ui.content: "surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller content classes should only append z-index or width.',
+          'Do not use Nuxt UI neutral semantic classes such as bg-default, text-muted, text-dimmed, border-default, or divide-default inside extension code; use eApp class tokens instead. Do not write text-[var(...)], bg-[var(...)], or border-[var(...)] in generated extension templates unless no class token exists for that exact primitive.',
+          'Do not pass ui.content: "eapp-surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller content classes should only append z-index or width.',
           'Do not inject global CSS, create theme guards, redefine the app palette, or solve one extension by overriding the whole app shell.',
           'Keep list selection local and fetch detail rows only; do not refetch the whole list after a row click unless the list data changed.',
           'Page extension paths are admin app UI routes. Do not verify them with test_rest_endpoint against ENFYRA_API_URL unless inspect_route shows an API route with the same path.',
@@ -1563,17 +1585,17 @@ ensure_page_extension({
         code: `// Create reusable/bulky sections as widget extension records first.
 const reportStatusWidgetCode = \`
 <template>
-  <section class="surface-card p-4">
+  <section class="eapp-surface-card p-4">
     <div class="flex items-start justify-between gap-3">
       <div>
-        <p class="text-sm font-medium text-[var(--text-tertiary)]">Total reports</p>
-        <p class="mt-2 text-2xl font-semibold text-[var(--text-primary)]">{{ total }}</p>
-        <p class="mt-1 text-xs text-[var(--text-tertiary)]">{{ latestLabel }}</p>
+        <p class="text-sm font-medium eapp-text-tertiary">Total reports</p>
+        <p class="mt-2 text-2xl font-semibold eapp-text-primary">{{ total }}</p>
+        <p class="mt-1 text-xs eapp-text-tertiary">{{ latestLabel }}</p>
       </div>
       <UButton type="button" color="neutral" variant="outline" @click.stop.prevent="emit('refresh')">Refresh</UButton>
     </div>
-    <div class="mt-3 h-1.5 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--surface-muted)]">
-      <div class="eapp-identity-solid h-full" :style="{ width: progressWidth }"></div>
+    <div class="mt-3 h-1.5 overflow-hidden eapp-radius-pill eapp-surface-muted">
+      <div class="eapp-primary-solid h-full" :style="{ width: progressWidth }"></div>
     </div>
     <UButton v-if="hasLatest" type="button" class="mt-3" color="primary" variant="solid" @click.stop.prevent="openLatest">Open latest</UButton>
   </section>
@@ -1642,7 +1664,7 @@ const NotificationList = defineComponent({
     return () => h('div', { class: 'p-2 text-sm' }, [
       h('button', {
         type: 'button',
-        class: 'flex w-full items-center justify-between rounded px-2 py-2 text-left hover:bg-[var(--surface-muted)]',
+        class: 'flex w-full items-center justify-between rounded px-2 py-2 text-left eapp-surface-hover',
         onClick: () => navigateTo('/notifications'),
       }, [
         h('span', 'Open notification center'),
@@ -1709,7 +1731,7 @@ const description = computed(() => unread.value > 0 ? 'Needs review' : 'All caug
 const NotificationPanelContent = defineComponent({
   name: 'NotificationPanelContent',
   setup() {
-    return () => h('div', { class: 'px-2 py-1 text-xs text-[var(--text-tertiary)]' }, 'Recent unread notifications can render here.')
+    return () => h('div', { class: 'px-2 py-1 text-xs eapp-text-tertiary' }, 'Recent unread notifications can render here.')
   },
 })
 

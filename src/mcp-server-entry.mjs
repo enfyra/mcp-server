@@ -888,7 +888,7 @@ server.tool(
         relations: routeTables.has('enfyra_relation')
           ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relation/delete_relation or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
           : 'Use create_relation/delete_relation or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
-        relationCascadeFkContract: 'Do not ask for or send physical FK/junction column names in relation create/update payloads. Enfyra derives fk/junction columns from relation propertyName/table metadata and hides FK columns from app schema/forms. Use targetTable, type, propertyName, inversePropertyName or mappedBy, isNullable, onDelete.',
+        relationCascadeFkContract: 'Do not ask for or send physical FK/junction column names in relation create/update payloads. Enfyra derives fk/junction columns from relation propertyName/table metadata and hides FK columns from app schema/forms. Use targetTable, type, propertyName, inversePropertyName or mappedBy, isNullable, onDelete. Add inversePropertyName only when a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal will use the reverse field.',
         tableDefinitionRelations: (tableDefinition?.relations || []).map((rel) => rel.propertyName),
         relationDefinitionRelations: (relationTable?.relations || []).map((rel) => rel.propertyName),
       },
@@ -1068,7 +1068,7 @@ server.tool(
           ? 'Use this table metadata primary column when available.'
           : 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
         relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
-        relationCascadeFkContract: 'When creating relations through create_table/create_relation/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms.',
+        relationCascadeFkContract: 'When creating relations through create_table/create_relation/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms. Add inversePropertyName only for a concrete reverse traversal such as parent deep child lists, response fields, UI sections, or aggregate sort/count.',
         graphql: 'GraphQL query args also accept filter/sort/page/limit. Table data requires Bearer auth and table enablement via enfyra_graphql; anonymous root/schema probes may still return 200.',
       },
       table: tableName
@@ -2088,7 +2088,7 @@ server.tool(
         fields: 'Use column names and relation propertyName values.',
         filter: 'Use query DSL operators on column names or nested relation propertyName objects.',
         deep: 'Deep fetch keys are relation propertyName values.',
-        relationMutation: 'For relation schema creation/update use targetTable/type/propertyName/inversePropertyName|mappedBy/isNullable/onDelete only. Do not provide physical FK/junction columns; Enfyra derives and hides them.',
+        relationMutation: 'For relation schema creation/update use targetTable/type/propertyName/inversePropertyName|mappedBy/isNullable/onDelete only. Do not provide physical FK/junction columns; Enfyra derives and hides them. Omit inversePropertyName unless a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal needs it.',
       },
     };
 
