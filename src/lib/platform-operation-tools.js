@@ -305,7 +305,7 @@ function getExtensionThemeContract() {
       'Primary color is runtime-configurable through the app color picker and must affect extension identity UI. For Nuxt UI components, choose color="primary" by semantic intent and let the app map it through the primary contract; do not choose a concrete palette. For custom extension UI, first choose whether the element is neutral surface, runtime-primary identity, or status. Regular panels, KPI cards, list rows, and large content blocks should use eapp-surface-card, eapp-surface-muted, eapp-surface-flat, eapp-surface-hover, eapp-divide-y, and eapp-text-* classes. Entity identity, selected/current state, active progress, primary tiles, primary icons, and primary CTA fills should use eapp-primary-surface, eapp-primary-soft, eapp-primary-subtle, eapp-primary-solid, eapp-primary-text, eapp-primary-border, or eapp-primary-ring so the color picker controls them.',
       'Use eapp-primary-surface only for larger entity/feature blocks, selected/current cards, tiles, or cards that should read like normal app cards with a very subtle active-primary tint; it is not a saturated selected-state fill and must not be applied broadly to every KPI/list wrapper. Add eapp-primary-surface-hover when that block is clickable. Use eapp-primary-soft for compact selected entity chips, pills, small icon tiles, and identity callouts; add eapp-primary-soft-hover when compact surfaces are clickable; use eapp-primary-subtle for a slightly stronger selected fill; use eapp-primary-solid only for primary identity fills; use eapp-primary-text for identity icons or inline text. eapp-identity-* remains an alias for the same runtime-primary intent, but eapp-primary-* is preferred in new extension code.',
       'Nuxt UI secondary is still a valid semantic color when the product intentionally wants a secondary action or state. Do not use color="secondary", from-secondary-*, bg-secondary-*, text-secondary-*, or cyan/purple/green palette utilities merely to approximate an entity accent; use eapp-primary-* and let the app decide the color.',
-      'Do not make custom extension blocks with Tailwind palette utilities, raw CSS variable utilities, or raw primary utilities such as text-[var(--*)], bg-[var(--*)], border-[var(--*)], text-primary, bg-primary/10, border-primary, ring-primary/20, from-cyan-*, text-violet-*, bg-green-*, bg-emerald-*, text-green-*, border-green-*, or dark:bg-zinc-950. The app owns how eapp-primary-* maps to the active color picker value.',
+      'The app runs on Tailwind v4. Short Tailwind color utilities are the canonical way to apply contract colors and ARE allowed: bg-primary, text-primary, border-primary, ring-primary, bg-success, text-error, etc., including opacity modifiers (bg-primary/10, ring-success/20) which v4 resolves via color-mix. They are generated from the token-backed config (primary -> --md-primary runtime, success/error/warning/info -> --st-* status, secondary -> --md-tertiary) so they follow the color picker and dark theme. Do NOT use raw CSS-variable utilities (text-[var(--*)], bg-[var(--*)], border-[var(--*)]), hardcoded hex, inline style colors, or concrete palette substitution (color="violet", from-cyan-*, text-violet-*, bg-green-*, bg-emerald-*, text-green-*, dark:bg-zinc-950). For intent surfaces with no Tailwind equivalent (selected identity block, soft/solid/subtle surface, divider, radius, modal chrome) use the eapp-* classes below; the app owns how they map to the active color picker value.',
       'Use UButton color="primary" only for the single main action for the current scope. Refresh, back, navigation, filters, and secondary actions should be neutral variants unless they are the main mutation.',
       'PageHeader gradient must be "none" for generated operational extensions unless the user explicitly asks for a decorative page accent. Do not hardcode cyan, violet, purple, blue, or green PageHeader gradients to force color variety.',
       'Do not inject global CSS, create theme guards, redefine the app palette, or solve one extension by overriding the whole app shell.',
@@ -399,6 +399,68 @@ function getExtensionThemeContract() {
       },
     ],
     compactExample: '<template><section class="min-h-full w-full space-y-4"><article class="eapp-surface-card p-4"><div class="flex items-start justify-between gap-3"><div><p class="text-sm eapp-text-tertiary">Neutral KPI</p><p class="mt-2 text-2xl font-semibold eapp-text-primary">24</p></div><span class="eapp-primary-soft eapp-radius-control p-2"><UIcon name="lucide:square-stack" class="size-5 eapp-primary-text" /></span></div><div class="mt-3 h-1.5 overflow-hidden eapp-radius-pill eapp-surface-muted"><div class="eapp-primary-solid h-full w-1/2"></div></div></article><section class="eapp-surface-card p-4"><div class="flex items-center justify-between gap-3"><p class="font-semibold eapp-text-primary">Status block stays neutral</p><UBadge color="success" variant="soft">Healthy</UBadge></div></section></section></template>',
+    contractAuthority: [
+      'This is the authoritative Enfyra theme & color contract. Source of truth: documents/app/theme-color-contract.md. The app owns color via three files only: app/assets/css/theme.css (variables + Nuxt UI mapping), tailwind.config.js (single token source for Tailwind v4 semantic colors - all token-backed, no hardcoded hex), app/app.config.ts (Nuxt UI component mapping). Pages and extensions only CONSUME classes/Nuxt UI props; they never define colors.',
+      'Every color flows from two base layers: --md-* (Material, runtime primary picker) and --st-* (status). The app runs on Tailwind v4, so short utilities (bg-primary, text-success, bg-primary/10, ring-error/20) are canonical and resolve through the token-backed config via color-mix. All Nuxt UI semantic colors (primary/secondary/success/warning/error/info/neutral) are re-pointed to these, so Nuxt UI is used per its docs but colors are decided by Enfyra. This applies to the shell, system pages, and compiled dynamic extensions.',
+      'Call get_theme_class_reference for the full class->variable->Nuxt UI table when you need the exact class name or variable.',
+    ],
+    classReference: {
+      surfaces: ['eapp-surface-card (default card; --card-bg/--card-border)', 'eapp-surface-muted (recessed/track; --surface-muted)', 'eapp-surface-flat (flush; --surface-default)', 'eapp-surface-hover (clickable row hover)'],
+      text: ['eapp-text-primary', 'eapp-text-secondary', 'eapp-text-tertiary', 'eapp-text-quaternary'],
+      primaryIdentity: ['eapp-primary-solid (solid fill/meter)', 'eapp-primary-text (inline/icon)', 'eapp-primary-soft + -hover (compact chip/tile)', 'eapp-primary-subtle (stronger selected fill)', 'eapp-primary-surface + -hover (large selected identity block)', 'eapp-primary-border', 'eapp-primary-ring'],
+      status: ['eapp-status-success|warning|danger|info|neutral -soft/-text/-border (badges/small icons/short text only)'],
+      radius: ['eapp-radius-card', 'eapp-radius-panel', 'eapp-radius-control', 'eapp-radius-subcontrol', 'eapp-radius-pill'],
+      dividers: ['eapp-divider', 'eapp-divide-y'],
+      modal: ['eapp-modal-surface (modal content chrome; never surface-card)'],
+      nuxtUiMapping: 'primary=--md-primary(runtime), secondary=--md-tertiary(runtime), success=--st-success, warning=--st-warning, error=--st-error, info=--st-info, neutral=neutral surfaces',
+    },
+  };
+}
+
+function getThemeClassReference() {
+  return {
+    action: 'theme_class_reference',
+    authority: 'Authoritative Enfyra theme & color contract. Source of truth: documents/app/theme-color-contract.md. App owns color via theme.css + main.css + app.config.ts only; pages/extensions consume classes and Nuxt UI props.',
+    baseLayers: {
+      material: '--md-* (runtime primary picker, HCT/Material You). Drives identity/brand. Never read directly in templates.',
+      status: '--st-success/--st-warning/--st-error/--st-info. Fixed semantic palette. Never read directly in templates.',
+    },
+    nuxtUiColors: {
+      primary: 'runtime --md-primary (main brand action/identity). NEVER substitute a concrete palette.',
+      secondary: 'runtime --md-tertiary (intentional secondary accent only).',
+      success: '--st-success (healthy/success).',
+      warning: '--st-warning (pending/attention).',
+      error: '--st-error (destructive/error).',
+      info: '--st-info (informational).',
+      neutral: 'neutral surfaces (secondary chrome, non-actions).',
+    },
+    classes: [
+      { group: 'Surfaces (large ordinary - keep neutral)', classes: 'eapp-surface-card, eapp-surface-muted, eapp-surface-flat, eapp-surface-hover' },
+      { group: 'Text', classes: 'eapp-text-primary, eapp-text-secondary, eapp-text-tertiary, eapp-text-quaternary' },
+      { group: 'Runtime primary identity', classes: 'eapp-primary-solid, eapp-primary-text, eapp-primary-soft(+hover), eapp-primary-subtle, eapp-primary-surface(+hover), eapp-primary-border, eapp-primary-ring' },
+      { group: 'Status (badges/small icons/short text only)', classes: 'eapp-status-{success|warning|danger|info|neutral}-{soft|text|border}' },
+      { group: 'Radius', classes: 'eapp-radius-card, eapp-radius-panel, eapp-radius-control, eapp-radius-subcontrol, eapp-radius-pill' },
+      { group: 'Dividers', classes: 'eapp-divider, eapp-divide-y' },
+      { group: 'Modal', classes: 'eapp-modal-surface (never surface-card as modal ui.content)' },
+    ],
+    forbidden: [
+      'Raw CSS variables in templates: text-[var(--*)], bg-[var(--*)], border-[var(--*)].',
+      'Tailwind palette accents: from-cyan-*, text-violet-*, bg-green-*, bg-emerald-*, text-gray-*, bg-slate-*, dark:bg-zinc-950.',
+      'Concrete palette substitution (color="violet"/"cyan"/..., from-cyan-*, text-violet-*, bg-green-*, bg-emerald-*, dark:bg-zinc-950).',
+      'Hardcoded hex colors or inline style="color:#..." for theme-driven surfaces.',
+      'Reading --md-* / --st-* / --badge-* base variables directly from extension templates.',
+    ],
+    allowedShortUtilities: [
+      'Tailwind v4 short utilities ARE canonical and preferred: bg-primary, text-primary, border-primary, ring-primary, bg-success, text-error, bg-warning, text-info, bg-secondary.',
+      'Opacity modifiers work natively via v4 color-mix: bg-primary/10, ring-primary/20, text-primary/70, bg-success/15.',
+      'Use eapp-* classes only for intent surfaces with no Tailwind equivalent (eapp-primary-surface/solid/soft/subtle, eapp-surface-card/muted/flat/hover, eapp-divider/divide-y, eapp-radius-*, eapp-modal-surface).',
+    ],
+    chooseByIntent: [
+      'Normal accent / active tab / progress / primary CTA -> primary (eapp-primary-* or color="primary").',
+      'True semantic state -> status (eapp-status-* or color="success|warning|error|info").',
+      'Large ordinary surface -> eapp-surface-*; put a small status badge inside.',
+      'Whole block is active identity -> eapp-primary-surface (+hover), subtle only.',
+    ],
   };
 }
 
@@ -1112,6 +1174,17 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     'Return the concise Enfyra admin extension UI/theme/security contract. Call before writing or reviewing extension UI.',
     {},
     async () => jsonText(getExtensionThemeContract()),
+  );
+
+  server.tool(
+    'get_theme_class_reference',
+    [
+      'Return the authoritative Enfyra theme & color class reference: class -> CSS variable -> Nuxt UI semantic color -> intent.',
+      'Call this whenever you need the exact eapp-* class name or the Nuxt UI color mapping for shell, system page, or dynamic extension UI.',
+      'Source of truth: documents/app/theme-color-contract.md.',
+    ].join(' '),
+    {},
+    async () => jsonText(getThemeClassReference()),
   );
 
   server.tool(
