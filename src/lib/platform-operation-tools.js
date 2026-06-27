@@ -347,7 +347,10 @@ function getExtensionThemeContract() {
       'Buttons should have stable geometry: hover may change color, border, or shadow but must not move the button or resize its content. Disabled buttons keep disabled cursor/visual state.',
       'Inputs and textareas should not add hover movement or decorative hover states; focus, invalid, disabled, and loading states must be explicit.',
       'Dynamic extensions resolve UModal to the app CommonModal. Do not pass ui.content: "eapp-surface-card" or "surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller ui.content should only append z-index, width, or max-width classes.',
+      'CommonModal and CommonDrawer own action-only footers through cancelAction, primaryAction, dangerAction, leadingActions, and footerHint. Pass footer button intent through those props instead of custom footer slots. cancelAction defaults to error outline; use tone: "neutral" for Close/Done and tone: "primary" for Keep editing in discard dialogs.',
+      'Use custom #footer content only when the footer contains real custom layout or non-button content. Every modal/drawer button should use type="button" unless it intentionally submits a form.',
       'Use CommonDrawer for side-panel editing. Open drawers immediately on user action and render loading/error/content inside the drawer instead of waiting for fetch before opening.',
+      'Use UTabs for page sections and large grouped forms instead of custom tab bars; the app-level Nuxt UI override owns active and inactive indicators, focus rings, spacing, and theme contrast.',
       'Use UBadge or token-backed badge spans for status. Keep badges legible in both themes with tokenized background, text, and border.',
     ],
     loadingAndLists: [
@@ -400,8 +403,8 @@ function getExtensionThemeContract() {
     ],
     compactExample: '<template><section class="min-h-full w-full space-y-4"><article class="eapp-surface-card p-4"><div class="flex items-start justify-between gap-3"><div><p class="text-sm eapp-text-tertiary">Neutral KPI</p><p class="mt-2 text-2xl font-semibold eapp-text-primary">24</p></div><span class="eapp-primary-soft eapp-radius-control p-2"><UIcon name="lucide:square-stack" class="size-5 eapp-primary-text" /></span></div><div class="mt-3 h-1.5 overflow-hidden eapp-radius-pill eapp-surface-muted"><div class="eapp-primary-solid h-full w-1/2"></div></div></article><section class="eapp-surface-card p-4"><div class="flex items-center justify-between gap-3"><p class="font-semibold eapp-text-primary">Status block stays neutral</p><UBadge color="success" variant="soft">Healthy</UBadge></div></section></section></template>',
     contractAuthority: [
-      'This is the authoritative Enfyra theme & color contract. Source of truth: documents/app/theme-color-contract.md. The app owns color via three files only: app/assets/css/theme.css (variables + Nuxt UI mapping), tailwind.config.js (single token source for Tailwind v4 semantic colors - all token-backed, no hardcoded hex), app/app.config.ts (Nuxt UI component mapping). Pages and extensions only CONSUME classes/Nuxt UI props; they never define colors.',
-      'Every color flows from two base layers: --md-* (Material, runtime primary picker) and --st-* (status). The app runs on Tailwind v4, so short utilities (bg-primary, text-success, bg-primary/10, ring-error/20) are canonical and resolve through the token-backed config via color-mix. All Nuxt UI semantic colors (primary/secondary/success/warning/error/info/neutral) are re-pointed to these, so Nuxt UI is used per its docs but colors are decided by Enfyra. This applies to the shell, system pages, and compiled dynamic extensions.',
+      'This is the authoritative Enfyra theme & color contract. Source of truth: documents/app/theme-color-contract.md. The app owns color through app/utils/primary-colors.ts (Material You seed-to-role generation), app/assets/css/theme.css (semantic variables and Nuxt UI ramps), app/assets/css/main.css (extension-safe semantic utilities), and app/app.config.ts (Nuxt UI component mapping). Pages and extensions only CONSUME classes/Nuxt UI props; they never define colors.',
+      'Every color flows from two base layers: --md-* (Material You, runtime primary picker) and --st-* (status). Runtime primary roles are generated with SchemeTonalSpot. Success/warning/info stay fixed status quarts; error follows the generated Material error role through the single --danger-* lane. All Nuxt UI semantic colors (primary/secondary/success/warning/error/info/neutral) are re-pointed to these, so Nuxt UI is used per its docs but colors are decided by Enfyra. This applies to the shell, system pages, and compiled dynamic extensions.',
       'Call get_theme_class_reference for the full class->variable->Nuxt UI table when you need the exact class name or variable.',
     ],
     classReference: {
@@ -430,7 +433,7 @@ function getThemeClassReference() {
       secondary: 'runtime --md-tertiary (intentional secondary accent only).',
       success: '--st-success (healthy/success).',
       warning: '--st-warning (pending/attention).',
-      error: '--st-error (destructive/error).',
+      error: 'single --danger-* lane from Material error roles (destructive/error). Ghost danger text uses --danger-on-surface; danger fills use --danger-surface.',
       info: '--st-info (informational).',
       neutral: 'neutral surfaces (secondary chrome, non-actions).',
     },

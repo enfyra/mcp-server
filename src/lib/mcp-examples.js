@@ -1574,6 +1574,8 @@ ensure_page_extension({
           'For general card grids inside the shell, use md:grid-cols-2 xl:grid-cols-3 instead of lg:grid-cols-3 because the desktop sidebar leaves tablet-width content at 1024px.',
           'Do not use Nuxt UI neutral semantic classes such as bg-default, text-muted, text-dimmed, border-default, or divide-default inside extension code; use eApp class tokens instead. Do not write text-[var(...)], bg-[var(...)], or border-[var(...)] in generated extension templates unless no class token exists for that exact primitive.',
           'Do not pass ui.content: "eapp-surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller content classes should only append z-index or width.',
+          'CommonModal and CommonDrawer own action-only footers through cancelAction, primaryAction, dangerAction, leadingActions, and footerHint. Pass action intent through props instead of styling footer buttons manually; cancelAction defaults to error outline, Close/Done should use tone: "neutral", and Keep editing should use tone: "primary" in discard dialogs.',
+          'Use UTabs for page sections instead of custom tab bars so the app-level active/inactive indicators, spacing, focus rings, and theme contrast stay consistent.',
           'Do not inject global CSS, create theme guards, redefine the app palette, or solve one extension by overriding the whole app shell.',
           'Keep list selection local and fetch detail rows only; do not refetch the whole list after a row click unless the list data changed.',
           'Page extension paths are admin app UI routes. Do not verify them with test_rest_endpoint against ENFYRA_API_URL unless inspect_route shows an API route with the same path.',
@@ -1906,9 +1908,13 @@ onMounted(() => fetchOrders())
         ],
       },
       {
-        name: 'Modal and drawer buttons do not submit accidentally',
+        name: 'Managed modal and drawer footer actions',
         code: `<template>
-  <CommonModal v-model:open="open">
+  <CommonModal
+    v-model:open="open"
+    :cancel-action="{ label: 'Cancel', onClick: () => (open = false) }"
+    :primary-action="{ label: 'Update version', loading: saving, disabled: !canSubmit, onClick: submit }"
+  >
     <template #header>
       <h3 class="text-lg font-semibold">Update version</h3>
     </template>
@@ -1922,28 +1928,13 @@ onMounted(() => fetchOrders())
         @click.stop.prevent="checkVersion"
       />
     </template>
-
-    <template #footer>
-      <UButton
-        type="button"
-        color="neutral"
-        variant="ghost"
-        label="Cancel"
-        @click.stop.prevent="open = false"
-      />
-      <UButton
-        type="button"
-        color="primary"
-        label="Update version"
-        :disabled="!canSubmit"
-        @click.stop.prevent="submit"
-      />
-    </template>
   </CommonModal>
 </template>`,
         notes: [
-          'Every trigger/footer/action button inside CommonModal, CommonDrawer, or UModal should use type="button" unless it intentionally submits a form.',
-          'Use @click.stop.prevent on modal/drawer action buttons so clicks do not bubble to row/page triggers.',
+          'For action-only footers, use CommonModal/CommonDrawer footer props: cancelAction, primaryAction, dangerAction, leadingActions, and footerHint.',
+          'cancelAction defaults to error outline because it usually backs out of a mutation. Use tone: "neutral" for Close/Done and tone: "primary" for Keep editing in discard dialogs.',
+          'Every trigger/body action button inside CommonModal, CommonDrawer, or UModal should use type="button" unless it intentionally submits a form.',
+          'Use @click.stop.prevent on body action buttons so clicks do not bubble to row/page triggers.',
           'Open modal/drawer shells immediately, then load content inside them; do not close and reopen after an API call.',
           'Keep destructive final actions disabled until all confirmation inputs are valid.',
         ],
