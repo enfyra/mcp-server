@@ -1,6 +1,6 @@
 # Enfyra MCP Server
 
-Manage Enfyra instances from MCP-compatible coding tools such as **Codex**, **Claude Code**, **Cursor**, MCP Inspector, and other STDIO MCP hosts.
+Manage Enfyra instances from MCP-compatible coding tools such as **Codex**, **Claude Code**, **Cursor**, **VS Code / GitHub Copilot**, **Google Antigravity**, MCP Inspector, and other STDIO MCP hosts.
 
 This package is the MCP bridge only. Assistant rules, schema behavior, dynamic script guidance, and examples are served through the MCP server itself from `src/lib/mcp-instructions.js`, `src/lib/mcp-examples.js`, and tool descriptions in `src/mcp-server-entry.mjs`.
 
@@ -12,7 +12,7 @@ From your project root:
 npx @enfyra/mcp-server config
 ```
 
-The config command writes project config for Codex, Claude Code, and Cursor. It preserves other MCP servers and replaces only the `enfyra` entry.
+The config command writes project config for Codex, Claude Code, Cursor, VS Code / GitHub Copilot, and Google Antigravity. It preserves other MCP servers and replaces only the `enfyra` entry.
 
 Interactive setup asks for your Enfyra app/admin URL, then guides you to the token page when needed and asks for `ENFYRA_API_TOKEN`.
 
@@ -25,6 +25,8 @@ npx @enfyra/mcp-server config --yes \
 # One or more clients
 npx @enfyra/mcp-server config --codex
 npx @enfyra/mcp-server config --cursor --claude-code
+npx @enfyra/mcp-server config --vscode
+npx @enfyra/mcp-server config --antigravity
 ```
 
 Equivalent in this repo:
@@ -40,7 +42,9 @@ yarn mcp:config
 | Codex | `npx @enfyra/mcp-server config --codex` | `.codex/config.toml` |
 | Claude Code | `npx @enfyra/mcp-server config --claude-code` | `.mcp.json` |
 | Cursor | `npx @enfyra/mcp-server config --cursor` | `.cursor/mcp.json` |
-| MCP Inspector / other hosts | Paste the shared STDIO config below | Host-specific `mcpServers` config |
+| VS Code / GitHub Copilot | `npx @enfyra/mcp-server config --vscode` | `.vscode/mcp.json` |
+| Google Antigravity | `npx @enfyra/mcp-server config --antigravity` | `.agents/mcp_config.json` |
+| MCP Inspector / other project-scoped hosts | Paste the shared STDIO config below | Host-specific project config |
 
 <details>
 <summary><strong>Codex setup</strong></summary>
@@ -109,9 +113,70 @@ Official reference: [Cursor MCP](https://cursor.com/docs/context/mcp).
 </details>
 
 <details>
+<summary><strong>VS Code / GitHub Copilot setup</strong></summary>
+
+```bash
+npx @enfyra/mcp-server config --vscode
+```
+
+VS Code workspace config is written to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "enfyra": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@enfyra/mcp-server"],
+      "env": {
+        "ENFYRA_API_URL": "http://localhost:3000/api",
+        "ENFYRA_API_TOKEN": "efy_pat_your-token"
+      }
+    }
+  }
+}
+```
+
+Use the VS Code command `MCP: List Servers` to inspect or start the server after setup. This is a workspace config, so it stays tied to the current project.
+
+Official references: [VS Code MCP servers](https://code.visualstudio.com/docs/copilot/chat/mcp-servers) and [VS Code MCP configuration](https://code.visualstudio.com/docs/agents/reference/mcp-configuration).
+
+</details>
+
+<details>
+<summary><strong>Google Antigravity setup</strong></summary>
+
+```bash
+npx @enfyra/mcp-server config --antigravity
+```
+
+Antigravity project config is written to `.agents/mcp_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "enfyra": {
+      "command": "npx",
+      "args": ["-y", "@enfyra/mcp-server"],
+      "env": {
+        "ENFYRA_API_URL": "http://localhost:3000/api",
+        "ENFYRA_API_TOKEN": "efy_pat_your-token"
+      }
+    }
+  }
+}
+```
+
+Antigravity also documents a shared user config at `~/.gemini/config/mcp_config.json`; this helper intentionally writes the project-local `.agents/mcp_config.json` file so Enfyra URL and token stay scoped to the current workspace.
+
+Official reference: [Antigravity MCP](https://antigravity.google/docs/mcp).
+
+</details>
+
+<details>
 <summary><strong>Other MCP hosts and MCP Inspector</strong></summary>
 
-Use the shared STDIO config with any host that accepts an `mcpServers` JSON block:
+Use the shared STDIO config with any project-scoped host that accepts an `mcpServers` JSON block:
 
 ```json
 {
@@ -145,11 +210,12 @@ npx @enfyra/mcp-server config [options]
 | `--app-url` | Set the Enfyra app/admin URL |
 | `--api-token`, `-t` | Set `ENFYRA_API_TOKEN` |
 | `--yes` | Non-interactive mode for CI/scripts |
-| `--global` | Write global/user config instead of project config |
 | `--reconfig` | Prompt for target clients again and replace the existing `enfyra` entry |
 | `--codex` | Write Codex config |
 | `--claude-code`, `--claude` | Write Claude Code config |
 | `--cursor` | Write Cursor config |
+| `--vscode`, `--copilot` | Write VS Code / GitHub Copilot config |
+| `--antigravity` | Write Google Antigravity config |
 | `-h`, `--help` | Show CLI help |
 
 Without a target flag, interactive mode asks which client to configure. Non-interactive mode defaults to all supported clients.

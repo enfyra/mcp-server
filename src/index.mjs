@@ -11,15 +11,17 @@ if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
 
 Usage:
   npx @enfyra/mcp-server                 Start the MCP stdio server
-  npx @enfyra/mcp-server config [flags]  Write local MCP host config
+  npx @enfyra/mcp-server config [flags]  Write project-local MCP host config
 
 Common config flags:
-  --codex             Write ~/.codex/config.toml
+  --codex             Write ./.codex/config.toml
   --claude-code       Write ./.mcp.json
   --cursor            Write ./.cursor/mcp.json
+  --vscode            Write ./.vscode/mcp.json
+  --antigravity       Write ./.agents/mcp_config.json
   --reconfig          Prompt for host and credentials again, replacing the enfyra entry
   --yes               Non-interactive
-  -a, --api-url       ENFYRA_API_URL
+  --app-url           ENFYRA_APP_URL
   -t, --api-token     ENFYRA_API_TOKEN
   -h, --help          Show config help
 

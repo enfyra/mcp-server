@@ -3,7 +3,6 @@ import { createInterface } from 'node:readline/promises';
 import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output, cwd } from 'node:process';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
 
 const SERVER_KEY = 'enfyra';
 const forceColor = process.env.FORCE_COLOR != null && process.env.FORCE_COLOR !== '0';
@@ -36,6 +35,16 @@ const clients = {
     path: './.cursor/mcp.json',
     color: style.cyan,
   },
+  vscode: {
+    label: 'VS Code / Copilot',
+    path: './.vscode/mcp.json',
+    color: style.blue,
+  },
+  antigravity: {
+    label: 'Antigravity',
+    path: './.agents/mcp_config.json',
+    color: style.yellow,
+  },
 };
 
 function statusIcon(kind) {
@@ -55,7 +64,7 @@ function exitCancelled() {
 
 function printHelp() {
   console.log(`${style.bold('Enfyra MCP config')}
-${style.dim('Write local MCP client config for Enfyra.')}
+${style.dim('Write project-local MCP client config for Enfyra.')}
 
 ${style.bold('Usage')}
   npx @enfyra/mcp-server config [options]
@@ -64,12 +73,12 @@ ${style.bold('Supported clients')}
   Codex        ./.codex/config.toml
   Claude Code  ./.mcp.json
   Cursor       ./.cursor/mcp.json
-  Other MCP hosts can use the shared stdio JSON from the README.
+  VS Code      ./.vscode/mcp.json
+  Antigravity  ./.agents/mcp_config.json
 
 ${style.bold('Options')}
   --app-url <url>          Enfyra app/admin URL, for example https://demo.enfyra.io
   --api-token, -t <secret>  ENFYRA_API_TOKEN
-  --global                Write global/user config for selected clients instead of project config
   --reconfig              Always choose target again in interactive mode and replace the old enfyra config for that target
   --yes                   Non-interactive: no prompts (CI / scripts); use CLI, env, existing file, then defaults
 
@@ -79,20 +88,23 @@ ${style.bold('Client selection')}
   --claude-code, --claude, --claude-only   Only ./.mcp.json (Claude Code project scope)
   --cursor, --cursor-only                  Only ./.cursor/mcp.json (Cursor)
   --codex, --codex-only                    Only ./.codex/config.toml (Codex project scope)
+  --vscode, --copilot, --vscode-only       Only ./.vscode/mcp.json (VS Code / Copilot)
+  --antigravity, --antigravity-only        Only ./.agents/mcp_config.json (Antigravity)
   Passing multiple target flags writes each selected target.
 
   -h, --help              Show this help
 
 ${style.bold('Interactive mode')}
-  Choose Codex, Claude Code, Cursor, or all clients; then enter ENFYRA_APP_URL and ENFYRA_API_TOKEN.
+  Choose Codex, Claude Code, Cursor, VS Code, Antigravity, or all clients; then enter ENFYRA_APP_URL and ENFYRA_API_TOKEN.
   Existing Enfyra config and environment variables are used as defaults. Re-run anytime to update.
 
 ${style.bold('Examples')}
   npx @enfyra/mcp-server config
   npx @enfyra/mcp-server config --yes
   npx @enfyra/mcp-server config --codex --cursor
+  npx @enfyra/mcp-server config --vscode
+  npx @enfyra/mcp-server config --antigravity
   npx @enfyra/mcp-server config --claude-code
-  npx @enfyra/mcp-server config --global --codex
   npx @enfyra/mcp-server config --reconfig
   npx @enfyra/mcp-server config --app-url http://localhost:3000 -t 'efy_pat_...'
   ENFYRA_APP_URL=https://demo.enfyra.io ENFYRA_API_TOKEN=efy_pat_... npx @enfyra/mcp-server config --yes
@@ -109,11 +121,14 @@ function parseArgs(argv) {
     help: false,
     yes: false,
     reconfig: false,
-    global: false,
+    vscode: true,
+    antigravity: true,
   };
   let pickClaude = false;
   let pickCursor = false;
   let pickCodex = false;
+  let pickVscode = false;
+  let pickAntigravity = false;
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const next = () => {
@@ -126,7 +141,6 @@ function parseArgs(argv) {
     else if (a === 'help') out.help = true;
     else if (a === '--yes') out.yes = true;
     else if (a === '--reconfig') out.reconfig = true;
-    else if (a === '--global') out.global = true;
     else if (a === '--app-url') out.appUrl = next();
     else if (a === '--api-url' || a === '-a') {
       throw new Error(`${a} is no longer supported for setup; use --app-url instead`);
@@ -138,13 +152,17 @@ function parseArgs(argv) {
     else if (a === '--claude-only' || a === '--claude-code' || a === '--claude') pickClaude = true;
     else if (a === '--cursor-only' || a === '--cursor') pickCursor = true;
     else if (a === '--codex-only' || a === '--codex') pickCodex = true;
+    else if (a === '--vscode-only' || a === '--vscode' || a === '--copilot') pickVscode = true;
+    else if (a === '--antigravity-only' || a === '--antigravity') pickAntigravity = true;
     else throw new Error(`Unknown argument: ${a}`);
   }
-  out.targetExplicit = pickClaude || pickCursor || pickCodex;
+  out.targetExplicit = pickClaude || pickCursor || pickCodex || pickVscode || pickAntigravity;
   if (out.targetExplicit) {
     out.claude = pickClaude;
     out.cursor = pickCursor;
     out.codex = pickCodex;
+    out.vscode = pickVscode;
+    out.antigravity = pickAntigravity;
   }
   return out;
 }
@@ -193,9 +211,7 @@ async function mergeMcpFile(absPath, serverEntry) {
   try {
     const raw = await readFile(absPath, 'utf8');
     const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && parsed.mcpServers && typeof parsed.mcpServers === 'object') {
-      data.mcpServers = { ...parsed.mcpServers };
-    } else if (parsed && typeof parsed === 'object') {
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       data = { ...parsed, mcpServers: parsed.mcpServers && typeof parsed.mcpServers === 'object' ? { ...parsed.mcpServers } : {} };
     }
   } catch (e) {
@@ -204,6 +220,31 @@ async function mergeMcpFile(absPath, serverEntry) {
   data.mcpServers = { ...data.mcpServers, [SERVER_KEY]: serverEntry };
   const dir = dirname(absPath);
   await mkdir(dir, { recursive: true });
+  await writeFile(absPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+}
+
+async function mergeVscodeMcpFile(absPath, serverEntry) {
+  let data = { servers: {} };
+  try {
+    const raw = await readFile(absPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      data = {
+        ...parsed,
+        servers: parsed.servers && typeof parsed.servers === 'object' ? { ...parsed.servers } : {},
+      };
+    }
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  data.servers = {
+    ...data.servers,
+    [SERVER_KEY]: {
+      type: 'stdio',
+      ...serverEntry,
+    },
+  };
+  await mkdir(dirname(absPath), { recursive: true });
   await writeFile(absPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 
@@ -285,50 +326,69 @@ async function readCodexEnfyraEnv(absPath) {
   return null;
 }
 
-function getCodexConfigPath(root, globalScope) {
-  return globalScope ? join(homedir(), '.codex', 'config.toml') : join(root, '.codex', 'config.toml');
+function getCodexConfigPath(root) {
+  return join(root, '.codex', 'config.toml');
 }
 
-function getClaudeConfigPath(root, globalScope) {
-  return globalScope ? join(homedir(), '.mcp.json') : join(root, '.mcp.json');
+function getClaudeConfigPath(root) {
+  return join(root, '.mcp.json');
 }
 
-function getCursorConfigPath(root, globalScope) {
-  return globalScope ? join(homedir(), '.cursor', 'mcp.json') : join(root, '.cursor', 'mcp.json');
+function getCursorConfigPath(root) {
+  return join(root, '.cursor', 'mcp.json');
 }
 
-function getClientPath(client, root, globalScope) {
-  if (client === 'claude') return getClaudeConfigPath(root, globalScope);
-  if (client === 'cursor') return getCursorConfigPath(root, globalScope);
-  if (client === 'codex') return getCodexConfigPath(root, globalScope);
+function getVscodeConfigPath(root) {
+  return join(root, '.vscode', 'mcp.json');
+}
+
+function getAntigravityConfigPath(root) {
+  return join(root, '.agents', 'mcp_config.json');
+}
+
+function getClientPath(client, root) {
+  if (client === 'claude') return getClaudeConfigPath(root);
+  if (client === 'cursor') return getCursorConfigPath(root);
+  if (client === 'codex') return getCodexConfigPath(root);
+  if (client === 'vscode') return getVscodeConfigPath(root);
+  if (client === 'antigravity') return getAntigravityConfigPath(root);
   throw new Error(`Unknown MCP client: ${client}`);
 }
 
-async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, globalScope) {
-  const paths = [];
-  if (readClaude) paths.push(getClaudeConfigPath(root, globalScope));
-  if (readCursor) paths.push(getCursorConfigPath(root, globalScope));
-  if (!globalScope && !readClaude && readCursor) paths.push(join(root, '.mcp.json'));
-  const seen = new Set();
-  for (const p of paths) {
-    if (seen.has(p)) continue;
-    seen.add(p);
-    try {
-      const raw = await readFile(p, 'utf8');
-      const j = JSON.parse(raw);
-      const e = j?.mcpServers?.[SERVER_KEY]?.env;
-      if (e && typeof e === 'object' && (e.ENFYRA_API_URL || e.ENFYRA_API_TOKEN)) {
-        return {
-          apiUrl: typeof e.ENFYRA_API_URL === 'string' ? e.ENFYRA_API_URL : '',
-          apiToken: typeof e.ENFYRA_API_TOKEN === 'string' ? e.ENFYRA_API_TOKEN : '',
-        };
-      }
-    } catch {
-      /* */
+async function readMcpServerEnv(absPath, serverRootKey) {
+  try {
+    const raw = await readFile(absPath, 'utf8');
+    const j = JSON.parse(raw);
+    const e = j?.[serverRootKey]?.[SERVER_KEY]?.env;
+    if (e && typeof e === 'object' && (e.ENFYRA_API_URL || e.ENFYRA_API_TOKEN)) {
+      return {
+        apiUrl: typeof e.ENFYRA_API_URL === 'string' ? e.ENFYRA_API_URL : '',
+        apiToken: typeof e.ENFYRA_API_TOKEN === 'string' ? e.ENFYRA_API_TOKEN : '',
+      };
     }
+  } catch {
+    /* */
+  }
+  return null;
+}
+
+async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, readVscode, readAntigravity) {
+  const paths = [];
+  if (readClaude) paths.push({ path: getClaudeConfigPath(root), rootKey: 'mcpServers' });
+  if (readCursor) paths.push({ path: getCursorConfigPath(root), rootKey: 'mcpServers' });
+  if (!readClaude && readCursor) paths.push({ path: getClaudeConfigPath(root), rootKey: 'mcpServers' });
+  if (readVscode) paths.push({ path: getVscodeConfigPath(root), rootKey: 'servers' });
+  if (readAntigravity) paths.push({ path: getAntigravityConfigPath(root), rootKey: 'mcpServers' });
+  const seen = new Set();
+  for (const entry of paths) {
+    const key = `${entry.rootKey}:${entry.path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const env = await readMcpServerEnv(entry.path, entry.rootKey);
+    if (env) return env;
   }
   if (readCodex) {
-    const codex = await readCodexEnfyraEnv(getCodexConfigPath(root, globalScope));
+    const codex = await readCodexEnfyraEnv(getCodexConfigPath(root));
     if (codex) return codex;
   }
   return { apiUrl: '', apiToken: '' };
@@ -338,23 +398,31 @@ async function promptTargetChoice() {
   const choices = [
     {
       client: 'codex',
-      value: { claude: false, cursor: false, codex: true },
+      value: { claude: false, cursor: false, codex: true, vscode: false, antigravity: false },
     },
     {
       client: 'claude',
-      value: { claude: true, cursor: false, codex: false },
+      value: { claude: true, cursor: false, codex: false, vscode: false, antigravity: false },
     },
     {
       client: 'cursor',
-      value: { claude: false, cursor: true, codex: false },
+      value: { claude: false, cursor: true, codex: false, vscode: false, antigravity: false },
+    },
+    {
+      client: 'vscode',
+      value: { claude: false, cursor: false, codex: false, vscode: true, antigravity: false },
+    },
+    {
+      client: 'antigravity',
+      value: { claude: false, cursor: false, codex: false, vscode: false, antigravity: true },
     },
     {
       client: 'all',
-      value: { claude: true, cursor: true, codex: true },
+      value: { claude: true, cursor: true, codex: true, vscode: true, antigravity: true },
     },
   ];
   if (input.setRawMode && output.isTTY) {
-    return promptTargetSelect(choices, 3);
+    return promptTargetSelect(choices, 5);
   }
 
   const rl = createInterface({ input, output });
@@ -363,23 +431,31 @@ async function promptTargetChoice() {
       + '  [1] Codex        ./.codex/config.toml\n'
       + '  [2] Claude Code  ./.mcp.json\n'
       + '  [3] Cursor       ./.cursor/mcp.json\n'
-      + '  [4] All [default]\n'
-      + 'Choice [4]: ',
+      + '  [4] VS Code      ./.vscode/mcp.json\n'
+      + '  [5] Antigravity  ./.agents/mcp_config.json\n'
+      + '  [6] All [default]\n'
+      + 'Choice [6]: ',
   )).trim().toLowerCase();
   await rl.close();
-  if (line === '' || line === '4' || line === 'all' || line === 'a') {
-    return { claude: true, cursor: true, codex: true };
+  if (line === '' || line === '6' || line === 'all' || line === 'a') {
+    return { claude: true, cursor: true, codex: true, vscode: true, antigravity: true };
   }
   if (line === '1' || line === 'codex' || line === 'x') {
-    return { claude: false, cursor: false, codex: true };
+    return { claude: false, cursor: false, codex: true, vscode: false, antigravity: false };
   }
   if (line === '2' || line === 'claude' || line === 'claude-code') {
-    return { claude: true, cursor: false, codex: false };
+    return { claude: true, cursor: false, codex: false, vscode: false, antigravity: false };
   }
   if (line === '3' || line === 'cursor' || line === 'u') {
-    return { claude: false, cursor: true, codex: false };
+    return { claude: false, cursor: true, codex: false, vscode: false, antigravity: false };
   }
-  return { claude: true, cursor: true, codex: true };
+  if (line === '4' || line === 'vscode' || line === 'vs-code' || line === 'copilot') {
+    return { claude: false, cursor: false, codex: false, vscode: true, antigravity: false };
+  }
+  if (line === '5' || line === 'antigravity') {
+    return { claude: false, cursor: false, codex: false, vscode: false, antigravity: true };
+  }
+  return { claude: true, cursor: true, codex: true, vscode: true, antigravity: true };
 }
 
 async function promptTargetSelect(choices, initialIndex = 0) {
@@ -392,7 +468,7 @@ async function promptTargetSelect(choices, initialIndex = 0) {
     if (choice.client === 'all') {
       const label = active ? style.bold(style.underline('All supported clients')) : 'All supported clients';
       const paddedLabel = label + ' '.repeat(22 - 'All supported clients'.length);
-      const hint = active ? style.cyan('Codex + Claude Code + Cursor') : style.dim('Codex + Claude Code + Cursor');
+      const hint = active ? style.cyan('Codex + Claude Code + Cursor + VS Code + Antigravity') : style.dim('Codex + Claude Code + Cursor + VS Code + Antigravity');
       return `${accent} ${indicator} ${paddedLabel} ${hint}`;
     }
 
@@ -545,14 +621,18 @@ export async function runLocalConfig(argv) {
   let writeClaude = opts.claude;
   let writeCursor = opts.cursor;
   let writeCodex = opts.codex;
+  let writeVscode = opts.vscode;
+  let writeAntigravity = opts.antigravity;
   if (usePrompt && (!opts.targetExplicit || opts.reconfig)) {
     const t = await promptTargetChoice();
     writeClaude = t.claude;
     writeCursor = t.cursor;
     writeCodex = t.codex;
+    writeVscode = t.vscode;
+    writeAntigravity = t.antigravity;
   }
 
-  const existing = await loadExistingEnfyraEnv(root, writeClaude, writeCursor, writeCodex, opts.global);
+  const existing = await loadExistingEnfyraEnv(root, writeClaude, writeCursor, writeCodex, writeVscode, writeAntigravity);
 
   let apiUrl;
   let apiToken;
@@ -578,23 +658,32 @@ export async function runLocalConfig(argv) {
   const written = [];
 
   if (writeCodex) {
-    const p = getClientPath('codex', root, opts.global);
+    const p = getClientPath('codex', root);
     await mergeCodexConfig(p, apiUrl, apiToken);
     written.push({ client: 'codex', path: p });
   }
   if (writeClaude) {
-    const p = getClientPath('claude', root, opts.global);
+    const p = getClientPath('claude', root);
     await mergeMcpFile(p, serverEntry);
     written.push({ client: 'claude', path: p });
   }
   if (writeCursor) {
-    const p = getClientPath('cursor', root, opts.global);
+    const p = getClientPath('cursor', root);
     await mergeMcpFile(p, serverEntry);
     written.push({ client: 'cursor', path: p });
   }
+  if (writeVscode) {
+    const p = getClientPath('vscode', root);
+    await mergeVscodeMcpFile(p, serverEntry);
+    written.push({ client: 'vscode', path: p });
+  }
+  if (writeAntigravity) {
+    const p = getClientPath('antigravity', root);
+    await mergeMcpFile(p, serverEntry);
+    written.push({ client: 'antigravity', path: p });
+  }
 
-  const scopeLabel = opts.global ? 'global/user' : 'project';
-  console.log(`${statusIcon('success')} ${style.bold(style.green('Enfyra MCP config updated'))} ${style.dim(`(${scopeLabel})`)}\n`);
+  console.log(`${statusIcon('success')} ${style.bold(style.green('Enfyra MCP config updated'))} ${style.dim('(project)')}\n`);
   for (const entry of written) {
     const meta = clients[entry.client];
     console.log(`  ${style.cyan('•')} ${style.bold(meta.color(meta.label))}`);
@@ -611,6 +700,12 @@ export async function runLocalConfig(argv) {
   }
   if (selectedClients.has('cursor')) {
     console.log('  - Cursor: restart Cursor or reload MCP, then confirm the server under Settings -> MCP.');
+  }
+  if (selectedClients.has('vscode')) {
+    console.log('  - VS Code / Copilot: run MCP: List Servers or reload the workspace, then start the Enfyra server if prompted.');
+  }
+  if (selectedClients.has('antigravity')) {
+    console.log('  - Antigravity: reopen the workspace or reload MCP servers so ./.agents/mcp_config.json is picked up.');
   }
   console.log('  - Re-run this command anytime to update the same Enfyra entries.');
   if (!apiToken) {
