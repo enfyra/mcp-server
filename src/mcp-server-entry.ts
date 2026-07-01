@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Enfyra MCP — stdio server (loaded by index.ts / dist/index.js).
  */
@@ -15,6 +14,40 @@ import { createHash } from 'node:crypto';
 const ENFYRA_API_URL = process.env.ENFYRA_API_URL || 'http://localhost:3000/api';
 const ENFYRA_API_TOKEN = process.env.ENFYRA_API_TOKEN || '';
 const DISCOVERY_FETCH_TIMEOUT_MS = 12000;
+
+type AnyRecord = Record<string, any>;
+type MetadataSummaryOptions = {
+  search?: string;
+  limit?: number;
+  all?: boolean;
+};
+type MethodPatchBody = {
+  buttonColor?: string;
+  textColor?: string;
+  name?: string;
+};
+type RouteCreateBody = {
+  path: string;
+  isEnabled: boolean;
+  description: string;
+  availableMethods: any;
+  mainTable?: { id: any };
+  publicMethods?: any;
+};
+type RouteHandlerBody = {
+  route: { id: string | number };
+  method: { id: any };
+  sourceCode: string;
+  scriptLanguage: 'javascript' | 'typescript';
+  timeout?: number;
+};
+
+function asNonEmptyStringTuple(values: string[], label: string): [string, ...string[]] {
+  if (!values.length) {
+    throw new Error(`${label} must include at least one value.`);
+  }
+  return values as [string, ...string[]];
+}
 
 // Import modules
 import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
@@ -226,7 +259,7 @@ const SCRIPT_BACKED_TABLES = [
   'enfyra_websocket',
   'enfyra_graphql',
   'enfyra_bootstrap_script',
-];
+] as const;
 const SCRIPT_BACKED_TABLE_SET = new Set(SCRIPT_BACKED_TABLES);
 
 const SCRIPT_SOURCE_FIELDS = [
@@ -251,10 +284,10 @@ function inferPrimaryKeyContext(tables) {
   const primaryColumns = tables
     .map((table) => ({ table: table.name, primaryKey: getPrimaryColumn(table)?.name || null }))
     .filter((item) => item.primaryKey);
-  const counts = primaryColumns.reduce((acc, item) => {
-    acc[item.primaryKey] = (acc[item.primaryKey] || 0) + 1;
-    return acc;
-  }, {});
+  const counts: Record<string, number> = {};
+  for (const item of primaryColumns) {
+    counts[item.primaryKey] = (counts[item.primaryKey] || 0) + 1;
+  }
   const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
   return {
     dominantPrimaryKey: dominant,
@@ -339,7 +372,7 @@ function summarizeRoutes(routesResult) {
   }));
 }
 
-function summarizeMetadata(metadata, { search, limit, all = false } = {}) {
+function summarizeMetadata(metadata, { search, limit, all = false }: MetadataSummaryOptions = {}) {
   const tables = normalizeTables(metadata);
   const q = search ? search.toLowerCase() : null;
   const summarized = tables.map((table) => ({
@@ -582,8 +615,8 @@ async function discoveryFetch(path, { fallbackData = [], timeoutMs = DISCOVERY_F
 
 function collectPartialErrors(results) {
   return Object.entries(results)
-    .filter(([, result]) => result?.error)
-    .map(([name, result]) => ({ name, error: result.error }));
+    .filter(([, result]) => (result as AnyRecord)?.error)
+    .map(([name, result]) => ({ name, error: (result as AnyRecord).error }));
 }
 
 async function getMetadataTables() {
@@ -865,7 +898,7 @@ server.tool(
     'Use this before generating schemas, queries, handlers/hooks, SSR app auth, OAuth, Socket.IO, flows, files, or extensions so implementation details follow proven patterns.',
   ].join(' '),
   {
-    category: z.enum(listExampleCategories().map((item) => item.key)).optional().describe('Example category key. Omit to list categories.'),
+    category: z.enum(asNonEmptyStringTuple(listExampleCategories().map((item) => item.key), 'Example categories')).optional().describe('Example category key. Omit to list categories.'),
   },
   async ({ category }) => {
     const result = getExamples(category);
@@ -1817,7 +1850,7 @@ server.tool(
       targetId = getId(existing);
     }
 
-    const body = {};
+    const body: MethodPatchBody = {};
     if (buttonColor !== undefined) {
       body.buttonColor = normalizeHexColorInput(buttonColor, 'buttonColor');
     }
@@ -1995,7 +2028,7 @@ function withMethodNames(records, methodIdNameMap, field = 'methods') {
 }
 
 async function collectRestDefinitionState() {
-  await getValidToken();
+  await getValidToken(ENFYRA_API_URL);
   const [
     metadataContext,
     routes,
@@ -2405,7 +2438,7 @@ server.tool(
       ...(parseJsonArg(headers, {}) || {}),
     };
     if (useAuth) {
-      requestHeaders.Authorization = `Bearer ${await getValidToken()}`;
+      requestHeaders.Authorization = `Bearer ${await getValidToken(ENFYRA_API_URL)}`;
     }
 
     const started = Date.now();
@@ -2513,7 +2546,7 @@ server.tool(
     const methodMap = await getMethodMap();
     const normalizedPath = normalizeRestPath(routePath);
 
-    const body = {
+    const body: RouteCreateBody = {
       path: normalizedPath,
       isEnabled,
       description,
@@ -2591,7 +2624,7 @@ server.tool(
       const methodId = methodMap[methodName.toUpperCase()];
       if (!methodId) throw new Error(`Unknown method: ${methodName}. Valid: ${Object.keys(methodMap).join(', ')}`);
 
-      const body = { route: { id: routeId }, method: { id: methodId }, sourceCode, scriptLanguage };
+      const body: RouteHandlerBody = { route: { id: routeId }, method: { id: methodId }, sourceCode, scriptLanguage };
       if (timeout) body.timeout = timeout;
 
       const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_route_handler', {
