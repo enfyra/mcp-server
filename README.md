@@ -244,19 +244,27 @@ Use `get_enfyra_examples` from the MCP tool list when asking an LLM to generate 
 - files and storage
 - Enfyra admin extensions
 
+Use `discover_enfyra_workflows` when an LLM knows the goal but may not know the right Enfyra tool path. It returns progressive-disclosure workflow matches with first tools, required acknowledgements, verification tools, relevant example categories, and `avoidTools` boundaries that prevent near-correct but unsafe tool choices.
+
+Use `get_enfyra_required_knowledge` before asking an LLM to mutate metadata, schema, routes, permissions, menus, packages, cache state, dynamic server code, or Enfyra extension code. It returns global rules plus acknowledgement keys that write tools verify before saving. Dynamic server code also requires the dynamic-code acknowledgement key, and extension code also requires the extension acknowledgement key.
+
 ## Runtime Safety
 
 The MCP server includes safety guards for LLM callers:
 
 - Generic record mutations validate fields against live metadata.
+- Write tools require `get_enfyra_required_knowledge` acknowledgement before mutating Enfyra state. Discovery, validation, and preview tools remain available without the acknowledgement so agents can read and plan first. If the acknowledgement is missing, the tool error tells the caller to read `get_enfyra_required_knowledge` and pass the required key.
 - Script-backed records validate `sourceCode` through `/admin/script/validate` before saving.
 - `validate_dynamic_script` checks handler, hook, flow, websocket, GraphQL, and bootstrap script source without saving.
 - `validate_extension_code` checks Enfyra admin extension code through `/enfyra_extension/preview` without saving.
+- Dynamic script guidance distinguishes secure repositories (`@REPOS.main`, `@REPOS.secure.<table>`) from trusted internal repositories (`@REPOS.<table>`), and tells agents not to return raw trusted records to users.
 - `compiledCode` is generated from `sourceCode` and may differ textually because macros are expanded; the MCP server never accepts hand-written `compiledCode`.
+- Long source/code values in read responses are written to `/tmp/enfyra-mcp-sources` and returned as length/hash/preview/tmpFile metadata so LLM callers can inspect full source from the file path without truncating tool output.
 - JSON responses include `compressionStats` with estimated token savings. Arrays of objects are converted to columnar form only when the compact shape is smaller than raw JSON.
 - Relation tools reject physical FK/junction names and resolve table ids from exact table names or aliases before schema mutation.
 - Generated code should use relation property names such as `conversation`, `sender`, and `member` instead of physical FK fields such as `conversationId`, `senderId`, or `memberId`.
 - Custom route tools reject `mainTableId` unless the route is the canonical table route.
+- `discover_enfyra_workflows` maps task intent to workflow surfaces before the agent loads detailed examples or guesses between similar tools.
 - Platform operation tools such as `api_endpoint_workflow`, `create_api_endpoint`, `enable_route`, `disable_route`, `delete_route`, `public_route_methods`, `add_route_methods`, `set_table_graphql`, `ensure_guard`, `ensure_field_permission`, `ensure_column_rule`, `ensure_websocket_event`, `choose_flow_step_tool`, fixed-type flow step tools, `ensure_menu`, `ensure_page_extension`, `ensure_global_extension`, and `ensure_widget_extension` resolve metadata ids and validate code before saving.
 - Schema changes are serialized.
 - Destructive deletes return a preview before requiring `confirm=true`.
@@ -295,7 +303,7 @@ Do not create custom login/logout/me routes that manually set Enfyra token cooki
 
 ## Tool Summary
 
-The MCP server exposes tools for metadata discovery, examples, query/CRUD, method management, route lifecycle, route access audit/grant, routes, handlers, hooks, tables, columns, relations, cache reloads, logs, users, roles, packages, menus, extensions, scripts, flows, websocket, files, and `get_enfyra_api_context`.
+The MCP server exposes tools for workflow routing, metadata discovery, required knowledge, examples, query/CRUD, method management, route lifecycle, route access audit/grant, routes, handlers, hooks, tables, columns, relations, cache reloads, logs, users, roles, packages, menus, extensions, scripts, flows, websocket, files, `get_enfyra_api_context`, and `get_enfyra_required_knowledge`.
 
 Routes have two separate controls. `isEnabled` controls runtime registration: disabled routes return `404`. Use `enable_route` and `disable_route` for this lifecycle. `publicMethods` controls anonymous access for enabled routes; use `public_route_methods` and `private_route_methods` for that access boundary.
 

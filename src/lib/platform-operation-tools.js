@@ -2,6 +2,15 @@ import { z } from 'zod';
 
 import { fetchAPI } from './fetch.js';
 import { validateScriptSourceIfPresent } from './mutation-guards.js';
+import {
+  assertDynamicCodeKnowledgeAck,
+  assertDynamicCodeKnowledgeAckIf,
+  assertExtensionKnowledgeAck,
+  assertGlobalRulesAck,
+  dynamicCodeKnowledgeAckParam,
+  extensionKnowledgeAckParam,
+  globalRulesAckParam,
+} from './required-knowledge.js';
 
 function unwrapData(result) {
   return Array.isArray(result?.data) ? result.data : [];
@@ -104,7 +113,8 @@ async function resolveRoute(apiUrl, { path, routeId }) {
   return { route, routes, path: route.path };
 }
 
-async function updateRouteMethods(apiUrl, { path, routeId, methods, mode, isEnabled }) {
+async function updateRouteMethods(apiUrl, { path, routeId, methods, mode, isEnabled, globalRulesAckKey }) {
+  assertGlobalRulesAck(globalRulesAckKey);
   const [{ route }, { methodMap, methodIdNameMap }] = await Promise.all([
     resolveRoute(apiUrl, { path, routeId }),
     getMethodContext(apiUrl),
@@ -134,7 +144,8 @@ async function updateRouteMethods(apiUrl, { path, routeId, methods, mode, isEnab
   };
 }
 
-async function updateRoutePublicMethods(apiUrl, { path, routeId, methods, mode }) {
+async function updateRoutePublicMethods(apiUrl, { path, routeId, methods, mode, globalRulesAckKey }) {
+  assertGlobalRulesAck(globalRulesAckKey);
   const [{ route }, { methodMap, methodIdNameMap }] = await Promise.all([
     resolveRoute(apiUrl, { path, routeId }),
     getMethodContext(apiUrl),
@@ -164,7 +175,8 @@ async function updateRoutePublicMethods(apiUrl, { path, routeId, methods, mode }
   };
 }
 
-async function setRouteEnabled(apiUrl, { path, routeId, isEnabled }) {
+async function setRouteEnabled(apiUrl, { path, routeId, isEnabled, globalRulesAckKey }) {
+  assertGlobalRulesAck(globalRulesAckKey);
   const { route } = await resolveRoute(apiUrl, { path, routeId });
   const before = route?.isEnabled !== false;
   if (before === isEnabled) {
@@ -228,7 +240,7 @@ async function deleteRows(apiUrl, tableName, rows) {
   return deleted;
 }
 
-async function deleteRoute(apiUrl, { path, routeId, expectedPath, confirm }) {
+async function deleteRoute(apiUrl, { path, routeId, expectedPath, confirm, globalRulesAckKey }) {
   const { route } = await resolveRoute(apiUrl, { path, routeId });
   if (expectedPath && route.path !== normalizeRestPath(expectedPath)) {
     throw new Error(`Route path mismatch: resolved ${route.path}, expected ${normalizeRestPath(expectedPath)}.`);
@@ -248,6 +260,7 @@ async function deleteRoute(apiUrl, { path, routeId, expectedPath, confirm }) {
       next: 'Call delete_route again with confirm=true and expectedPath set to this route path to delete the route and related handlers/hooks/permissions/guards.',
     };
   }
+  assertGlobalRulesAck(globalRulesAckKey);
 
   await deleteRows(apiUrl, 'enfyra_route_handler', dependencies.handlers);
   await deleteRows(apiUrl, 'enfyra_pre_hook', dependencies.preHooks);
@@ -297,6 +310,9 @@ function getExtensionThemeContract() {
       'The extension is already mounted inside the Enfyra app shell. Do not add a duplicate page header, centered page wrapper, or root-level page padding.',
       'Page extensions should be full-bleed, responsive, and split large operations into focused pages or UTabs.',
       'Use usePageHeaderRegistry for the shell title and useHeaderActionRegistry/useSubHeaderActionRegistry for page actions.',
+      'Use useMenuNotificationRegistry from global extensions to register sidebar menu notification counts or dots. Register stable ids, target menus by id/path/route, use value for counts, omit value for a dot, and choose color from primary/success/warning/error/info/neutral.',
+      'For shell menu notifications, first decide the signal source. Use a count only when the source already owns an exact count, such as a notification summary endpoint or bounded unread-notification query. Use a dot when a realtime event only proves that something new exists. Do not poll a domain list such as messages, tickets, orders, or jobs solely to decorate the menu; the destination page owns domain fetching.',
+      'Use useAccountPanelRegistry for account panel rows. AccountPanelItem supports count as the preferred numeric/text badge value, badge as a legacy alias, and badgeColor primary/neutral/info/error/warning/success.',
       'For detail/form workflows that should stay left-aligned with empty space on the right, wrap the body in eapp-page-constrained; use eapp-page-constrained-wide only when the workflow genuinely needs more width.',
       'Card/list grids inside the default shell must account for the 280px desktop sidebar. Do not switch general card grids to three columns at lg; use md:grid-cols-2 xl:grid-cols-3 unless a local container proves three columns have enough width.',
     ],
@@ -352,6 +368,7 @@ function getExtensionThemeContract() {
       'Use CommonDrawer for side-panel editing. Open drawers immediately on user action and render loading/error/content inside the drawer instead of waiting for fetch before opening.',
       'Use UTabs for page sections and large grouped forms instead of custom tab bars; the app-level Nuxt UI override owns active and inactive indicators, focus rings, spacing, and theme contrast.',
       'Use UBadge or token-backed badge spans for status. Keep badges legible in both themes with tokenized background, text, and border.',
+      'Use shell registries for shell badges: useAccountPanelRegistry for the account panel and useMenuNotificationRegistry for sidebar menus. Do not draw detached fixed-position badges over the app shell.',
     ],
     loadingAndLists: [
       'For first load of card/list pages, render calm skeleton cards with a slow pulse. Use USkeleton or shared loading components so the app-owned skeleton theme controls contrast and accent matching. For subsequent pagination/filter refreshes, keep the card shells mounted and skeletonize card content until the new list is ready.',
@@ -402,6 +419,12 @@ function getExtensionThemeContract() {
       },
     ],
     compactExample: '<template><section class="min-h-full w-full space-y-4"><article class="eapp-surface-card p-4"><div class="flex items-start justify-between gap-3"><div><p class="text-sm eapp-text-tertiary">Neutral KPI</p><p class="mt-2 text-2xl font-semibold eapp-text-primary">24</p></div><span class="eapp-primary-soft eapp-icon-tile"><UIcon name="lucide:square-stack" class="size-5 eapp-primary-text" /></span></div><div class="mt-3 h-1.5 overflow-hidden eapp-radius-pill eapp-surface-muted"><div class="eapp-primary-solid h-full w-1/2"></div></div></article><section class="eapp-surface-card p-4"><div class="flex items-center justify-between gap-3"><p class="font-semibold eapp-text-primary">Status block stays neutral</p><UBadge color="success" variant="soft">Healthy</UBadge></div></section></section></template>',
+    shellNotificationContract: {
+      menu: 'useMenuNotificationRegistry().register({ id, target: { id?, path?, route? }, value?, color?, title?, order? }). value renders a count/chip; omitting value renders a dot. Parent menus sum numeric child values.',
+      accountPanel: 'useAccountPanelRegistry().register({ id, label, description, icon, count?, badge?, badgeColor?, expanded?, onToggle?, contentComponent? }). count is preferred over badge and the account trigger sums numeric visible item counts, capped at 99+.',
+      lifecycle: 'Register from global extensions for app-wide notification state; stable ids replace previous registrations and component-owned registrations are removed on unmount.',
+      reasoning: 'Counts and dots are different promises. A count says the shell knows an exact or bounded number from an appropriate notification/summary source. A dot says the shell only knows that new attention exists. Avoid fetching the destination domain list just to make a menu badge more precise.',
+    },
     contractAuthority: [
       'This is the authoritative Enfyra theme & color contract. Source of truth: documents/app/theme-color-contract.md. The app owns color through app/utils/primary-colors.ts (Material You seed-to-role generation), app/assets/css/theme.css (semantic variables and Nuxt UI ramps), app/assets/css/main.css (extension-safe semantic utilities), and app/app.config.ts (Nuxt UI component mapping). Pages and extensions only CONSUME classes/Nuxt UI props; they never define colors.',
       'Every color flows from two base layers: --md-* (Material You, runtime primary picker) and --st-* (status). Runtime primary roles are generated with SchemeTonalSpot. Success/warning/info stay fixed status quarts; error follows the generated Material error role through the single --danger-* lane. All Nuxt UI semantic colors (primary/secondary/success/warning/error/info/neutral) are re-pointed to these, so Nuxt UI is used per its docs but colors are decided by Enfyra. This applies to the shell, system pages, and compiled dynamic extensions.',
@@ -624,7 +647,9 @@ async function ensureMenu(apiUrl, {
   permission,
   description,
   isEnabled = true,
+  globalRulesAckKey,
 }) {
+  assertGlobalRulesAck(globalRulesAckKey);
   const normalizedPath = path ? normalizeRestPath(path) : undefined;
   const existing = normalizedPath
     ? await findRecord(apiUrl, 'enfyra_menu', { path: { _eq: normalizedPath } }, 'id,_id,path,label')
@@ -656,7 +681,11 @@ async function ensureExtension(apiUrl, {
   description,
   isEnabled = true,
   version = '1.0.0',
+  globalRulesAckKey,
+  extensionKnowledgeAckKey,
 }) {
+  assertGlobalRulesAck(globalRulesAckKey);
+  assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
   if (type === 'page' && !menuId) {
     throw new Error('menuId is required for page extensions. Use ensure_menu first, then ensure_page_extension.');
   }
@@ -692,7 +721,9 @@ async function ensureFlow(apiUrl, {
   maxExecutions = 100,
   isEnabled = true,
   description,
+  globalRulesAckKey,
 }) {
+  assertGlobalRulesAck(globalRulesAckKey);
   const existing = await findRecord(apiUrl, 'enfyra_flow', { name: { _eq: name } }, 'id,_id,name');
   const operation = await createOrPatch(apiUrl, 'enfyra_flow', existing, {
     name,
@@ -718,7 +749,10 @@ async function ensureFlowStep(apiUrl, {
   scriptLanguage,
   timeout,
   isEnabled,
+  globalRulesAckKey,
+  knowledgeAckKey,
 }) {
+  assertGlobalRulesAck(globalRulesAckKey);
   if (!flowName && !flowId) throw new Error('Provide flowName or flowId.');
   if (flowName && flowId) throw new Error('Provide flowName or flowId, not both.');
   const flow = flowId
@@ -726,6 +760,7 @@ async function ensureFlowStep(apiUrl, {
     : await findRecord(apiUrl, 'enfyra_flow', { name: { _eq: flowName } }, 'id,_id,name');
   if (!flow) throw new Error(`Flow not found: ${flowId || flowName}`);
   const parsedConfig = parseJsonObjectArg('config', config, {});
+  assertDynamicCodeKnowledgeAckIf(Boolean(sourceCode && ['script', 'condition'].includes(type)), knowledgeAckKey);
   const validation = sourceCode && ['script', 'condition'].includes(type)
     ? await validateDynamicScript(apiUrl, sourceCode, scriptLanguage)
     : { validated: false, reason: 'no script validation required' };
@@ -971,7 +1006,12 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
     nextSteps: blocked
       ? [{ tool: 'api_endpoint_workflow', input: { path: normalizedPath, method: methodName, overwrite: true }, reason: blocked.reason }]
       : firstRunnable
-        ? [{ tool: 'api_endpoint_workflow', input: { path: normalizedPath, method: methodName, apply: true }, stepId: firstRunnable.id }]
+        ? [{
+          tool: 'api_endpoint_workflow',
+          input: { path: normalizedPath, method: methodName, apply: true },
+          stepId: firstRunnable.id,
+          requiresKnowledgeAck: firstRunnable.id === 'save_handler' ? 'dynamicCodeAckKey from get_enfyra_required_knowledge' : undefined,
+        }]
         : [],
   };
 }
@@ -1020,6 +1060,7 @@ async function applyApiEndpointWorkflowStep(apiUrl, state, opts, stepId) {
   }
 
   if (selectedStep.id === 'save_handler') {
+    assertDynamicCodeKnowledgeAck(opts.knowledgeAckKey);
     if (!endpoint.routeId) throw new Error('Route must exist before saving handler.');
     const body = {
       sourceCode: opts.sourceCode,
@@ -1097,6 +1138,10 @@ async function runApiEndpointWorkflow(apiUrl, opts) {
   const operations = [];
   let completedEphemeralStepId = null;
   if (opts.apply || opts.applyAll) {
+    assertGlobalRulesAck(opts.globalRulesAckKey);
+    if (opts.applyAll && state.steps.some((item) => item.id === 'save_handler' && ['pending', 'waiting'].includes(item.status))) {
+      assertDynamicCodeKnowledgeAck(opts.knowledgeAckKey);
+    }
     const maxSteps = opts.applyAll ? 10 : 1;
     for (let i = 0; i < maxSteps; i += 1) {
       if (state.blocked || !state.firstRunnable) break;
@@ -1197,8 +1242,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       tableName: z.string().describe('Table name, alias, or id.'),
       isEnabled: z.boolean().describe('Desired GraphQL enabled state for the table.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ tableName, isEnabled }) => {
+    async ({ tableName, isEnabled, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
       const table = resolveTable(await getMetadataTables(ENFYRA_API_URL), tableName);
       const existing = await findRecord(ENFYRA_API_URL, 'enfyra_graphql', { table: { id: { _eq: getId(table) } } }, 'id,_id,table.id,isEnabled');
       const operation = await createOrPatch(ENFYRA_API_URL, 'enfyra_graphql', existing, {
@@ -1224,13 +1271,15 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
       methods: z.array(z.string()).min(1).describe('HTTP method names to add.'),
       isEnabled: z.boolean().optional().describe('Optionally enable/disable the route in the same safe patch.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ path, routeId, methods, isEnabled }) => jsonText(await updateRouteMethods(ENFYRA_API_URL, {
+    async ({ path, routeId, methods, isEnabled, globalRulesAckKey }) => jsonText(await updateRouteMethods(ENFYRA_API_URL, {
       path,
       routeId,
       methods,
       mode: 'merge',
       isEnabled,
+      globalRulesAckKey,
     })),
   );
 
@@ -1242,13 +1291,15 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
       methods: z.array(z.string()).min(1).describe('Exact HTTP method names for availableMethods.'),
       isEnabled: z.boolean().optional().describe('Optionally enable/disable the route in the same safe patch.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ path, routeId, methods, isEnabled }) => jsonText(await updateRouteMethods(ENFYRA_API_URL, {
+    async ({ path, routeId, methods, isEnabled, globalRulesAckKey }) => jsonText(await updateRouteMethods(ENFYRA_API_URL, {
       path,
       routeId,
       methods,
       mode: 'replace',
       isEnabled,
+      globalRulesAckKey,
     })),
   );
 
@@ -1260,13 +1311,15 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
       methods: z.array(z.string()).min(1).describe('HTTP method names to remove.'),
       isEnabled: z.boolean().optional().describe('Optionally enable/disable the route in the same safe patch.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ path, routeId, methods, isEnabled }) => jsonText(await updateRouteMethods(ENFYRA_API_URL, {
+    async ({ path, routeId, methods, isEnabled, globalRulesAckKey }) => jsonText(await updateRouteMethods(ENFYRA_API_URL, {
       path,
       routeId,
       methods,
       mode: 'remove',
       isEnabled,
+      globalRulesAckKey,
     })),
   );
 
@@ -1276,11 +1329,13 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().optional().describe('Route path, e.g. /sum. Use either path or routeId.'),
       routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ path, routeId }) => jsonText(await setRouteEnabled(ENFYRA_API_URL, {
+    async ({ path, routeId, globalRulesAckKey }) => jsonText(await setRouteEnabled(ENFYRA_API_URL, {
       path,
       routeId,
       isEnabled: true,
+      globalRulesAckKey,
     })),
   );
 
@@ -1290,11 +1345,13 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().optional().describe('Route path, e.g. /sum. Use either path or routeId.'),
       routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ path, routeId }) => jsonText(await setRouteEnabled(ENFYRA_API_URL, {
+    async ({ path, routeId, globalRulesAckKey }) => jsonText(await setRouteEnabled(ENFYRA_API_URL, {
       path,
       routeId,
       isEnabled: false,
+      globalRulesAckKey,
     })),
   );
 
@@ -1306,6 +1363,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
       expectedPath: z.string().optional().describe('Optional safety check. When confirm=true, pass the path returned by the preview.'),
       confirm: z.boolean().optional().default(false).describe('false returns a dependency preview only; true deletes the route and related route-owned records.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
     },
     async (input) => jsonText(await deleteRoute(ENFYRA_API_URL, input)),
   );
@@ -1317,12 +1375,14 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       path: z.string().optional().describe('Route path, e.g. /sum. Use either path or routeId.'),
       routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
       methods: z.array(z.string()).min(1).describe('HTTP method names to make public. They must already be available on the route.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ path, routeId, methods }) => jsonText(await updateRoutePublicMethods(ENFYRA_API_URL, {
+    async ({ path, routeId, methods, globalRulesAckKey }) => jsonText(await updateRoutePublicMethods(ENFYRA_API_URL, {
       path,
       routeId,
       methods,
       mode: 'merge',
+      globalRulesAckKey,
     })),
   );
 
@@ -1333,12 +1393,14 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       path: z.string().optional().describe('Route path, e.g. /sum. Use either path or routeId.'),
       routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
       methods: z.array(z.string()).min(1).describe('HTTP method names to remove from publicMethods.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ path, routeId, methods }) => jsonText(await updateRoutePublicMethods(ENFYRA_API_URL, {
+    async ({ path, routeId, methods, globalRulesAckKey }) => jsonText(await updateRoutePublicMethods(ENFYRA_API_URL, {
       path,
       routeId,
       methods,
       mode: 'remove',
+      globalRulesAckKey,
     })),
   );
 
@@ -1369,6 +1431,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       apply: z.boolean().optional().default(false).describe('false returns plan only; true applies exactly the next pending step.'),
       applyAll: z.boolean().optional().default(false).describe('true applies all safe pending steps in order. Prefer apply=true for production changes.'),
       stepId: z.string().optional().describe('Optional pending step id to apply. Omit to apply the next pending step.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when apply/applyAll mutates metadata. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required when apply/applyAll reaches the save_handler step. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
     },
     async (input) => jsonText(await runApiEndpointWorkflow(ENFYRA_API_URL, input)),
   );
@@ -1377,7 +1441,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     'create_api_endpoint',
     [
       'Business operation: create or update a custom REST endpoint with a handler in one safe operation.',
-      'Use this when the user asks for a new route/endpoint/API path that computes or orchestrates behavior, such as GET /sum or POST /webhook.',
+      'Prefer api_endpoint_workflow when route access, role/user permissions, overwrite decisions, or multi-step planning matter.',
+      'Use this one-shot helper only when the endpoint contract is already clear and no authenticated route-permission step is needed in the same operation, such as a simple public webhook or private admin-only utility that will be granted separately.',
       'It creates the route without mainTableId, ensures the method is available, validates sourceCode, creates or overwrites the route handler, optionally makes the method public, reloads routes, and can smoke-test the endpoint.',
       'Use table/schema tools separately when the user needs persisted data. This tool is for custom behavior endpoints.',
     ].join(' '),
@@ -1392,8 +1457,12 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       overwrite: z.boolean().optional().default(false).describe('If a handler already exists for route+method, false fails; true updates its sourceCode.'),
       smokeTestQuery: z.string().optional().describe('Optional query JSON object for a smoke test after save, e.g. {"a":"1","b":"2"}.'),
       smokeTestBody: z.string().optional().describe('Optional body JSON object for a smoke test after save.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
     },
-    async ({ path, method, sourceCode, scriptLanguage, public: makePublic, description, timeout, overwrite, smokeTestQuery, smokeTestBody }) => {
+    async ({ path, method, sourceCode, scriptLanguage, public: makePublic, description, timeout, overwrite, smokeTestQuery, smokeTestBody, globalRulesAckKey, knowledgeAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      assertDynamicCodeKnowledgeAck(knowledgeAckKey);
       const normalizedPath = normalizeRestPath(path);
       const methodName = normalizeMethodName(method);
       const { methodMap, methodIdNameMap } = await getMethodContext(ENFYRA_API_URL);
@@ -1523,8 +1592,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       message: z.string().optional().describe('Custom validation error message.'),
       description: z.string().optional().describe('Admin note.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable the rule.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ tableName, columnName, ruleType, value, message, description, isEnabled }) => {
+    async ({ tableName, columnName, ruleType, value, message, description, isEnabled, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
       const table = resolveTable(await getMetadataTables(ENFYRA_API_URL), tableName);
       const column = resolveColumn(table, columnName);
       const existing = await findRecord(ENFYRA_API_URL, 'enfyra_column_rule', {
@@ -1564,8 +1635,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       condition: z.string().optional().describe('Condition JSON object using field permission DSL.'),
       description: z.string().optional().describe('Admin note.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable the permission.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ tableName, columnName, relationName, action, effect, roleId, roleName, allowedUserIds, condition, description, isEnabled }) => {
+    async ({ tableName, columnName, relationName, action, effect, roleId, roleName, allowedUserIds, condition, description, isEnabled, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
       if (!!columnName === !!relationName) throw new Error('Provide exactly one of columnName or relationName.');
       assertOneScope({ roleId, roleName, allowedUserIds });
       const [tables, role] = await Promise.all([
@@ -1623,8 +1696,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('Admin note.'),
       rules: z.string().optional().describe('Rules JSON array: [{type, config, priority, isEnabled, description, userIds}].'),
       rulesMode: z.enum(['append', 'replace', 'none']).optional().default('append').describe('append creates rules, replace disables existing rules first, none leaves rules unchanged.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ name, guardId, position, routeId, path, methods, combinator, priority, isGlobal, isEnabled, description, rules, rulesMode }) => {
+    async ({ name, guardId, position, routeId, path, methods, combinator, priority, isGlobal, isEnabled, description, rules, rulesMode, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
       if (path && routeId) throw new Error('Provide path or routeId, not both.');
       const ruleInputs = parseJsonArrayArg('rules', rules, []);
       if (position === 'pre_auth') {
@@ -1700,8 +1775,12 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for connection handler.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable gateway.'),
       description: z.string().optional().describe('Admin note.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required when sourceCode is provided. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
     },
-    async ({ path, sourceCode, scriptLanguage, isEnabled, description }) => {
+    async ({ path, sourceCode, scriptLanguage, isEnabled, description, globalRulesAckKey, knowledgeAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      assertDynamicCodeKnowledgeAckIf(sourceCode !== undefined, knowledgeAckKey);
       const normalizedPath = normalizeRestPath(path);
       const validation = sourceCode === undefined
         ? { validated: false, reason: 'no sourceCode' }
@@ -1730,8 +1809,12 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable event.'),
       description: z.string().optional().describe('Admin note.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
     },
-    async ({ gatewayPath, gatewayId, eventName, sourceCode, scriptLanguage, isEnabled, description }) => {
+    async ({ gatewayPath, gatewayId, eventName, sourceCode, scriptLanguage, isEnabled, description, globalRulesAckKey, knowledgeAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      assertDynamicCodeKnowledgeAck(knowledgeAckKey);
       if (!gatewayPath && !gatewayId) throw new Error('Provide gatewayPath or gatewayId.');
       if (gatewayPath && gatewayId) throw new Error('Provide gatewayPath or gatewayId, not both.');
       const gateway = gatewayId
@@ -1765,14 +1848,16 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       maxExecutions: z.number().int().positive().optional().default(100).describe('Execution history cap.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable flow.'),
       description: z.string().optional().describe('Admin note.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ name, timeout, maxExecutions, isEnabled, description }) => jsonText(await ensureFlow(ENFYRA_API_URL, {
+    async ({ name, timeout, maxExecutions, isEnabled, description, globalRulesAckKey }) => jsonText(await ensureFlow(ENFYRA_API_URL, {
       name,
       triggerType: 'manual',
       timeout,
       maxExecutions,
       isEnabled,
       description,
+      globalRulesAckKey,
     })),
   );
 
@@ -1786,8 +1871,9 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       maxExecutions: z.number().int().positive().optional().default(100).describe('Execution history cap.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable flow.'),
       description: z.string().optional().describe('Admin note.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ name, triggerConfig, timeout, maxExecutions, isEnabled, description }) => jsonText(await ensureFlow(ENFYRA_API_URL, {
+    async ({ name, triggerConfig, timeout, maxExecutions, isEnabled, description, globalRulesAckKey }) => jsonText(await ensureFlow(ENFYRA_API_URL, {
       name,
       triggerType: 'schedule',
       triggerConfig,
@@ -1795,6 +1881,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       maxExecutions,
       isEnabled,
       description,
+      globalRulesAckKey,
     })),
   );
 
@@ -1833,6 +1920,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1853,6 +1942,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1871,6 +1962,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1889,6 +1981,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1907,6 +2000,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1925,6 +2019,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1943,6 +2038,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1961,6 +2057,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1979,6 +2076,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -1997,6 +2095,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
       timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
       ...input,
@@ -2016,6 +2115,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       permission: z.string().optional().describe('Menu permission JSON object.'),
       description: z.string().optional().describe('Admin note.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable menu.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
     async (input) => jsonText({
       action: 'menu_ensured',
@@ -2033,6 +2133,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('Extension description.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
       version: z.string().optional().default('1.0.0').describe('Extension version.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
     },
     async (input) => jsonText({
       action: 'page_extension_ensured',
@@ -2049,6 +2151,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('Extension description.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
       version: z.string().optional().default('1.0.0').describe('Extension version.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
     },
     async (input) => jsonText({
       action: 'global_extension_ensured',
@@ -2065,6 +2169,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('Extension description.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
       version: z.string().optional().default('1.0.0').describe('Extension version.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
     },
     async (input) => jsonText({
       action: 'widget_extension_ensured',

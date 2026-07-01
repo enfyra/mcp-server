@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
 import { jsonContent } from './response-format.js';
+import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
 
 let schemaQueue = Promise.resolve();
 
@@ -308,10 +309,11 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   const apiBase = ENFYRA_API_URL.replace(/\/$/, '');
 
   async function appendColumnToTable(args) {
+    assertGlobalRulesAck(args.globalRulesAckKey);
     return withSchemaQueue(async () => {
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, args.tableId);
     if (!tableData) {
-      return { content: [{ type: 'text', text: `Error: Table with ID ${args.tableId} not found.` }] };
+      throw new Error(`Table with ID ${args.tableId} not found.`);
     }
 
     const existingColumns = getPatchableColumns(tableData.columns);
@@ -323,13 +325,17 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       columnName: args.name,
     });
 
-    return {
-      content: [{ type: 'text', text: `Column "${args.name}" added to table ${args.tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
-    };
+    return jsonContent({
+      action: 'column_created',
+      tableId: args.tableId,
+      columnName: args.name,
+      result,
+    });
     });
   }
 
   async function appendRelationToTable(args) {
+    assertGlobalRulesAck(args.globalRulesAckKey);
     return withSchemaQueue(async () => {
     assertNoForbiddenRelationKeys(args);
     const { sourceTableId, targetTableId, type, propertyName, inversePropertyName, mappedBy, isNullable, onDelete, description } = args;
@@ -338,7 +344,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     const resolvedTargetTableId = resolveTableIdentifierFromMetadata(metadata, targetTableId, 'targetTableId');
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, resolvedSourceTableId);
     if (!tableData) {
-      return { content: [{ type: 'text', text: `Error: Table ${sourceTableId} not found.` }] };
+      throw new Error(`Table ${sourceTableId} not found.`);
     }
     const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
     const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
@@ -353,17 +359,19 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       action: 'create',
       propertyName,
     });
-    return {
-      content: [{ type: 'text', text: `Relation created: ${propertyName} (${type}) from table ${resolvedSourceTableId} → ${resolvedTargetTableId}.\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
-    };
+    return jsonContent({
+      action: 'relation_created',
+      relation: { propertyName, type, sourceTableId: resolvedSourceTableId, targetTableId: resolvedTargetTableId },
+      result,
+    });
     });
   }
 
-  async function removeColumnFromTable({ tableId, columnId, confirm }) {
+  async function removeColumnFromTable({ tableId, columnId, confirm, globalRulesAckKey }) {
     return withSchemaQueue(async () => {
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
     if (!tableData) {
-      return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
+      throw new Error(`Table with ID ${tableId} not found.`);
     }
 
     const existingColumns = getPatchableColumns(tableData.columns);
@@ -385,6 +393,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         }, null, 2) }],
       };
     }
+    assertGlobalRulesAck(globalRulesAckKey);
 
     const columns = existingColumns
       .filter(col => String(getId(col)) !== String(columnId))
@@ -395,17 +404,20 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       columnId,
     });
 
-    return {
-      content: [{ type: 'text', text: `Column ${columnId} deleted from table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
-    };
+    return jsonContent({
+      action: 'column_deleted',
+      tableId,
+      columnId,
+      result,
+    });
     });
   }
 
-  async function removeRelationFromTable({ tableId, relationId, confirm }) {
+  async function removeRelationFromTable({ tableId, relationId, confirm, globalRulesAckKey }) {
     return withSchemaQueue(async () => {
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
     if (!tableData) {
-      return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
+      throw new Error(`Table with ID ${tableId} not found.`);
     }
 
     const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
@@ -427,6 +439,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         }, null, 2) }],
       };
     }
+    assertGlobalRulesAck(globalRulesAckKey);
 
     const relations = existingRelations
       .filter(rel => String(getId(rel)) !== String(relationId))
@@ -437,9 +450,12 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       relationId,
     });
 
-    return {
-      content: [{ type: 'text', text: `Relation ${relationId} deleted from table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
-    };
+    return jsonContent({
+      action: 'relation_deleted',
+      tableId,
+      relationId,
+      result,
+    });
     });
   }
 
@@ -458,6 +474,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     defaultValue: z.string().optional().describe('Default value as JSON string or backend-supported literal.'),
     description: z.string().optional().describe('Column description.'),
     options: z.string().optional().describe('Column options as JSON string (e.g., enum values).'),
+    globalRulesAckKey: globalRulesAckParam(z),
   };
 
   const relationCreateSchema = {
@@ -477,18 +494,21 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     targetColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
     junctionSourceColumn: z.never().optional().describe('Forbidden. Use relation property names only; Enfyra derives junction columns.'),
     junctionTargetColumn: z.never().optional().describe('Forbidden. Use relation property names only; Enfyra derives junction columns.'),
+    globalRulesAckKey: globalRulesAckParam(z),
   };
 
   const columnDeleteSchema = {
     tableId: z.string().describe('Table definition ID.'),
     columnId: z.string().describe('Column definition ID to delete.'),
     confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
+    globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
   };
 
   const relationDeleteSchema = {
     tableId: z.string().describe('Table definition ID (source table of the relation).'),
     relationId: z.string().describe('Relation definition ID to delete.'),
     confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
+    globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
   };
 
   // ─── READ ───
@@ -565,8 +585,10 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id, {"id": <id>}, or an exact table name that MCP resolves to an id before mutation. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Omit inversePropertyName unless a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal needs the reverse field. Example only when parent posts are queried: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
       indexes: z.string().optional().describe('JSON array of logical index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Example: [["member","isRead","conversation"],["conversation","member","isRead"]]'),
       uniques: z.string().optional().describe('JSON array of logical unique field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Example: [["message","member"]]'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson, indexes: indexesJson, uniques: uniquesJson }) => withSchemaQueue(async () => {
+    async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson, indexes: indexesJson, uniques: uniquesJson, globalRulesAckKey }) => withSchemaQueue(async () => {
+      assertGlobalRulesAck(globalRulesAckKey);
       const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
       const userColumns = parseJsonArrayParam('columns', columnsJson);
       const parsedRelations = parseJsonArrayParam('relations', relationsJson).map(normalizeRelationForTablePatch);
@@ -602,9 +624,25 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         indexes.length ? `Index group(s): ${indexes.length}.` : null,
         uniques.length ? `Unique group(s): ${uniques.length}.` : null,
       ].filter(Boolean).join(' ');
-      return {
-        content: [{ type: 'text', text: `${colHint}\n${relHint}${constraintHint ? `\n${constraintHint}` : ''}\n${restHint}\n\nFull result:\n${JSON.stringify(result, null, 2)}` }],
-      };
+      return jsonContent({
+        action: 'table_created',
+        table: { id: createdTableId, name, routePath },
+        summary: {
+          columnCount: userColumns.length + 1,
+          createdColumnCount: userColumns.length,
+          relationCount: userRelations.length,
+          indexGroupCount: indexes.length,
+          uniqueGroupCount: uniques.length,
+        },
+        rest: {
+          base,
+          routePath,
+          operations: ['GET /<table>', 'POST /<table>', 'PATCH /<table>/:id', 'DELETE /<table>/:id'],
+          noGetById: true,
+        },
+        message: [colHint, relHint, constraintHint, restHint].filter(Boolean).join('\n'),
+        result,
+      });
     })
   );
 
@@ -627,8 +665,10 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       graphqlEnabled: z.boolean().optional().describe('Enable or disable GraphQL for this table by syncing enfyra_graphql.isEnabled. GraphQL table data still requires Bearer auth; anonymous root or schema probes may return 200.'),
       indexes: z.string().optional().describe('Complete JSON array of logical index field groups to store on enfyra_table.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear.'),
       uniques: z.string().optional().describe('Complete JSON array of logical unique field groups to store on enfyra_table.uniques. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current uniques; pass [] to clear.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled, indexes: indexesJson, uniques: uniquesJson }) => withSchemaQueue(async () => {
+    async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled, indexes: indexesJson, uniques: uniquesJson, globalRulesAckKey }) => withSchemaQueue(async () => {
+      assertGlobalRulesAck(globalRulesAckKey);
       const body = {};
       if (name !== undefined) body.name = name;
       if (alias !== undefined) body.alias = alias;
@@ -639,9 +679,11 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       if (uniquesJson !== undefined) body.uniques = normalizeConstraintGroups('uniques', parseJsonArrayParam('uniques', uniquesJson));
 
       const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, body);
-      return {
-        content: [{ type: 'text', text: `Table ${tableId} updated.\n\n${JSON.stringify(result, null, 2)}` }],
-      };
+      return jsonContent({
+        action: 'table_updated',
+        tableId,
+        result,
+      });
     })
   );
 
@@ -657,8 +699,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     {
       tableId: z.string().describe('Table definition ID to delete.'),
       confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
     },
-    async ({ tableId, confirm }) => withSchemaQueue(async () => {
+    async ({ tableId, confirm, globalRulesAckKey }) => withSchemaQueue(async () => {
       const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
       if (!confirm) {
         return {
@@ -673,12 +716,15 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           }, null, 2) }],
         };
       }
+      assertGlobalRulesAck(globalRulesAckKey);
       const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}`, {
         method: 'DELETE',
       });
-      return {
-        content: [{ type: 'text', text: `Table ${tableId} deleted.\n\n${JSON.stringify(result, null, 2)}` }],
-      };
+      return jsonContent({
+        action: 'table_deleted',
+        tableId,
+        result,
+      });
     })
   );
 
@@ -720,11 +766,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       defaultValue: z.string().optional().describe('New default value as JSON string.'),
       description: z.string().optional().describe('New description.'),
       options: z.string().optional().describe('New options as JSON string.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options }) => withSchemaQueue(async () => {
+    async ({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options, globalRulesAckKey }) => withSchemaQueue(async () => {
+      assertGlobalRulesAck(globalRulesAckKey);
       const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
       if (!tableData) {
-        return { content: [{ type: 'text', text: `Error: Table with ID ${tableId} not found.` }] };
+        throw new Error(`Table with ID ${tableId} not found.`);
       }
 
       const existingColumns = getPatchableColumns(tableData.columns);
@@ -754,9 +802,12 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         columnId,
       });
 
-      return {
-        content: [{ type: 'text', text: `Column ${columnId} updated on table ${tableId}.\n\n${JSON.stringify(result, null, 2)}` }],
-      };
+      return jsonContent({
+        action: 'column_updated',
+        tableId,
+        columnId,
+        result,
+      });
     })
   );
 

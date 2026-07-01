@@ -20,11 +20,23 @@ import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTo
 import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
 import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instructions.js';
 import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
+import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './lib/tool-routing.js';
 import { registerTableTools } from './lib/table-tools.js';
 import { registerPlatformOperationTools } from './lib/platform-operation-tools.js';
-import { prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
+import { parseRecordData, prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
+import {
+  assertDynamicCodeKnowledgeAck,
+  assertDynamicCodeKnowledgeAckIf,
+  assertExtensionKnowledgeAckIf,
+  assertGlobalRulesAck,
+  buildRequiredKnowledgePayload,
+  dynamicCodeKnowledgeAckParam,
+  extensionKnowledgeAckParam,
+  globalRulesAckParam,
+} from './lib/required-knowledge.js';
 import { validateMainTableRoutePath } from './lib/route-guards.js';
 import { installColumnarToolFormatter, jsonContent } from './lib/response-format.js';
+import { compactSourceFields, writeSourceArtifact } from './lib/source-artifacts.js';
 import {
   findRoutePermission,
   mergeMethodNames,
@@ -208,6 +220,7 @@ const SCRIPT_BACKED_TABLES = [
   'enfyra_graphql',
   'enfyra_bootstrap_script',
 ];
+const SCRIPT_BACKED_TABLE_SET = new Set(SCRIPT_BACKED_TABLES);
 
 const SCRIPT_SOURCE_FIELDS = [
   'sourceCode',
@@ -319,7 +332,7 @@ function summarizeRoutes(routesResult) {
   }));
 }
 
-function summarizeMetadata(metadata, { search, limit } = {}) {
+function summarizeMetadata(metadata, { search, limit, all = false } = {}) {
   const tables = normalizeTables(metadata);
   const q = search ? search.toLowerCase() : null;
   const summarized = tables.map((table) => ({
@@ -334,11 +347,13 @@ function summarizeMetadata(metadata, { search, limit } = {}) {
   const matched = q
     ? summarized.filter((table) => JSON.stringify(table).toLowerCase().includes(q))
     : summarized;
-  const outputLimit = limit || 30;
+  const outputLimit = all ? matched.length : (limit || 30);
   return {
     tableCount: tables.length,
     matchedTableCount: matched.length,
     returnedTableCount: Math.min(matched.length, outputLimit),
+    complete: all || outputLimit >= matched.length,
+    hardCap: all ? null : outputLimit,
     search: search || null,
     tables: matched.slice(0, outputLimit),
   };
@@ -596,6 +611,12 @@ async function prepareGenericMutation(tableName, data) {
   });
 }
 
+function assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, extensionKnowledgeAckKey }) {
+  const payload = parseRecordData(data);
+  assertDynamicCodeKnowledgeAckIf(SCRIPT_BACKED_TABLE_SET.has(tableName) && typeof payload.sourceCode === 'string', knowledgeAckKey);
+  assertExtensionKnowledgeAckIf(tableName === 'enfyra_extension' && typeof payload.code === 'string', extensionKnowledgeAckKey);
+}
+
 function parseQueryParamsArg(queryParams) {
   const parsed = parseJsonArg(queryParams, {});
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
@@ -775,19 +796,35 @@ installColumnarToolFormatter(server);
 // METADATA TOOLS
 // ============================================================================
 
+server.tool(
+  'get_enfyra_required_knowledge',
+  [
+    'Return required Enfyra knowledge and acknowledgement keys for MCP code-writing tools.',
+    'Call this before creating or updating dynamic server code or Enfyra extension code. Read the returned contracts and pass the matching ack key into write tools.',
+  ].join(' '),
+  {},
+  async () => jsonContent(buildRequiredKnowledgePayload()),
+);
+
 server.tool('get_all_metadata', 'Get concise metadata summary for all tables. Use get_table_metadata or inspect_table for detail.', {
   includeFull: z.boolean().optional().default(false).describe('Return full raw metadata. Default false to keep MCP context small.'),
   search: z.string().optional().describe('Optional table-name/alias substring filter.'),
   limit: z.number().optional().describe('Maximum tables returned after search. Default 30.'),
-}, async ({ includeFull, search, limit }) => {
+  all: z.boolean().optional().default(false).describe('Return every matched table summary. Use when a complete table list is required.'),
+}, async ({ includeFull, search, limit, all }) => {
+  if (all && limit !== undefined) {
+    throw new Error('get_all_metadata accepts either all=true or limit, not both.');
+  }
   const result = await fetchAPI(ENFYRA_API_URL, '/metadata');
   const payload = includeFull
     ? result
     : {
         statusCode: result?.statusCode,
         success: result?.success,
-        ...summarizeMetadata(result, { search, limit }),
-        detailHint: 'Default response is capped and minimal. Call get_table_metadata({ tableName }) or inspect_table({ tableName }) for columns, relations, and route context.',
+        ...summarizeMetadata(result, { search, limit, all }),
+        detailHint: all
+          ? 'Complete summary returned. Call get_table_metadata({ tableName }) or inspect_table({ tableName }) for columns, relations, and route context.'
+          : 'Default response is capped and minimal. Pass all=true for a complete summary, or call get_table_metadata({ tableName }) / inspect_table({ tableName }) for detail.',
       };
   return jsonContent(payload);
 });
@@ -822,6 +859,23 @@ server.tool(
     const result = getExamples(category);
     return jsonContent(result);
   },
+);
+
+server.tool(
+  'discover_enfyra_workflows',
+  [
+    'Progressive-disclosure router for the Enfyra MCP tool surface.',
+    'Call this when the task intent is clear but the right Enfyra tool path is not.',
+    'Returns matched workflows, first tools, required acknowledgement keys, verification tools, and avoidTools negative-routing boundaries.',
+  ].join(' '),
+  {
+    intent: z.string().optional().describe('Plain-language task goal, e.g. "add a menu chip when support tickets arrive".'),
+    surface: z.enum(WORKFLOW_SURFACES).optional().describe('Known surface when the caller can classify the task. Omit to infer from intent.'),
+    risk: z.enum(['read', 'write', 'destructive', 'debug', 'unknown']).optional().default('unknown').describe('Highest expected operation risk.'),
+    detail: z.enum(['summary', 'plan', 'full']).optional().default('summary').describe('summary lists candidate workflows; plan adds tool sequence and avoidTools; full also includes matching keywords.'),
+    limit: z.number().int().positive().max(10).optional().default(5).describe('Maximum workflows to return.'),
+  },
+  async (input) => jsonContent(discoverWorkflowRoutes(input)),
 );
 
 server.tool(
@@ -1051,6 +1105,7 @@ server.tool(
         deep: 'Nested relation fetch object keyed by relation propertyName.',
       },
       countPattern: 'For counts, query only fields=id with limit=1 and request meta. Use meta=totalCount without a filter, or meta=filterCount when a filter is supplied. MCP count_records wraps this pattern.',
+      security: 'Filters, sorts, counts, and aggregate values can leak information even when a field is not selected. In generated public/user-facing APIs, do not filter, sort, count, or aggregate unpublished fields or private relations unless the endpoint intentionally exposes that fact.',
       deep: {
         shape: '{ [relationName]: { fields?, filter?, sort?, limit?, page?, deep? } }',
         rules: [
@@ -1180,7 +1235,7 @@ server.tool(
         },
         handler: {
           runs: 'Main route logic, or canonical CRUD if no handler overrides.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REQ', '@RES when response streaming is available', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main', '@REPOS.<table>', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@PKGS', '@SOCKET global emit helpers/roomSize', '@TRIGGER'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REQ', '@RES when response streaming is available', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main secure route main table repo', '@REPOS.secure.<table> secure explicit table repo', '@REPOS.<table> trusted internal table repo', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@PKGS', '@SOCKET global emit helpers/roomSize', '@TRIGGER'],
           queryContract: 'When a handler wraps a canonical table read, pass through client fields/deep/sort/page/limit/meta/aggregate/debugMode unless the route is a clearly custom summary or workflow endpoint.',
           returnBehavior: 'Return value becomes response body unless post-hook changes it.',
         },
@@ -1217,7 +1272,9 @@ server.tool(
       },
       helpers: {
         repos: {
-          scopes: '$repos.main is the canonical repository for the route main table and preserves normal route query behavior. $repos.<table> is an explicit internal repository for table-specific logic. Do not generate $repos.secure.<table>; current runtime does not expose table methods there.',
+          scopes: '$repos.main is the secure repository for the route main table and preserves normal route query behavior. $repos.secure.<table> is the secure repository for explicit table access in public/user-facing custom handlers, hooks, websocket scripts, flows that return data, and third-party app integrations. $repos.<table> is a trusted internal repository for server-owned maintenance/admin logic that intentionally needs hidden fields; never return raw trusted-repo records to users.',
+          security: 'Secure repos enforce the normal field visibility/projection path, including unpublished columns and relations. Trusted repos bypass that exposure boundary; if trusted access is necessary, project or sanitize the result before returning it. Authorization is still required in either path: enforce route access plus owner/tenant filters or membership checks.',
+          sensitiveQuerySurface: 'Filters, sort helpers, counts, and aggregate values on unpublished fields or private relations can leak information even when the value is not selected. Do not expose aggregate, _max, _min, _count, or predicate-oracle behavior over hidden fields in generated user-facing endpoints.',
           mutationReturnShape: '$repos.<table>.create({ data }) and $repos.<table>.update({ id, data }) return a collection-shaped result: { data: [...], count? }. data is always an array for create/update, even for one created/updated record. If a script needs the single record object, it must read result.data[0] or result.data?.[0] ?? null.',
           preferredExample: 'const result = await @REPOS.main.create({ data: @BODY }); const record = result.data?.[0] ?? null; return record;',
           wrongSingleRecordAccess: 'Do not use result.data.id, do not return result.data when one object is expected, and do not assume create/update returns the bare row object.',
@@ -1288,7 +1345,7 @@ server.tool('query_table', 'Query any route-backed table. Response is minimal un
   fields: z.array(z.string()).optional().describe('Fields to select. If omitted, MCP selects only the table primary key to avoid oversized responses.'),
   meta: z.string().optional().describe('Optional REST meta request, e.g. "totalCount", "filterCount", or aggregate modes supported by the route. Use count_records for simple counts.'),
   deep: z.string().optional().describe('Optional deep relation fetch object as JSON string. Keys must be relation propertyName values.'),
-  aggregate: z.string().optional().describe('Optional aggregate object as JSON string, keyed by real fields/relations. Results are returned in response.meta.aggregate when supported.'),
+  aggregate: z.string().optional().describe('Optional aggregate object as JSON string, keyed by real fields/relations. Results are returned in response.meta.aggregate when supported. Do not request aggregates over hidden fields/private relations in user-facing APIs.'),
 }, async ({ tableName, filter, sort, page, limit, all, fields, meta, deep, aggregate }) => {
   if (!all && limit === undefined) {
     throw new Error('query_table requires either limit or all=true. Do not rely on implicit default page sizes.');
@@ -1329,7 +1386,7 @@ server.tool('query_table', 'Query any route-backed table. Response is minimal un
     },
     minimalDefaultApplied: !(fields && fields.length > 0),
     meta: result?.meta,
-    data: result?.data || [],
+    data: compactSourceFields(result?.data || [], { tableName }),
     detailHint: fields && fields.length > 0
       ? undefined
       : 'Only the primary key was returned because fields was omitted. Re-run query_table with explicit fields for details, or use inspect_table to find valid field names.',
@@ -1410,7 +1467,7 @@ server.tool(
         tableName,
         primaryKey,
         fields: selectedFields,
-        data: one,
+        data: compactSourceFields(one, { tableName }),
         detailHint: fields && fields.length > 0 ? undefined : 'Only the primary key was returned. Pass fields for details.',
       }, null, 2) }] };
     }
@@ -1428,7 +1485,7 @@ server.tool(
     return { content: [{ type: 'text', text: JSON.stringify({
       tableName,
       fields: selectedFields,
-      data: result.data?.[0] || null,
+      data: compactSourceFields(result.data?.[0] || null, { tableName }),
       detailHint: fields && fields.length > 0 ? undefined : 'Only the primary key was returned. Pass fields for details.',
     }, null, 2) }] };
   },
@@ -1442,8 +1499,13 @@ server.tool('create_record', 'Create a new record in any route-backed table. The
   tableName: z.string().describe('Table name to insert into'),
   data: z.string().describe('Record data as JSON string'),
   queryParams: z.string().optional().describe('Optional query params as JSON object string, e.g. {"expired_at":"2026-09-20"}. Use for route contracts that intentionally keep workflow fields out of the validated body.'),
-}, async ({ tableName, data, queryParams }) => {
+  globalRulesAckKey: globalRulesAckParam(z),
+  knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required only when data contains sourceCode. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
+  extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required only when tableName is enfyra_extension and data contains code. Use extensionAckKey from get_enfyra_required_knowledge.'),
+}, async ({ tableName, data, queryParams, globalRulesAckKey, knowledgeAckKey, extensionKnowledgeAckKey }) => {
+  assertGlobalRulesAck(globalRulesAckKey);
   validateTableName(tableName);
+  assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, extensionKnowledgeAckKey });
   const prepared = await prepareGenericMutation(tableName, data);
   const query = parseQueryParamsArg(queryParams);
   const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}`, query), { method: 'POST', body: JSON.stringify(prepared.payload) });
@@ -1458,8 +1520,13 @@ server.tool('update_record', 'Update an existing record by ID using PATCH. The t
   id: z.string().describe('Record ID to update'),
   data: z.string().describe('Fields to update as JSON string'),
   queryParams: z.string().optional().describe('Optional query params as JSON object string for route contracts that intentionally keep workflow fields out of the validated body.'),
-}, async ({ tableName, id, data, queryParams }) => {
+  globalRulesAckKey: globalRulesAckParam(z),
+  knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required only when data contains sourceCode. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
+  extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required only when tableName is enfyra_extension and data contains code. Use extensionAckKey from get_enfyra_required_knowledge.'),
+}, async ({ tableName, id, data, queryParams, globalRulesAckKey, knowledgeAckKey, extensionKnowledgeAckKey }) => {
+  assertGlobalRulesAck(globalRulesAckKey);
   validateTableName(tableName);
+  assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, extensionKnowledgeAckKey });
   const prepared = await prepareGenericMutation(tableName, data);
   const query = parseQueryParamsArg(queryParams);
   const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${id}`, query), { method: 'PATCH', body: JSON.stringify(prepared.payload) });
@@ -1481,12 +1548,14 @@ server.tool(
   },
   async ({ tableName, id }) => {
     const { primaryKey, record, sourceField, sourceCode } = await fetchScriptRecord(tableName, id);
+    const sourceArtifact = writeSourceArtifact({ tableName, id, fieldName: sourceField, source: sourceCode });
     return { content: [{ type: 'text', text: JSON.stringify({
       tableName,
       id,
       primaryKey,
       sourceField,
-      sourceCode,
+      sourceFile: sourceArtifact.tmpFile,
+      sourcePreview: sourceArtifact.preview,
       sourceLength: sourceCode.length,
       sourceSha256: sha256(sourceCode),
       scriptLanguage: record.scriptLanguage || record.language || null,
@@ -1511,8 +1580,10 @@ server.tool(
     expectedSourceSha256: z.string().optional().describe('Optional SHA-256 from get_script_source; fails if source changed.'),
     scriptLanguage: z.string().optional().describe('Script language to save. Defaults to existing scriptLanguage or javascript.'),
     apply: z.boolean().optional().default(false).describe('false returns preview only; true validates and saves.'),
+    globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when apply=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+    knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required when apply=true. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
   },
-  async ({ tableName, id, oldText, newText, occurrence, expectedSourceSha256, scriptLanguage, apply }) => {
+  async ({ tableName, id, oldText, newText, occurrence, expectedSourceSha256, scriptLanguage, apply, globalRulesAckKey, knowledgeAckKey }) => {
     const { record, sourceField, sourceCode } = await fetchScriptRecord(tableName, id);
     if (sourceField !== 'sourceCode') {
       throw new Error(`patch_script_source only saves sourceCode records. Record uses "${sourceField}"; use update_record intentionally for this legacy field.`);
@@ -1543,6 +1614,8 @@ server.tool(
     if (!apply) {
       return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
     }
+    assertGlobalRulesAck(globalRulesAckKey);
+    assertDynamicCodeKnowledgeAck(knowledgeAckKey);
     const language = scriptLanguage || record.scriptLanguage || 'javascript';
     const prepared = await prepareGenericMutation(
       tableName,
@@ -1584,8 +1657,12 @@ server.tool(
     id: z.string().describe('Record ID to update'),
     sourceCode: z.string().describe('Editable script sourceCode. Pass the raw code string; do not JSON-escape it yourself.'),
     scriptLanguage: z.string().optional().default('javascript').describe('Script language, usually javascript or typescript'),
+    globalRulesAckKey: globalRulesAckParam(z),
+    knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
   },
-  async ({ tableName, id, sourceCode, scriptLanguage }) => {
+  async ({ tableName, id, sourceCode, scriptLanguage, globalRulesAckKey, knowledgeAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
+    assertDynamicCodeKnowledgeAck(knowledgeAckKey);
     validateTableName(tableName);
     const prepared = await prepareGenericMutation(
       tableName,
@@ -1611,7 +1688,8 @@ server.tool('delete_record', 'Delete a record by ID', {
   id: z.string().describe('Record ID to delete'),
   queryParams: z.string().optional().describe('Optional query params as JSON object string for route-specific confirmation contracts.'),
   confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
-}, async ({ tableName, id, queryParams, confirm }) => {
+  globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+}, async ({ tableName, id, queryParams, confirm, globalRulesAckKey }) => {
   validateTableName(tableName);
   const primaryKey = await getPrimaryFieldName(tableName);
   if (!confirm) {
@@ -1632,6 +1710,7 @@ server.tool('delete_record', 'Delete a record by ID', {
       next: 'Call delete_record again with confirm=true to delete this route-backed record.',
     }, null, 2) }] };
   }
+  assertGlobalRulesAck(globalRulesAckKey);
   const query = parseQueryParamsArg(queryParams);
   const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${id}`, query), { method: 'DELETE' });
   return { content: [{ type: 'text', text: JSON.stringify({
@@ -1672,8 +1751,10 @@ server.tool(
     buttonColor: z.string().describe('Badge background color as full hex, e.g. #dbeafe.'),
     textColor: z.string().describe('Badge text color as full hex, e.g. #1d4ed8.'),
     isSystem: z.boolean().optional().default(false).describe('Set true only for built-in/runtime-owned methods. Normal app methods should leave this false.'),
+    globalRulesAckKey: globalRulesAckParam(z),
   },
-  async ({ method, buttonColor, textColor, isSystem }) => {
+  async ({ method, buttonColor, textColor, isSystem, globalRulesAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
     const normalizedMethod = normalizeMethodNameInput(method);
     const existing = await findMethodRecordByName(normalizedMethod);
     if (existing) {
@@ -1706,8 +1787,10 @@ server.tool(
     method: z.string().optional().describe('Existing method name to find, or new name when id is provided.'),
     buttonColor: z.string().optional().describe('Badge background color as full hex, e.g. #dbeafe.'),
     textColor: z.string().optional().describe('Badge text color as full hex, e.g. #1d4ed8.'),
+    globalRulesAckKey: globalRulesAckParam(z),
   },
-  async ({ id, method, buttonColor, textColor }) => {
+  async ({ id, method, buttonColor, textColor, globalRulesAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
     let targetId = id;
     let existing = null;
     if (!targetId) {
@@ -1752,8 +1835,9 @@ server.tool(
     id: z.string().optional().describe('Method record id. If omitted, method is used to find the record.'),
     method: z.string().optional().describe('Method name to find when id is omitted.'),
     confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
+    globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
   },
-  async ({ id, method, confirm }) => {
+  async ({ id, method, confirm, globalRulesAckKey }) => {
     let targetId = id;
     let target = null;
     if (!targetId) {
@@ -1779,6 +1863,7 @@ server.tool(
         next: 'Call delete_method again with confirm=true to delete.',
       }, null, 2) }] };
     }
+    assertGlobalRulesAck(globalRulesAckKey);
     const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_method/${encodeURIComponent(String(targetId))}`, { method: 'DELETE' });
     _methodMap = null;
     return { content: [{ type: 'text', text: JSON.stringify({
@@ -2050,16 +2135,11 @@ server.tool(
     tableName: z.string().describe('Table name or alias to inspect'),
   },
   async ({ tableName }) => {
-    let state = await collectRestDefinitionState();
-    let table = state.tables.find((item) => item?.name === tableName || item?.alias === tableName);
+    const state = await collectRestDefinitionState();
+    const table = state.tables.find((item) => item?.name === tableName || item?.alias === tableName);
     if (!table) {
-      await fetchAPI(ENFYRA_API_URL, '/admin/reload/metadata', { method: 'POST' }).catch(() => {});
-      await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' }).catch(() => {});
-      await new Promise((resolve) => setTimeout(resolve, 150));
-      state = await collectRestDefinitionState();
-      table = state.tables.find((item) => item?.name === tableName || item?.alias === tableName);
+      throw new Error(`Unknown table "${tableName}". Use get_all_tables({ search, limit }) or get_all_metadata({ search, all: true }) to confirm the table name. If a just-created table is missing, verify the create response/reload event before calling manual reload tools.`);
     }
-    if (!table) throw new Error(`Unknown table "${tableName}"`);
     const tableId = getId(table);
     const columnIds = new Set((table.columns || []).map((column) => String(getId(column))));
     const relationIds = new Set((table.relations || []).map((relation) => String(getId(relation))));
@@ -2361,7 +2441,7 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Every
   const queryParams = new URLSearchParams({
     filter: JSON.stringify(filter),
     fields: 'id,path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled',
-    limit: '1000',
+    limit: all ? '0' : '1000',
   });
   const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_route?${queryParams.toString()}`);
   const q = search ? search.toLowerCase() : null;
@@ -2380,6 +2460,8 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Every
     matchedRouteCount: matchedRoutes.length,
     returnedRouteCount: Math.min(matchedRoutes.length, routeLimit),
     all: !!all,
+    complete: all || routeLimit >= matchedRoutes.length,
+    hardCap: all ? null : routeLimit,
     search: search || null,
     routes: matchedRoutes.slice(0, routeLimit),
     detailHint: matchedRoutes.length > routeLimit
@@ -2408,8 +2490,10 @@ server.tool(
       .describe('Methods accessible WITHOUT auth token. Omit = all methods require auth.'),
     isEnabled: z.boolean().optional().default(true).describe('Enable route immediately'),
     description: z.string().optional().describe('Route description'),
+    globalRulesAckKey: globalRulesAckParam(z),
   },
-  async ({ path: routePath, mainTableId, methods, publicMethods, isEnabled, description }) => {
+  async ({ path: routePath, mainTableId, methods, publicMethods, isEnabled, description, globalRulesAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
     const methodMap = await getMethodMap();
     const normalizedPath = normalizeRestPath(routePath);
 
@@ -2472,8 +2556,12 @@ server.tool(
     sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic.'),
     scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
     timeout: z.number().optional().describe('Timeout in ms (default: system DEFAULT_HANDLER_TIMEOUT, usually 30000)'),
+    globalRulesAckKey: globalRulesAckParam(z),
+    knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
   },
-  async ({ routeId, method, methods, sourceCode, scriptLanguage, timeout }) => {
+  async ({ routeId, method, methods, sourceCode, scriptLanguage, timeout, globalRulesAckKey, knowledgeAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
+    assertDynamicCodeKnowledgeAck(knowledgeAckKey);
     const methodNames = methods && methods.length > 0 ? methods : method ? [method] : [];
     if (methodNames.length === 0) throw new Error('Provide method or methods');
     const methodMap = await getMethodMap();
@@ -2533,8 +2621,12 @@ server.tool(
       .describe('Method names this hook applies to. Default: built-in REST methods GET, POST, PATCH, DELETE.'),
     priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
     isEnabled: z.boolean().optional().default(true).describe('Enable hook immediately'),
+    globalRulesAckKey: globalRulesAckParam(z),
+    knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
   },
-  async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled }) => {
+  async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
+    assertDynamicCodeKnowledgeAck(knowledgeAckKey);
     const methodMap = await getMethodMap();
     const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
     const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_pre_hook', {
@@ -2587,8 +2679,12 @@ server.tool(
       .describe('Method names this hook applies to. Default: built-in REST methods GET, POST, PATCH, DELETE.'),
     priority: z.number().optional().default(0).describe('Execution order (lower = first)'),
     isEnabled: z.boolean().optional().default(true).describe('Enable hook immediately'),
+    globalRulesAckKey: globalRulesAckParam(z),
+    knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
   },
-  async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled }) => {
+  async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
+    assertDynamicCodeKnowledgeAck(knowledgeAckKey);
     const methodMap = await getMethodMap();
     const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
     const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_post_hook', {
@@ -2704,8 +2800,10 @@ server.tool(
     mode: z.enum(['merge', 'replace']).optional().default('merge').describe('merge adds methods to an existing permission; replace overwrites methods on the matched permission.'),
     description: z.string().optional().describe('Admin note'),
     isEnabled: z.boolean().optional().default(true).describe('Enable the permission'),
+    globalRulesAckKey: globalRulesAckParam(z),
   },
-  async ({ path, routeId, methods, roleId, roleName, allowedUserIds, mode, description, isEnabled }) => {
+  async ({ path, routeId, methods, roleId, roleName, allowedUserIds, mode, description, isEnabled, globalRulesAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
     if (!path && !routeId) throw new Error('Provide path or routeId.');
     if (path && routeId) throw new Error('Provide path or routeId, not both.');
     if (roleId && roleName) throw new Error('Provide roleId or roleName, not both.');
@@ -2805,24 +2903,36 @@ registerPlatformOperationTools(server, ENFYRA_API_URL);
 // CACHE & SYSTEM TOOLS
 // ============================================================================
 
-server.tool('reload_all', 'Reload all caches (metadata, routes, GraphQL)', {}, async () => {
+server.tool('reload_all', 'Reload all caches (metadata, routes, GraphQL)', {
+  globalRulesAckKey: globalRulesAckParam(z),
+}, async ({ globalRulesAckKey }) => {
+  assertGlobalRulesAck(globalRulesAckKey);
   const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload', { method: 'POST' });
-  return { content: [{ type: 'text', text: `System reloaded:\n${JSON.stringify(result, null, 2)}` }] };
+  return jsonContent({ action: 'reloaded_all', result });
 });
 
-server.tool('reload_metadata', 'Reload metadata cache only', {}, async () => {
+server.tool('reload_metadata', 'Reload metadata cache only', {
+  globalRulesAckKey: globalRulesAckParam(z),
+}, async ({ globalRulesAckKey }) => {
+  assertGlobalRulesAck(globalRulesAckKey);
   const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload/metadata', { method: 'POST' });
-  return { content: [{ type: 'text', text: `Metadata reloaded:\n${JSON.stringify(result, null, 2)}` }] };
+  return jsonContent({ action: 'reloaded_metadata', result });
 });
 
-server.tool('reload_routes', 'Reload routes cache only', {}, async () => {
+server.tool('reload_routes', 'Reload routes cache only', {
+  globalRulesAckKey: globalRulesAckParam(z),
+}, async ({ globalRulesAckKey }) => {
+  assertGlobalRulesAck(globalRulesAckKey);
   const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload/routes', { method: 'POST' });
-  return { content: [{ type: 'text', text: `Routes reloaded:\n${JSON.stringify(result, null, 2)}` }] };
+  return jsonContent({ action: 'reloaded_routes', result });
 });
 
-server.tool('reload_graphql', 'Reload GraphQL schema', {}, async () => {
+server.tool('reload_graphql', 'Reload GraphQL schema', {
+  globalRulesAckKey: globalRulesAckParam(z),
+}, async ({ globalRulesAckKey }) => {
+  assertGlobalRulesAck(globalRulesAckKey);
   const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload/graphql', { method: 'POST' });
-  return { content: [{ type: 'text', text: `GraphQL reloaded:\n${JSON.stringify(result, null, 2)}` }] };
+  return jsonContent({ action: 'reloaded_graphql', result });
 });
 
 // ============================================================================
@@ -2968,8 +3078,10 @@ server.tool(
     name: z.string().describe('Exact NPM package name (e.g., "node-ssh", "axios")'),
     type: z.enum(['Server', 'App']).default('Server').describe('Where to install: Server (handlers/hooks) or App (extensions)'),
     version: z.string().optional().describe('Specific version. If omitted, fetches latest from NPM.'),
+    globalRulesAckKey: globalRulesAckParam(z),
   },
-  async ({ name, type, version }) => {
+  async ({ name, type, version, globalRulesAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
     // Step 1: Get package info from NPM if version not specified
     let pkgVersion = version;
     let pkgDescription = '';
@@ -2991,12 +3103,15 @@ server.tool(
     const checkFilter = JSON.stringify({ name: { _eq: name }, type: { _eq: type } });
     const existing = await fetchAPI(ENFYRA_API_URL, `/enfyra_package?filter=${encodeURIComponent(checkFilter)}&limit=1`);
     if (existing.data && existing.data.length > 0) {
-      return {
-        content: [{
-          type: 'text',
-          text: `Package "${name}" is already installed (version: ${existing.data[0].version}, type: ${existing.data[0].type}).\n${JSON.stringify(existing.data[0], null, 2)}`,
-        }],
-      };
+      return jsonContent({
+        action: 'package_already_installed',
+        package: {
+          name,
+          version: existing.data[0].version,
+          type: existing.data[0].type,
+        },
+        record: existing.data[0],
+      });
     }
 
     // Step 3: Get current user for installedBy
@@ -3018,12 +3133,11 @@ server.tool(
       body: JSON.stringify(body),
     });
 
-    return {
-      content: [{
-        type: 'text',
-        text: `Package "${name}@${pkgVersion}" installed successfully (type: ${type}).\n${JSON.stringify(result, null, 2)}`,
-      }],
-    };
+    return jsonContent({
+      action: 'package_installed',
+      package: { name, version: pkgVersion, type },
+      result,
+    });
   },
 );
 

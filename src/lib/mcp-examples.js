@@ -1,7 +1,15 @@
+export const EXAMPLE_REASONING_GUIDE = [
+  'Examples are reasoning anchors, not templates to copy blindly. Preserve the platform contract, then adapt table names, route paths, relation names, fields, UI labels, and lifecycle triggers to the live app.',
+  'First identify the invariant being demonstrated: security boundary, query shape, shell registry contract, schema relation direction, runtime lifecycle, or browser proxy pattern.',
+  'Then identify what is illustrative: chat/order/report/cloud paths, sample field names, icons, labels, menu order, and specific notification kinds.',
+  'When a note says do not, treat it as a contract or safety boundary unless live metadata proves a different supported contract. When a note says for example, map the idea to the current domain instead of copying the literal names.',
+  'Before applying an example, inspect live metadata/routes/features and choose the closest supported tool. Use the smallest example that proves the decision, then compose with other examples only when the task truly needs multiple contracts.',
+];
+
 export const EXAMPLE_CATEGORIES = {
   'ssr-app-auth': {
     title: 'SSR app auth, OAuth, refresh, and proxy setup',
-    useWhen: 'Use when building Nuxt, Next, or another browser app that should rely on Enfyra cookies through an app-origin proxy.',
+    useWhen: 'Use when building Nuxt, Next, or another browser app that should rely on Enfyra cookies through an app-origin proxy; adapt the framework-specific wrapper while preserving the same-origin proxy and cookie boundary.',
     examples: [
       {
         name: 'Nuxt routeRules for REST and Socket.IO',
@@ -543,6 +551,7 @@ update_record({
         name: 'Create a chat conversation table',
         code: `create_table({
   name: "chat_conversation",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   columns: JSON.stringify([
     { name: "kind", type: "varchar", isNullable: false, defaultValue: "dm" },
     { name: "title", type: "varchar", isNullable: true },
@@ -550,6 +559,7 @@ update_record({
   ])
 })`,
         notes: [
+          'Chat is the illustrative domain here. For another domain, keep the same modeling question: what is the parent entity, what is stored on the parent, and what belongs on child rows?',
           'create_table creates the default route for /chat_conversation.',
           'Keep the latest message as a relation named lastMessage after chat_message exists; do not duplicate last message text/date columns.',
           'Do not create tables just to get custom paths; use create_route for that.',
@@ -559,6 +569,7 @@ update_record({
         name: 'Create relations directly to enfyra_user',
         code: `create_table({
   name: "chat_message",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   columns: JSON.stringify([
     { name: "text", type: "text", isNullable: false },
     { name: "persistStatus", type: "varchar", defaultValue: "persisted" }
@@ -584,6 +595,7 @@ update_record({
   ])
 })`,
         notes: [
+          'The relation names conversation and sender are examples of domain language; choose relation property names that match the entity model users reason about.',
           'Use enfyra_user as the user table.',
           'Use table ids for targetTable when already known; MCP can also resolve exact table names such as "enfyra_user" before schema mutation.',
           'Do not add inverse relations on enfyra_user unless a concrete user-to-record response, UI, or deep query will use it.',
@@ -597,6 +609,7 @@ update_record({
         code: `create_relation({
   sourceTableId: "chat_message",
   targetTableId: "chat_conversation",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   propertyName: "conversation",
   inversePropertyName: "messages",
   type: "many-to-one",
@@ -606,6 +619,7 @@ update_record({
         notes: [
           'Use inversePropertyName only when the parent table will actually expose, deep-load, count, or sort by that child collection.',
           'For example, conversation.messages is justified if a conversation detail response loads the latest message page with deep.messages limit/sort, or if a list sorts by _max(messages.createdAt).',
+          'Translate this to the current domain by asking whether the parent screen needs a child collection or aggregate; if not, keep the relation one-directional.',
           'If the app only filters chat_message by conversation.id, omit inversePropertyName and keep the schema one-directional.',
           'Before creating an inverse, inspect existing relations and state why the reverse traversal is needed.',
         ],
@@ -614,6 +628,7 @@ update_record({
         name: 'Add chat_conversation.lastMessage after chat_message exists',
         code: `update_table({
   tableId: "<chat_conversation_id>",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   relations: JSON.stringify([
     {
       propertyName: "createdBy",
@@ -640,6 +655,7 @@ update_record({
         name: 'Unread/read table with unique and indexes',
         code: `create_table({
   name: "chat_message_read",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   columns: JSON.stringify([
     { name: "isRead", type: "boolean", defaultValue: false },
     { name: "readAt", type: "datetime", isNullable: true }
@@ -666,6 +682,7 @@ update_record({
         code: `create_column({
   tableId: "<enfyra_user_table_id>",
   name: "emailVerifiedAt",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   type: "datetime",
   isNullable: true,
   isPublished: true,
@@ -675,6 +692,7 @@ update_record({
 create_column({
   tableId: "<enfyra_user_table_id>",
   name: "emailVerificationStatus",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   type: "varchar",
   isNullable: false,
   defaultValue: "pending",
@@ -685,6 +703,7 @@ create_column({
 create_column({
   tableId: "<integration_secret_table_id>",
   name: "value",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   type: "text",
   isNullable: false,
   isPublished: false,
@@ -711,6 +730,7 @@ create_column({
 create_column({
   tableId: "<table_id>",
   name: "api_secret",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   type: "text",
   isPublished: false,
   isEncrypted: true
@@ -754,6 +774,7 @@ create_column({
           'Use a conversation read pre-hook/RLS boundary so the route only returns conversations visible to @USER.',
           'lastMessage is a relation to chat_message; do not duplicate preview fields on chat_conversation.',
           'all: true tells MCP to send REST limit=0 and load all matching conversation rows.',
+          'This is a small bounded user inbox example. For larger inventories, prefer pagination even when RLS scopes the records.',
           'Do not fetch messages for every conversation on initial list load; load messages after selecting a conversation.',
         ],
       },
@@ -807,6 +828,7 @@ GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
         notes: [
           'Use fields with dotted relation paths when you only need scalar fields from related records.',
           'This is enough for simple many-to-one or one-to-one relation display such as owner.email, customer.name, or lastMessage.text.',
+          'Treat order/customer as placeholders; the transferable idea is "show parent rows with a few scalar relation fields".',
           'Do not add deep when fields alone can express the relation data you need.',
         ],
       },
@@ -894,7 +916,9 @@ query_table({
         notes: [
           'Use _max(relation.field) for latest-child ordering, _min(relation.field) for earliest-child ordering, and _count(relation) for child-count ordering.',
           'Aggregate sort helpers only work on direct one-to-many or many-to-many list relations.',
-          'The aggregate field must be a real non-encrypted scalar field on the related table.',
+          'Support tickets and messages are illustrative. Apply this when a parent list must be ordered by child recency or child volume.',
+          'The aggregate field must be a real published, non-encrypted scalar field on the related table for user-facing APIs.',
+          'Do not use _max, _min, or _count on private relations or unpublished fields unless the endpoint intentionally exposes that fact.',
           'Do not use raw sort=-messages.createdAt for parent ordering; it is ambiguous and rejected.',
           'deep.messages.sort only orders the loaded message rows inside each ticket, so keep parent sort and child pagination as separate concerns.',
         ],
@@ -908,6 +932,7 @@ GET /enfyra/integrations?filter={"api_token":{"_eq":"plaintext-token"}}
 create_column({
   tableId: "<integrations_table_id>",
   name: "api_token_lookup_sha256",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   type: "varchar",
   isNullable: false,
   isPublished: false
@@ -943,6 +968,8 @@ const found = await #integrations.find({
   routeId: "<route_id>",
   method: "POST",
   scriptLanguage: "javascript",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
   sourceCode: \`const email = @BODY.email
 if (!email) @THROW400("Email is required")
 
@@ -950,6 +977,7 @@ return { ok: true, email }\`
 })`,
         notes: [
           'Use sourceCode, not logic. The server generates compiledCode.',
+          'Call get_enfyra_required_knowledge before saving dynamic code, pass globalRulesAckKey as globalRulesAckKey, and pass dynamicCodeAckKey as knowledgeAckKey.',
           'Use method for one handler, or methods only when the same sourceCode should be saved for multiple methods.',
           'Do not pass name to enfyra_route_handler; one handler is identified by route + method.',
         ],
@@ -1003,6 +1031,7 @@ const scope = {
         name: 'Encrypted field table definition',
         code: `create_table({
   name: "integrations",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   columns: JSON.stringify([
     { name: "name", type: "varchar", isNullable: false },
     {
@@ -1030,6 +1059,8 @@ const scope = {
   name: "strip_email_verification_fields",
   methods: ["PATCH"],
   priority: -10,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
   code: \`delete @BODY.emailVerifiedAt
 delete @BODY.emailVerificationStatus
 delete @BODY.emailVerificationSentAt\`
@@ -1047,6 +1078,8 @@ delete @BODY.emailVerificationSentAt\`
   name: "shape_display_title",
   methods: ["GET"],
   priority: 0,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
   code: \`if (@ERROR) {
   @LOGS("Request failed", @ERROR.message)
   return
@@ -1320,7 +1353,7 @@ const socket = io("/chat", {
         code: `const conversationId = @BODY.conversationId
 if (!conversationId) @THROW400("conversationId is required")
 
-const membership = await @REPOS.chat_conversation_member.find({
+const membership = await @REPOS.secure.chat_conversation_member.find({
   filter: {
     conversation: { id: { _eq: conversationId } },
     member: { id: { _eq: @USER.id } }
@@ -1336,6 +1369,7 @@ if (!membership.data[0]) @THROW403("Not a conversation member")
           'Join conversation rooms, not member-id rooms.',
           'conversationId is a request/room identifier; DB filters still use the relation property conversation.',
           'Check membership server-side; do not trust the client.',
+          'Use @REPOS.secure.<table> for explicit table access in user-facing websocket scripts.',
         ],
       },
       {
@@ -1343,7 +1377,7 @@ if (!membership.data[0]) @THROW403("Not a conversation member")
         code: `const { conversationId, text, clientId } = @BODY
 if (!conversationId || !text) @THROW400("conversationId and text are required")
 
-const membership = await @REPOS.chat_conversation_member.find({
+const membership = await @REPOS.secure.chat_conversation_member.find({
   filter: {
     conversation: { id: { _eq: conversationId } },
     member: { id: { _eq: @USER.id } }
@@ -1352,7 +1386,7 @@ const membership = await @REPOS.chat_conversation_member.find({
 })
 if (!membership.data[0]) @THROW403("Not a conversation member")
 
-const created = await @REPOS.chat_message.create({
+const created = await @REPOS.secure.chat_message.create({
   data: {
     conversation: { id: conversationId },
     sender: { id: @USER.id },
@@ -1363,7 +1397,7 @@ const created = await @REPOS.chat_message.create({
 
 const message = created.data?.[0] ?? null
 if (message?.id) {
-  await @REPOS.chat_conversation.update({
+  await @REPOS.secure.chat_conversation.update({
     id: conversationId,
     data: { lastMessage: { id: message.id }, updatedAt: message.createdAt || new Date().toISOString() }
   })
@@ -1378,6 +1412,7 @@ return { ok: true, message }`,
           'Do not ask the client for senderId. The sender relation is derived from @USER.id.',
           'conversationId is accepted only as the room/business identifier; persistence uses relation properties conversation and sender, not physical FK fields.',
           'Event scripts should explicitly emit replies/broadcasts.',
+          'Use @REPOS.secure.<table> for explicit table access in user-facing websocket scripts; trusted @REPOS.<table> is only for internal/admin logic that will sanitize output.',
         ],
       },
     ],
@@ -1503,7 +1538,7 @@ return saved`,
   },
   extensions: {
     title: 'Dynamic app extensions and menus',
-    useWhen: 'Use when adding custom UI pages to the Enfyra app.',
+    useWhen: 'Use when adding custom Enfyra admin UI pages, widgets, global shell integrations, menu entries, account-panel rows, or shell attention signals.',
     examples: [
       {
         name: 'Create or update HTTP method colors',
@@ -1537,6 +1572,7 @@ update_method({
   icon: "lucide:bar-chart-3",
   order: 20,
   isEnabled: true,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   permission: JSON.stringify({
     or: [
       { route: "/reports", methods: ["GET"] },
@@ -1551,32 +1587,24 @@ ensure_page_extension({
   description: "Reports dashboard",
   menuId: "<created-menu-id>",
   code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-2 xl:grid-cols-3\\"><article class=\\"eapp-surface-card p-4\\"><div class=\\"flex items-start justify-between gap-3\\"><div><p class=\\"text-sm font-medium eapp-text-tertiary\\">Total</p><p class=\\"mt-2 text-2xl font-semibold eapp-text-primary\\">0</p></div><span class=\\"eapp-primary-soft eapp-icon-tile\\"><span class=\\"eapp-primary-text\\">◆</span></span></div><div class=\\"mt-3 h-1.5 overflow-hidden eapp-radius-pill eapp-surface-muted\\"><div class=\\"eapp-primary-solid h-full w-1/2\\"></div></div></article><article class=\\"eapp-primary-surface eapp-radius-panel border p-4\\"><p class=\\"text-sm font-semibold eapp-text-primary\\">Selected report</p><p class=\\"mt-1 text-sm eapp-text-tertiary\\">Only selected/current identity blocks use identity surface.</p></article></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); const { register: registerHeaderActions } = useHeaderActionRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'none', variant: 'minimal' }); registerHeaderActions([{ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', color: 'neutral', variant: 'outline', onClick: () => {}, order: 80 }])</script>",
-  isEnabled: true
+  isEnabled: true,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  extensionKnowledgeAckKey: "<extensionAckKey from get_enfyra_required_knowledge>"
 })`,
         notes: [
+          'Reports is an illustrative page. Keep the shell/page contracts, but choose the real route, menu label, icon, permissions, and body layout from the operator workflow.',
           'Menu provides navigation; extension provides content.',
           'Use enfyra_menu.label, not title.',
           'Sensitive admin menus should include a permission condition at creation time.',
           'For page extensions, create the menu first with ensure_menu and pass its id to ensure_page_extension.',
-          'Call get_extension_theme_contract before writing or reviewing page/widget/global extension UI.',
+          'Call get_extension_theme_contract before writing or reviewing page/widget/global extension UI; that tool is the authority for theme, color, layout, modal, drawer, and shell registry details.',
+          'Call get_enfyra_required_knowledge before saving extension code, pass globalRulesAckKey as globalRulesAckKey, and pass extensionAckKey as extensionKnowledgeAckKey.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',
-          'Use variant: "minimal" for operational pages unless a larger header is intentionally needed.',
-          'Do not put ordinary KPI cards in PageHeader.stats; render metrics in the extension body.',
           'Put page-level actions in useHeaderActionRegistry or useSubHeaderActionRegistry, destructure register first, then call it with one action or an array.',
-          'Page extensions should be full-bleed by default and responsive from the first version.',
-          'The extension root is already inside Enfyra admin page main; do not add root-level page padding.',
-          'Use eApp theme class tokens for panels, rows, badges, borders, controls, radius, and text. Generated extension templates should prefer eapp-surface-*, eapp-text-*, eapp-radius-*, eapp-divide-y, and eapp-primary-* over raw CSS variable utilities.',
-          'Treat primary color as runtime-configurable by the app color picker. For Nuxt UI components, choose color="primary" by semantic intent. For custom extension UI, decide whether each element is neutral surface, runtime-primary identity, or status: regular panels/KPI cards/list rows use eapp-surface-card/eapp-surface-muted/eapp-surface-hover/eapp-divide-y and eapp-text-* classes, while selected/current identity blocks, primary tiles, progress fills, primary icons, and primary CTA fills use eapp-primary-surface, eapp-primary-soft, eapp-primary-subtle, eapp-primary-solid, or eapp-primary-text so the color picker controls them. eapp-primary-surface supplies selected identity color but does not replace card chrome; keep border/radius classes on selected blocks.',
-          'Decision cases: normal decorative accents, feature icons, non-state tiles, active tabs, progress fills, selected segments, and primary actions use runtime primary/identity classes; true semantic states use their matching status colors such as error, warning, success, or info; large ordinary surfaces stay neutral and carry only small badges/icons for status; selected/current entity blocks may use eapp-primary-surface.',
-          'Pattern examples: KPI/metric cards should be eapp-surface-card with a small icon tile using eapp-primary-soft eapp-icon-tile; selected/current entity cards may use eapp-primary-surface; progress bars use eapp-surface-muted tracks plus eapp-primary-solid fills; list rows use eapp-surface-card/eapp-divide-y/eapp-surface-hover and only small chips inside; primary scope actions use UButton color="primary" variant="solid"; secondary actions use neutral variants.',
-          'Status colors belong only in UBadge/UAlert semantic colors or eapp-status-*-soft/text/border classes for badges, small icons, or short status text. Do not read --badge-* variables directly in extension templates. Do not color large panels, alert-like success blocks, KPI cards, list containers, or attention/reconciliation blocks green/yellow/red because of state; keep the block neutral and place the status badge/icon inside.',
-          'Use PageHeader gradient: "none" for generated operational pages unless the user explicitly asks for a decorative page accent; do not hardcode cyan/violet/purple/blue/green gradients.',
-          'For general card grids inside the shell, use md:grid-cols-2 xl:grid-cols-3 instead of lg:grid-cols-3 because the desktop sidebar leaves tablet-width content at 1024px.',
-          'Do not use Nuxt UI neutral semantic classes such as bg-default, text-muted, text-dimmed, border-default, or divide-default inside extension code; use eApp class tokens instead. Do not write text-[var(...)], bg-[var(...)], or border-[var(...)] in generated extension templates unless no class token exists for that exact primitive.',
-          'Do not pass ui.content: "eapp-surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller content classes should only append z-index or width.',
-          'CommonModal and CommonDrawer own action-only footers through cancelAction, primaryAction, dangerAction, leadingActions, and footerHint. Pass action intent through props instead of styling footer buttons manually; cancelAction defaults to neutral outline, dangerAction is for irreversible destructive work, and Keep editing should use tone: "primary" in discard dialogs.',
-          'Use UTabs for page sections instead of custom tab bars so the app-level active/inactive indicators, spacing, focus rings, and theme contrast stay consistent.',
-          'Do not inject global CSS, create theme guards, redefine the app palette, or solve one extension by overriding the whole app shell.',
+          'Page extensions should be full-bleed and responsive from the first version; the extension root is already inside the Enfyra admin page main.',
+          'Render ordinary metrics and lists in the body, not PageHeader.stats, unless the user explicitly wants a compact overview header.',
+          'Use app theme tokens and Nuxt UI semantic colors by intent; do not hard-code concrete palettes or redefine the app palette inside extension code.',
+          'Use app-owned primitives such as UTabs, CommonModal, CommonDrawer, Widget, useMenuNotificationRegistry, and useAccountPanelRegistry when the workflow matches them.',
           'Keep list selection local and fetch detail rows only; do not refetch the whole list after a row click unless the list data changed.',
           'Page extension paths are admin app UI routes. Do not verify them with test_rest_endpoint against ENFYRA_API_URL unless inspect_route shows an API route with the same path.',
           'After saving, open Enfyra admin tabs should update through the server/Enfyra admin UI realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',
@@ -1623,7 +1651,9 @@ ensure_widget_extension({
   name: "ReportStatusWidget",
   description: "Report status summary cards",
   code: reportStatusWidgetCode,
-  isEnabled: true
+  isEnabled: true,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  extensionKnowledgeAckKey: "<extensionAckKey from get_enfyra_required_knowledge>"
 })
 
 // Read the created widget record id, then embed it from the page extension.
@@ -1631,9 +1661,12 @@ ensure_page_extension({
   name: "ReportsPage",
   menuId: "<reports-menu-id>",
   code: "<template><section class=\\"min-h-full w-full space-y-4\\"><Widget :id=\\"<report-status-widget-id>\\" :total=\\"totalReports\\" :rows=\\"reportRows\\" :open-details=\\"openReportDetails\\" @refresh=\\"refresh\\" /><Widget :id=\\"<report-table-widget-id>\\" :rows=\\"reportRows\\" @refresh=\\"refresh\\" /></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'none', variant: 'minimal' }); const totalReports = ref(0); const reportRows = ref([]); function refresh() {} function openReportDetails(row) { navigateTo('/data/report?filter=' + encodeURIComponent(JSON.stringify({ id: { _eq: row.id } }))) }</script>",
-  isEnabled: true
+  isEnabled: true,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  extensionKnowledgeAckKey: "<extensionAckKey from get_enfyra_required_knowledge>"
 })`,
         notes: [
+          'This shows composition mechanics. Replace reports/status/table with domain sections that are independently reusable or complex enough to deserve widgets.',
           'Use widgets for bulky or reusable sections such as operation panels, timelines, tables, sidebars, and status cards.',
           'Embed widgets by their numeric enfyra_extension id, not by extensionId/name.',
           'Props and listeners pass through the Widget wrapper. Widget defineProps values update reactively when the parent refs/computed values change.',
@@ -1683,13 +1716,28 @@ register({
   label: 'Notifications',
   icon: notificationIcon,
   description: notificationDescription,
-  badge: notificationBadge,
+  count: notificationBadge,
   badgeColor: 'error',
   expanded,
   onToggle: () => {
     expanded.value = !expanded.value
   },
   contentComponent: NotificationList,
+})
+
+const { register: registerMenuNotification, unregister: unregisterMenuNotification } = useMenuNotificationRegistry()
+watchEffect(() => {
+  if (notificationBadge.value) {
+    registerMenuNotification({
+      id: 'notifications-menu-unread',
+      target: { path: '/notifications' },
+      value: notificationBadge.value,
+      color: 'error',
+      title: notificationDescription.value,
+    })
+  } else {
+    unregisterMenuNotification('notifications-menu-unread')
+  }
 })
 
 const { adminSocket } = useAdminSocket()
@@ -1699,6 +1747,7 @@ const handleNotification = (payload) => {
 adminSocket.on('notification:summary', handleNotification)
 onUnmounted(() => {
   adminSocket.off('notification:summary', handleNotification)
+  unregisterMenuNotification('notifications-menu-unread')
 })
 </script>
 \`
@@ -1707,16 +1756,177 @@ ensure_global_extension({
   name: "NotificationBellGlobal",
   description: "Registers the app-wide notification bell in the account panel",
   code: notificationBellCode,
-  isEnabled: true
+  isEnabled: true,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  extensionKnowledgeAckKey: "<extensionAckKey from get_enfyra_required_knowledge>"
 })`,
         notes: [
           'Global extensions are mounted invisibly by Enfyra admin UI during layout init; do not create a menu and do not embed them with Widget.',
           'Use them for shell-level registrations, realtime listeners, notification counters, account panel rows, and background refresh bridges.',
+          'The notification center is only one possible shell integration. The transferable shape is invisible global extension -> shell registry -> cleanup on unmount.',
+          'Use useMenuNotificationRegistry for sidebar menu counts/dots when notification state should be visible in the menu as well as the notification center.',
+          'Choose value only when the signal source already owns an exact count. Omit value for a dot when realtime only proves that something new exists.',
+          'Do not fetch the destination domain list just to decorate a menu. A mail page fetches mail; a support page fetches tickets; the shell should use notification or summary signals.',
           'Keep the global extension template empty or hidden; visible UI should be registered into an existing shell registry or component slot.',
           'For account-panel UI, register data-driven row fields so Enfyra admin UI owns icon size, row spacing, badge placement, hover state, and expanded chrome.',
           'Use contentComponent only for expanded inner content; use raw component only as an escape hatch when the row cannot fit the shell contract.',
           'Destructure registry functions and register stable ids so reloads replace the same shell item predictably.',
           'Remove socket or DOM listeners in onUnmounted; The Enfyra admin UI unmounts old global components when extension cache reloads or the extension is disabled.',
+        ],
+      },
+      {
+        name: 'Signal menu attention without polling destination lists',
+        code: `const signalBridgeCode = \`
+<template></template>
+
+<script setup>
+const attentionRows = ref([])
+const notificationSignal = ref(false)
+const route = useRoute()
+
+const notificationApi = useApi('/cloud_admin_notifications', {
+  query: {
+    filter: JSON.stringify({ readAt: { _is_null: true } }),
+    fields: 'id,kind,targetPath,readAt',
+    sort: '-createdAt,-id',
+    limit: 10,
+  },
+})
+
+const hasNewEmail = computed(() =>
+  attentionRows.value.some((row) => row.kind === 'email_inbound' && !row.readAt)
+)
+const hasNewSupport = computed(() =>
+  attentionRows.value.some((row) => row.kind === 'support' && !row.readAt)
+)
+const accountBadge = computed(() => notificationSignal.value ? 'New' : null)
+const accountDescription = computed(() => notificationSignal.value ? 'New admin attention' : 'All caught up')
+
+function syncFromNotificationRows() {
+  const value = notificationApi.data?.value
+  const rows = Array.isArray(value?.data)
+    ? value.data
+    : Array.isArray(value?.data?.data)
+      ? value.data.data
+      : []
+  attentionRows.value = rows
+  notificationSignal.value = rows.some((row) => !row.readAt)
+}
+
+async function refreshNotificationSignals() {
+  await notificationApi.execute()
+  syncFromNotificationRows()
+}
+
+const { register: registerAccountPanel } = useAccountPanelRegistry()
+registerAccountPanel({
+  id: 'admin-attention',
+  order: 20,
+  label: 'Notifications',
+  icon: computed(() => notificationSignal.value ? 'lucide:bell-ring' : 'lucide:bell'),
+  description: accountDescription,
+  count: accountBadge,
+  badgeColor: 'info',
+  onClick: () => navigateTo('/data/cloud_admin_notifications'),
+})
+
+const { register: registerMenuNotification, unregister: unregisterMenuNotification } = useMenuNotificationRegistry()
+watchEffect(() => {
+  if (hasNewEmail.value) {
+    registerMenuNotification({
+      id: 'attention-email',
+      target: { path: '/email/messages' },
+      color: 'info',
+      title: 'New inbound email',
+    })
+  } else {
+    unregisterMenuNotification('attention-email')
+  }
+
+  if (hasNewSupport.value) {
+    registerMenuNotification({
+      id: 'attention-support',
+      target: { path: '/cloud/support' },
+      color: 'info',
+      title: 'New support activity',
+    })
+  } else {
+    unregisterMenuNotification('attention-support')
+  }
+})
+
+watch(() => route.path, (path) => {
+  if (path.startsWith('/email/messages')) {
+    attentionRows.value = attentionRows.value.filter((row) => row.kind !== 'email_inbound')
+  }
+  if (path.startsWith('/cloud/support')) {
+    attentionRows.value = attentionRows.value.filter((row) => row.kind !== 'support')
+  }
+  notificationSignal.value = attentionRows.value.some((row) => !row.readAt)
+})
+
+const { adminSocket } = useAdminSocket()
+function handleAdminNotification(payload) {
+  refreshNotificationSignals()
+  if (payload?.kind === 'email_inbound') {
+    registerMenuNotification({ id: 'attention-email', target: { path: '/email/messages' }, color: 'info', title: 'New inbound email' })
+  }
+  if (payload?.kind === 'support') {
+    registerMenuNotification({ id: 'attention-support', target: { path: '/cloud/support' }, color: 'info', title: 'New support activity' })
+  }
+}
+
+function getAdminSocket() {
+  return adminSocket && adminSocket.value !== undefined ? adminSocket.value : adminSocket
+}
+
+function bindAdminSocket(socket) {
+  if (socket && typeof socket.on === 'function') {
+    socket.on('admin:notification-created', handleAdminNotification)
+  }
+}
+
+function unbindAdminSocket(socket) {
+  if (socket && typeof socket.off === 'function') {
+    socket.off('admin:notification-created', handleAdminNotification)
+  }
+}
+
+if (adminSocket && adminSocket.value !== undefined) {
+  watch(adminSocket, (nextSocket, previousSocket) => {
+    unbindAdminSocket(previousSocket)
+    bindAdminSocket(nextSocket)
+  })
+}
+
+onMounted(() => {
+  refreshNotificationSignals()
+  bindAdminSocket(getAdminSocket())
+})
+onUnmounted(() => {
+  unbindAdminSocket(getAdminSocket())
+  unregisterMenuNotification('attention-email')
+  unregisterMenuNotification('attention-support')
+})
+</script>
+\`
+
+ensure_global_extension({
+  name: "AdminAttentionSignalBridge",
+  description: "Routes notification signals into account-panel and sidebar menu attention markers without polling destination lists",
+  code: signalBridgeCode,
+  isEnabled: true,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  extensionKnowledgeAckKey: "<extensionAckKey from get_enfyra_required_knowledge>"
+})`,
+        notes: [
+          'Use this reasoning pattern when the shell should show attention but the destination page owns the expensive or domain-specific list fetch.',
+          'This example fetches only the notification source of truth, not the email, support, order, or job tables. Substitute your own notification or summary endpoint when available.',
+          'Omitting value on registerMenuNotification renders a dot. That is the right promise when the shell knows "new work exists" but not an exact count.',
+          'If a backend summary event already includes an exact unread count, use value for a count chip. If the event only says one record changed, use a dot and let the page fetch details.',
+          'Map notification kinds to menu targets by product meaning, not by copying these paths. For example, approval_required could target /reviews, failed_job could target /operations/jobs, and quota_warning could target /billing.',
+          'Generalize the lifecycle: seed from a bounded signal source, react to realtime events, clear local attention when the user reaches the owning page, and avoid duplicating that page\'s data fetch.',
+          'Clear local dot signals when the user enters the destination route or when the notification center marks the underlying notification as read.',
         ],
       },
       {
@@ -1727,7 +1937,7 @@ const expanded = ref(false)
 
 const label = 'Notifications'
 const icon = computed(() => unread.value > 0 ? 'lucide:bell-ring' : 'lucide:bell')
-const badge = computed(() => unread.value > 0 ? String(unread.value) : null)
+const count = computed(() => unread.value > 0 ? String(unread.value) : null)
 const description = computed(() => unread.value > 0 ? 'Needs review' : 'All caught up')
 
 const NotificationPanelContent = defineComponent({
@@ -1744,7 +1954,7 @@ register({
   label,
   icon,
   description,
-  badge,
+  count,
   badgeColor: 'error',
   expanded,
   onToggle: () => {
@@ -1755,6 +1965,8 @@ register({
 </script>`,
         notes: [
           'Prefer this contract for shell/account-panel items: data fields for the row, optional contentComponent for the expanded body.',
+          'Notifications is illustrative. Account-panel rows can represent any account-scoped attention or shortcut, such as approvals, billing, deployments, or personal tasks.',
+          'Use count for the primary visible badge value. badge remains supported as a legacy alias, but count is what the account trigger aggregates.',
           'Do not draw a custom full row with page-scale cards, hero headings, large whitespace, or nested buttons unless the shell contract cannot express the UI.',
           'Let the Enfyra admin UI handle the row button, icon container, label, microcopy, badge, chevron, hover state, spacing, and expanded wrapper.',
           'Keep contentComponent compact; it is rendered inside account-panel chrome and should not create another large card around itself.',
@@ -1808,6 +2020,7 @@ registerHeaderActions([
 </script>`,
         notes: [
           'Use PageHeader for the title strip; do not render a duplicate header inside extension body.',
+          'The exact actions are illustrative. Choose action prominence from user intent: navigation, secondary utility, primary mutation, or destructive confirmation.',
           'Use gradient: "none" for generated operational pages; hardcoded named gradients are decorative and should be explicit user intent.',
           'Back/navigation actions should be neutral ghost so they read as navigation, not a primary operation.',
           'Visible secondary operations should be neutral outline; soft is only for low-emphasis chrome actions.',
@@ -1847,7 +2060,7 @@ registerHeaderActions([
       },
       {
         name: 'Plan an admin dashboard as multiple pages',
-        code: `// Recommended menu shape for an operations surface:
+        code: `// Illustrative menu shape for an operations surface:
 ensure_menu({
   type: "Dropdown Menu",
   label: "Operations",
@@ -1873,6 +2086,7 @@ ensure_menu({
 // For admin record management, link to /data/<table>, e.g. /data/report, not public website paths.`,
         notes: [
           'Design the menu/page split before generating dashboard code.',
+          'Operations/jobs/orders/reports/settings are examples of separating mental models. Replace them with the real domains users navigate between.',
           'Permission-gate sensitive parent dropdown menus too, using any child page route or backing route that represents read access.',
           'Keep /dashboard as a summary and distribution page, not a detailed operations table.',
           'Use focused pages for operational domains.',
@@ -1904,6 +2118,7 @@ onMounted(() => fetchOrders())
         notes: [
           'Use app-provided composables in extensions.',
           'useApi does not auto-run; call execute() on mounted or through an action.',
+          'The /order path is illustrative; inspect routes and fetch the smallest data shape the extension needs.',
           'Keep extension UI focused; move backend logic into handlers/hooks when needed.',
         ],
       },
@@ -1959,7 +2174,8 @@ console.log(ok, requiredTerms.has('terms'), loaded, label, date)
         name: 'Install and use an app package in an extension',
         code: `install_package({
   name: "dayjs",
-  type: "App"
+  type: "App",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>"
 })
 
 // Then in extension code:
@@ -2030,6 +2246,8 @@ onMounted(() => Promise.all([flowStats.execute(), orderStats.execute()]))
           'Aggregate keys must be real fields or relations.',
           'Read results from response.meta.aggregate.',
           'Use top-level filter for time windows and cross-field conditions.',
+          'The flow/order pair is illustrative. Choose aggregates that answer the page question, such as failed work, pending approvals, unread support, quota pressure, or revenue.',
+          'Only aggregate fields and relations that the dashboard is allowed to expose; aggregate values can reveal hidden data even when rows omit that field.',
           'sum/avg require numeric fields; amount_usd must be a real float/numeric SQL column, not metadata-only float over a varchar physical column.',
         ],
       },
@@ -2048,6 +2266,7 @@ export function listExampleCategories() {
 export function getExamples(category) {
   if (!category) {
     return {
+      reasoningGuide: EXAMPLE_REASONING_GUIDE,
       categories: listExampleCategories(),
       hint: 'Call get_enfyra_examples with one category key to retrieve concrete examples for that area.',
     };
@@ -2063,6 +2282,7 @@ export function getExamples(category) {
 
   return {
     category,
+    reasoningGuide: EXAMPLE_REASONING_GUIDE,
     ...entry,
   };
 }

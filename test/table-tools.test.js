@@ -17,6 +17,8 @@ import {
 } from '../src/lib/table-tools.js';
 import { prepareRecordMutation } from '../src/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../src/lib/route-guards.js';
+import { GLOBAL_RULES_ACK_KEY } from '../src/lib/required-knowledge.js';
+import { WORKFLOW_SURFACES, discoverWorkflowRoutes, listWorkflowSurfaces } from '../src/lib/tool-routing.js';
 import {
   findRoutePermission,
   mergeMethodNames,
@@ -29,6 +31,54 @@ import {
 test('platform operation module imports cleanly', async () => {
   const module = await import('../src/lib/platform-operation-tools.js');
   assert.equal(typeof module.registerPlatformOperationTools, 'function');
+});
+
+test('workflow routing gives progressive tool plans and negative boundaries', () => {
+  assert.ok(WORKFLOW_SURFACES.includes('extension'));
+  assert.ok(WORKFLOW_SURFACES.includes('api-endpoint'));
+  assert.ok(listWorkflowSurfaces().length >= 10);
+
+  const extension = discoverWorkflowRoutes({
+    intent: 'support ticket menu chip should notify without fetching the ticket list',
+    surface: 'extension',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(extension.key, 'extension');
+  assert.ok(extension.firstTools.includes('get_extension_theme_contract'));
+  assert.ok(extension.requiredAck.includes('extensionAckKey when saving extension code'));
+  assert.ok(extension.writeTools.includes('ensure_global_extension'));
+  assert.ok(extension.verifyTools.includes('validate_extension_code'));
+  assert.match(JSON.stringify(extension.avoidTools), /destination domain lists/);
+  assert.match(JSON.stringify(extension.avoidTools), /destination-page fetch on click/);
+
+  const endpoint = discoverWorkflowRoutes({
+    intent: 'create authenticated REST endpoint with a handler and route permission',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(endpoint.key, 'api-endpoint');
+  assert.ok(endpoint.writeTools.includes('api_endpoint_workflow'));
+  assert.match(JSON.stringify(endpoint.avoidTools), /create_route/);
+
+  const flow = discoverWorkflowRoutes({
+    intent: 'add a provisioning flow step that queries then updates a record',
+    surface: 'flow',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(flow.key, 'flow');
+  assert.ok(flow.firstTools.includes('choose_flow_step_tool'));
+  assert.match(JSON.stringify(flow.avoidTools), /ensure_script_flow_step/);
+
+  const cache = discoverWorkflowRoutes({
+    intent: 'metadata looks stale after a table change',
+    surface: 'cache',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(cache.key, 'cache');
+  assert.match(JSON.stringify(cache.avoidTools), /Manual reloads should be evidence-driven/);
 });
 
 function jsonResponse(body, status = 200) {
@@ -471,6 +521,7 @@ test('create_relation resolves table names before schema patch', async () => {
       type: 'many-to-one',
       propertyName: 'owner',
       onDelete: 'SET NULL',
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
     });
 
     assert.equal(patchedBody.relations[0].targetTable, 4);
@@ -652,11 +703,65 @@ test('mcp server exposes metadata usage tracing for production script edits', ()
   assert.match(entry, /gateway\.path/);
 });
 
+test('code-writing tools require required-knowledge acknowledgement without blocking discovery or validation', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.js', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.js', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+
+  assert.match(entry, /server\.tool\(\s*['"]get_enfyra_required_knowledge['"]/);
+  assert.match(entry, /server\.tool\(\s*['"]discover_enfyra_workflows['"]/);
+  assert.match(entry, /discoverWorkflowRoutes/);
+  assert.match(entry, /detail: z\.enum\(\['summary', 'plan', 'full'\]/);
+  assert.match(entry, /avoidTools negative-routing boundaries/);
+  assert.match(requiredKnowledge, /GLOBAL_RULES_ACK_KEY/);
+  assert.match(requiredKnowledge, /globalRulesAckKey/);
+  assert.match(requiredKnowledge, /Call get_enfyra_required_knowledge/);
+  assert.match(requiredKnowledge, /DYNAMIC_CODE_KNOWLEDGE_ACK_KEY/);
+  assert.match(requiredKnowledge, /EXTENSION_KNOWLEDGE_ACK_KEY/);
+  assert.match(requiredKnowledge, /secure-vs-trusted-repositories/);
+  assert.match(requiredKnowledge, /theme-contract-first/);
+  assert.match(instructions, /get_enfyra_required_knowledge/);
+  assert.match(instructions, /discover_enfyra_workflows/);
+  assert.match(instructions, /globalRulesAckKey/);
+
+  assert.match(entry, /create_record[\s\S]*globalRulesAckKey/);
+  assert.match(entry, /create_record[\s\S]*knowledgeAckKey/);
+  assert.match(entry, /update_record[\s\S]*extensionKnowledgeAckKey/);
+  assert.match(entry, /delete_record[\s\S]*globalRulesAckKey/);
+  assert.match(entry, /SCRIPT_BACKED_TABLE_SET\.has\(tableName\)/);
+  assert.match(entry, /patch_script_source[\s\S]*apply[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
+  assert.match(entry, /update_script_source[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
+  assert.match(entry, /create_handler[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
+  assert.match(entry, /create_pre_hook[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
+  assert.match(entry, /create_post_hook[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
+
+  assert.match(platformTools, /set_table_graphql[\s\S]*globalRulesAckKey/);
+  assert.match(platformTools, /api_endpoint_workflow[\s\S]*knowledgeAckKey/);
+  assert.match(platformTools, /api_endpoint_workflow[\s\S]*globalRulesAckKey/);
+  assert.match(platformTools, /apply \|\| opts\.applyAll[\s\S]*assertGlobalRulesAck/);
+  assert.match(platformTools, /applyAll[\s\S]*assertDynamicCodeKnowledgeAck/);
+  assert.match(platformTools, /create_api_endpoint[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
+  assert.match(platformTools, /ensure_websocket_gateway[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAckIf/);
+  assert.match(platformTools, /ensure_websocket_event[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
+  assert.match(platformTools, /ensure_script_flow_step[\s\S]*knowledgeAckKey/);
+  assert.match(platformTools, /ensure_condition_flow_step[\s\S]*knowledgeAckKey/);
+  assert.match(platformTools, /ensure_page_extension[\s\S]*globalRulesAckKey[\s\S]*extensionKnowledgeAckKey/);
+  assert.match(platformTools, /ensure_global_extension[\s\S]*globalRulesAckKey[\s\S]*extensionKnowledgeAckKey/);
+  assert.match(platformTools, /ensure_widget_extension[\s\S]*globalRulesAckKey[\s\S]*extensionKnowledgeAckKey/);
+
+  assert.match(platformTools, /validate_dynamic_script[\s\S]*sourceCode: z\.string/);
+  assert.doesNotMatch(platformTools, /validate_dynamic_script[\s\S]{0,500}knowledgeAckKey/);
+  assert.match(platformTools, /validate_extension_code[\s\S]*code: z\.string/);
+  assert.doesNotMatch(platformTools, /validate_extension_code[\s\S]{0,500}extensionKnowledgeAckKey/);
+});
+
 test('mcp server exposes route platform operation tools', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
   const tableTools = readFileSync(new URL('../src/lib/table-tools.js', import.meta.url), 'utf8');
   const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.js', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const routing = readFileSync(new URL('../src/lib/tool-routing.js', import.meta.url), 'utf8');
   const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
 
   assert.match(entry, /registerPlatformOperationTools\(server, ENFYRA_API_URL\)/);
@@ -692,6 +797,9 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_column_rule['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_field_permission['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_guard['"]/);
+  assert.match(platformTools, /ensure_column_rule[\s\S]*globalRulesAckKey[\s\S]*assertGlobalRulesAck/);
+  assert.match(platformTools, /ensure_field_permission[\s\S]*globalRulesAckKey[\s\S]*assertGlobalRulesAck/);
+  assert.match(platformTools, /ensure_guard[\s\S]*globalRulesAckKey[\s\S]*assertGlobalRulesAck/);
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_column_rule['"]/);
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_field_permission['"]/);
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_route_permission['"]/);
@@ -771,17 +879,8 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(examples, /eapp-primary-solid/);
   assert.match(examples, /gradient: 'none'/);
   assert.match(examples, /color: 'neutral'/);
-  assert.match(examples, /Do not use Nuxt UI neutral semantic classes/);
-  assert.match(examples, /neutral surface, runtime-primary identity, or status/);
-  assert.match(examples, /eApp theme class tokens/);
-  assert.match(examples, /eapp-surface-\*/);
-  assert.match(examples, /eapp-primary-\*/);
-  assert.match(examples, /eapp-status-\*-soft\/text\/border/);
-  assert.match(examples, /Do not read --badge-\* variables directly/);
-  assert.match(examples, /Decision cases: normal decorative accents/);
-  assert.match(examples, /true semantic states use their matching status colors/);
-  assert.match(examples, /Pattern examples: KPI\/metric cards/);
-  assert.match(examples, /Do not color large panels/);
+  assert.match(examples, /Call get_extension_theme_contract before writing or reviewing page\/widget\/global extension UI/);
+  assert.match(examples, /authority for theme, color, layout, modal, drawer, and shell registry details/);
   assert.doesNotMatch(examples, /gradient: 'cyan'/);
   assert.doesNotMatch(examples, /<p class=\\["']text-sm text-muted/);
   assert.doesNotMatch(examples, /grid gap-4 md:grid-cols-3/);
@@ -792,15 +891,16 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(instructions, /get_permission_profile/);
   assert.match(instructions, /non-root API tokens/);
   assert.match(instructions, /\/admin\/script\/validate/);
-  assert.match(instructions, /websocket tools/);
-  assert.match(instructions, /api_endpoint_workflow/);
-  assert.match(instructions, /create_api_endpoint/);
-  assert.match(instructions, /public_route_methods/);
-  assert.match(instructions, /add_route_methods/);
-  assert.match(instructions, /enable_route/);
+  assert.match(instructions, /discover_enfyra_workflows/);
+  assert.match(routing, /ensure_websocket_event/);
+  assert.match(routing, /api_endpoint_workflow/);
+  assert.match(routing, /create_api_endpoint/);
+  assert.match(routing, /public_route_methods/);
+  assert.match(routing, /add_route_methods/);
+  assert.match(routing, /enable_route/);
   assert.match(instructions, /enfyra_route\.isEnabled/);
   assert.match(instructions, /GraphQL table data requires Bearer auth/);
-  assert.match(instructions, /ensure_page_extension/);
+  assert.match(routing, /ensure_page_extension/);
   assert.match(instructions, /get_extension_theme_contract/);
 });
 
@@ -820,12 +920,20 @@ test('mcp log search matches dashed and dotted app log filenames', () => {
 
 test('server instructions stay compact and route details to tools', () => {
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const routing = readFileSync(new URL('../src/lib/tool-routing.js', import.meta.url), 'utf8');
 
   assert.ok(Buffer.byteLength(instructions, 'utf8') < 12000);
+  assert.match(instructions, /detail: "plan"/);
+  assert.match(instructions, /avoidTools/);
   assert.match(instructions, /Load examples only when needed/);
   assert.match(instructions, /get_enfyra_api_context/);
   assert.match(instructions, /Run broad discovery tools sequentially, not in parallel/);
   assert.match(instructions, /fetch only the relevant live context or example category/);
+  assert.match(routing, /progressive disclosure/);
+  assert.match(routing, /query_table on destination domain lists/);
+  assert.match(routing, /notification summary\/realtime shell signal plus destination-page fetch on click/);
+  assert.match(routing, /api_endpoint_workflow/);
+  assert.match(routing, /choose_flow_step_tool/);
   assert.doesNotMatch(instructions, /#### Injected Vue API functions/);
   assert.doesNotMatch(instructions, /Tables confirmed to have REST routes/);
 });
