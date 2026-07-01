@@ -1,3 +1,4 @@
+// @ts-nocheck
 export const WORKFLOW_SURFACES = [
   'api-endpoint',
   'extension',
@@ -67,14 +68,14 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'inspect_feature'],
     inspectTools: ['inspect_feature', 'trace_metadata_usage', 'get_script_source'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'get_theme_class_reference'],
-    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
+    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
     verifyTools: ['validate_extension_code', 'inspect_feature'],
     avoidTools: [
       {
         tool: 'create_record/update_record on enfyra_extension',
         when: 'creating or changing extension code',
-        useInstead: 'extension_workflow, ensure_page_extension, ensure_global_extension, or ensure_widget_extension',
-        reason: 'Workflow and ensure tools validate extension code and preserve extension/menu contracts before saving.',
+        useInstead: 'update_extension_code for an existing extension id/name, or extension_workflow/ensure_*_extension for create/wire flows',
+        reason: 'Extension operation tools validate local guards plus /enfyra_extension/preview and save only after validation succeeds.',
       },
       {
         tool: 'query_table on destination domain lists',

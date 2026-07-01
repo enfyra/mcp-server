@@ -2,10 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { initAuth, resetTokens } from '../src/lib/auth.js';
-import { fetchAPI } from '../src/lib/fetch.js';
+import { initAuth, resetTokens } from '../dist/lib/auth.js';
+import { fetchAPI } from '../dist/lib/fetch.js';
 import {
   buildColumnDefinition,
+  assertIndexesDoNotReferenceUniqueFields,
   fetchTableWithDetails,
   normalizeRelationForTablePatch,
   registerTableTools,
@@ -14,11 +15,11 @@ import {
   resolveTableFromMetadata,
   resolveTableFromMetadataByName,
   sanitizeExistingRelationForTablePatch,
-} from '../src/lib/table-tools.js';
-import { prepareRecordMutation } from '../src/lib/mutation-guards.js';
-import { validateMainTableRoutePath } from '../src/lib/route-guards.js';
-import { GLOBAL_RULES_ACK_KEY } from '../src/lib/required-knowledge.js';
-import { WORKFLOW_SURFACES, discoverWorkflowRoutes, listWorkflowSurfaces } from '../src/lib/tool-routing.js';
+} from '../dist/lib/table-tools.js';
+import { prepareRecordMutation } from '../dist/lib/mutation-guards.js';
+import { validateMainTableRoutePath } from '../dist/lib/route-guards.js';
+import { GLOBAL_RULES_ACK_KEY } from '../dist/lib/required-knowledge.js';
+import { WORKFLOW_SURFACES, discoverWorkflowRoutes, listWorkflowSurfaces } from '../dist/lib/tool-routing.js';
 import {
   findRoutePermission,
   mergeMethodNames,
@@ -26,11 +27,33 @@ import {
   routePermissionMatchesScope,
   summarizeRouteAccess,
   validateMethodsForRoute,
-} from '../src/lib/route-permission-tools.js';
+} from '../dist/lib/route-permission-tools.js';
 
 test('platform operation module imports cleanly', async () => {
-  const module = await import('../src/lib/platform-operation-tools.js');
+  const module = await import('../dist/lib/platform-operation-tools.js');
   assert.equal(typeof module.registerPlatformOperationTools, 'function');
+});
+
+test('extension local validation rejects manual component resolution mistakes', async () => {
+  const { validateExtensionCodeLocally } = await import('../dist/lib/platform-operation-tools.js');
+
+  assert.deepEqual(
+    validateExtensionCodeLocally('<template><UButton>Save</UButton></template>'),
+    { componentCasing: 'passed' },
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally([
+      '<template><div /></template>',
+      '<script setup>',
+      "const UButton = resolveComponent('UButton')",
+      '</script>',
+    ].join('\n')),
+    /do not call resolveComponent/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<template><ubutton>Save</ubutton></template>'),
+    /use <UButton> instead of <ubutton>/,
+  );
 });
 
 test('workflow routing gives progressive tool plans and negative boundaries', () => {
@@ -48,6 +71,7 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
   assert.ok(extension.firstTools.includes('get_extension_theme_contract'));
   assert.ok(extension.requiredAck.includes('extensionAckKey when saving extension code'));
   assert.ok(extension.writeTools.includes('extension_workflow'));
+  assert.ok(extension.writeTools.includes('update_extension_code'));
   assert.ok(extension.writeTools.includes('reorder_menus'));
   assert.ok(extension.writeTools.includes('ensure_global_extension'));
   assert.ok(extension.verifyTools.includes('validate_extension_code'));
@@ -223,6 +247,24 @@ test('resolveTableIdentifierFromMetadata supports ids, names, and aliases', () =
   assert.throws(
     () => resolveTableIdentifierFromMetadata(metadata, 'missing_table', 'targetTableId'),
     /targetTableId "missing_table" was not found/
+  );
+});
+
+test('schema constraint validation rejects indexes that include unique fields', () => {
+  assert.throws(
+    () =>
+      assertIndexesDoNotReferenceUniqueFields(
+        [['is_active', 'version']],
+        [['version'], ['docker_image']],
+      ),
+    /indexes must not include fields that are already unique/,
+  );
+
+  assert.doesNotThrow(() =>
+    assertIndexesDoNotReferenceUniqueFields(
+      [['is_active', 'sort_order']],
+      [['version'], ['docker_image']],
+    ),
   );
 });
 
@@ -681,14 +723,14 @@ test('prepareRecordMutation fails closed when script validation endpoint is unav
 });
 
 test('mcp server exposes update_script_source for raw source updates', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /server\.tool\(\s*['"]update_script_source['"]/);
   assert.match(entry, /JSON\.stringify\(\{ sourceCode, scriptLanguage \}\)/);
   assert.match(entry, /updated_script_source/);
 });
 
 test('mcp server exposes script source inspection and patch tools', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /server\.tool\(\s*['"]get_script_source['"]/);
   assert.match(entry, /server\.tool\(\s*['"]patch_script_source['"]/);
   assert.match(entry, /expectedSourceSha256/);
@@ -696,7 +738,7 @@ test('mcp server exposes script source inspection and patch tools', () => {
 });
 
 test('mcp server exposes metadata usage tracing for production script edits', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /server\.tool\(\s*['"]trace_metadata_usage['"]/);
   assert.match(entry, /scriptReadErrors/);
   assert.match(entry, /get_script_source/);
@@ -706,10 +748,10 @@ test('mcp server exposes metadata usage tracing for production script edits', ()
 });
 
 test('code-writing tools require required-knowledge acknowledgement without blocking discovery or validation', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
-  const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.js', import.meta.url), 'utf8');
-  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.js', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
 
   assert.match(entry, /server\.tool\(\s*['"]get_enfyra_required_knowledge['"]/);
   assert.match(entry, /server\.tool\(\s*['"]discover_enfyra_workflows['"]/);
@@ -759,12 +801,12 @@ test('code-writing tools require required-knowledge acknowledgement without bloc
 });
 
 test('mcp server exposes route platform operation tools', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
-  const tableTools = readFileSync(new URL('../src/lib/table-tools.js', import.meta.url), 'utf8');
-  const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.js', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
-  const routing = readFileSync(new URL('../src/lib/tool-routing.js', import.meta.url), 'utf8');
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const tableTools = readFileSync(new URL('../src/lib/table-tools.ts', import.meta.url), 'utf8');
+  const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const routing = readFileSync(new URL('../src/lib/tool-routing.ts', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
 
   assert.match(entry, /registerPlatformOperationTools\(server, ENFYRA_API_URL\)/);
   assert.doesNotMatch(tableTools, /server\.tool\(\s*['"]add_column['"]/);
@@ -922,7 +964,7 @@ test('mcp server exposes route platform operation tools', () => {
 });
 
 test('test_flow_step uses unified admin test runner', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /'test_flow_step'/);
   assert.match(entry, /'\/admin\/test\/run'/);
   assert.match(entry, /kind:\s*'flow_step'/);
@@ -930,14 +972,14 @@ test('test_flow_step uses unified admin test runner', () => {
 });
 
 test('mcp log search matches dashed and dotted app log filenames', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /\^app\[\.-\]/);
   assert.match(entry, /\^error\[\.-\]/);
 });
 
 test('server instructions stay compact and route details to tools', () => {
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
-  const routing = readFileSync(new URL('../src/lib/tool-routing.js', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const routing = readFileSync(new URL('../src/lib/tool-routing.ts', import.meta.url), 'utf8');
 
   assert.ok(Buffer.byteLength(instructions, 'utf8') < 12000);
   assert.match(instructions, /detail: "plan"/);
@@ -956,7 +998,7 @@ test('server instructions stay compact and route details to tools', () => {
 });
 
 test('discovery tools report target instance and avoid unbounded broad searches', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
 
   assert.match(entry, /function targetInstance\(\)/);
   assert.match(entry, /source: 'ENFYRA_API_URL environment variable used by this MCP server process'/);
@@ -984,7 +1026,7 @@ test('discovery tools report target instance and avoid unbounded broad searches'
 });
 
 test('query_table supports deep meta and aggregate query options', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /meta: z\.string\(\)\.optional\(\)/);
   assert.match(entry, /deep: z\.string\(\)\.optional\(\)/);
   assert.match(entry, /aggregate: z\.string\(\)\.optional\(\)/);
@@ -993,9 +1035,9 @@ test('query_table supports deep meta and aggregate query options', () => {
 });
 
 test('list query tools require explicit limit or all intent', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
 
   assert.match(entry, /query_table requires either limit or all=true/);
@@ -1009,8 +1051,8 @@ test('list query tools require explicit limit or all intent', () => {
 });
 
 test('websocket script context documents roomSize helper', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
 
   assert.match(entry, /roomSize\(room\) counts sockets in that room across registered gateways/);
   assert.match(entry, /@SOCKET reply\/join\/leave\/disconnect\/emit helpers\/roomSize/);
@@ -1019,8 +1061,8 @@ test('websocket script context documents roomSize helper', () => {
 });
 
 test('script context discovery documents runtime macro and helper surface', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
 
   for (const macro of [
     '@BODY',
@@ -1063,7 +1105,7 @@ test('script context discovery documents runtime macro and helper surface', () =
 });
 
 test('SSR app examples include Nuxt Next and Angular connection patterns', () => {
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
 
   assert.match(examples, /Nuxt routeRules for REST and Socket\.IO/);
   assert.match(examples, /Next rewrites for REST and Socket\.IO/);
@@ -1080,8 +1122,8 @@ test('SSR app examples include Nuxt Next and Angular connection patterns', () =>
 });
 
 test('OAuth setup examples guide provider console callback configuration', () => {
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
 
   assert.match(examples, /'oauth-setup'/);
   assert.match(examples, /Google OAuth setup workflow/);
@@ -1094,28 +1136,28 @@ test('OAuth setup examples guide provider console callback configuration', () =>
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /async function reloadRoutesResult\(\)/);
   assert.match(entry, /routeReload/);
   assert.doesNotMatch(entry, /routesReloaded:\s*true/);
 });
 
 test('column rule examples use the current value contract', () => {
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   assert.match(examples, /value: JSON\.stringify\(\{ v: "email" \}\)/);
   assert.doesNotMatch(examples, /ruleConfig: JSON\.stringify/);
 });
 
 test('query examples distinguish relation fields from deep relation query options', () => {
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   assert.match(examples, /Use fields with dotted relation paths when you only need scalar fields from related records/);
   assert.match(examples, /Use deep when relation loading needs query options such as filter, sort, limit, page, or nested deep/);
   assert.match(examples, /Do not use deep just to filter by a relation id/);
 });
 
 test('query guidance documents fields exclusion mode', () => {
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   assert.match(examples, /fields=-compiledCode/);
   assert.match(examples, /fields=id,-compiledCode returns all readable fields except compiledCode/);
@@ -1126,8 +1168,8 @@ test('query guidance documents fields exclusion mode', () => {
 });
 
 test('operator guidance avoids speculative warnings and physical FK generated code', () => {
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
   assert.match(instructions, /Do not turn expected implementation details into speculative warnings/);
   assert.match(instructions, /`compiledCode` is generated and may differ textually/);
@@ -1139,9 +1181,9 @@ test('operator guidance avoids speculative warnings and physical FK generated co
 });
 
 test('RLS guidance preserves caller projection and pagination', () => {
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.js', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.js', import.meta.url), 'utf8');
-  const entry = readFileSync(new URL('../src/mcp-server-entry.mjs', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(instructions, /do not override `@QUERY\.fields`/);
   assert.match(instructions, /Merge only security filters into `@QUERY\.filter`/);
   assert.match(examples, /keep projection and pagination client-owned/);

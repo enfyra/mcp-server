@@ -10,8 +10,8 @@ if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
   console.log(`Enfyra MCP Server
 
 Usage:
-  npx @enfyra/mcp-server                 Start the MCP stdio server
-  npx @enfyra/mcp-server config [flags]  Write project-local MCP host config
+  npx @enfyra/mcp-server@latest                 Start the MCP stdio server
+  npx @enfyra/mcp-server@latest config [flags]  Write project-local MCP host config
 
 Common config flags:
   --codex             Write ./.codex/config.toml
@@ -25,16 +25,16 @@ Common config flags:
   -t, --api-token     ENFYRA_API_TOKEN
   -h, --help          Show config help
 
-Run \`npx @enfyra/mcp-server config --help\` for full config details.
+Run \`npx @enfyra/mcp-server@latest config --help\` for full config details.
 `);
   process.exit(0);
 }
 if (args[0] === 'config') {
   loadEnv({ quiet: true });
-  const { runLocalConfig } = await import('./lib/config-local.mjs');
+  const { runLocalConfig } = await import('./lib/config-local.js');
   await runLocalConfig(args.slice(1));
   process.exit(0);
 }
 
 loadEnv();
-await import('./mcp-server-entry.mjs');
+await import('./mcp-server-entry.js');

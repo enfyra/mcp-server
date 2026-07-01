@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Table & Column tools for Enfyra MCP Server
  */
@@ -123,6 +124,37 @@ function normalizeConstraintGroups(name, groups) {
     }
     return value;
   });
+}
+
+function parseConstraintGroupsParam(name, value) {
+  return normalizeConstraintGroups(name, parseJsonArrayParam(name, value));
+}
+
+function normalizeConstraintGroupsValue(name, value) {
+  if (value == null) return [];
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${name} must be a JSON array.`);
+  }
+  return normalizeConstraintGroups(name, parsed);
+}
+
+export function assertIndexesDoNotReferenceUniqueFields(indexes, uniques) {
+  const uniqueFields = new Set(uniques.flat());
+  const conflicts = indexes
+    .map((group) => ({
+      index: group,
+      uniqueFields: group.filter((field) => uniqueFields.has(field)),
+    }))
+    .filter((conflict) => conflict.uniqueFields.length > 0);
+  if (conflicts.length > 0) {
+    const groups = conflicts
+      .map((conflict) => `${JSON.stringify(conflict.index)} uses unique field(s) ${JSON.stringify(conflict.uniqueFields)}`)
+      .join('; ');
+    throw new Error(
+      `Invalid schema constraints: indexes must not include fields that are already unique. Conflict(s): ${groups}. Unique constraints already create indexed lookups; remove unique fields from indexes and keep those fields only in uniques.`,
+    );
+  }
 }
 
 export function normalizeRelationForTablePatch(relation) {
@@ -566,6 +598,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       '**Not** for adding a custom API path or handler only — for that use **`create_route`** without `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
       'PREFERRED: pass `columns` and `relations` params as JSON arrays to create a table WITH columns and relations in one call (cascade). Only use create_column/create_relation separately when adding to an existing table later.',
       'Indexes and uniques are first-class table metadata. Use `indexes` for query performance and `uniques` for data integrity. Each entry is a logical field group such as [["member","isRead","conversation"]] or [{"value":["message","member"]}]. Relation property names are allowed; Enfyra resolves them to physical FK columns.',
+      'A field that appears in any `uniques` group must not appear in `indexes`; unique constraints already create indexed unique lookups.',
       'Relations are supported in this same create_table call when the target table already exists. Each relation uses { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete? }; targetTable may be a table id, {id}, or an exact table name that MCP resolves to an id before mutation. Omit inversePropertyName unless a concrete parent-to-child query or UI surface needs it.',
       'Do NOT provide physical FK/junction columns. Never include fkCol, fkColumn, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn. Enfyra derives and hides those physical columns from relation propertyName/table metadata.',
       'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
@@ -583,7 +616,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record tables such as settings/config. This is passed directly to enfyra_table create.'),
       columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, defaultValue?, description?, options? }. Set isEncrypted=true for values encrypted at rest; set isUpdatable=false separately only when the field should be immutable. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"api_key","type":"varchar","isEncrypted":true,"isPublished":false}]'),
       relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id, {"id": <id>}, or an exact table name that MCP resolves to an id before mutation. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Omit inversePropertyName unless a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal needs the reverse field. Example only when parent posts are queried: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
-      indexes: z.string().optional().describe('JSON array of logical index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Example: [["member","isRead","conversation"],["conversation","member","isRead"]]'),
+      indexes: z.string().optional().describe('JSON array of logical non-unique index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Do not include any field that appears in uniques; unique constraints already create indexed unique lookups. Example: [["status","createdAt"]]'),
       uniques: z.string().optional().describe('JSON array of logical unique field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Example: [["message","member"]]'),
       globalRulesAckKey: globalRulesAckParam(z),
     },
@@ -596,8 +629,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       const userRelations = metadata
         ? resolveRelationTargetsFromMetadata(metadata, parsedRelations)
         : parsedRelations;
-      const indexes = normalizeConstraintGroups('indexes', parseJsonArrayParam('indexes', indexesJson));
-      const uniques = normalizeConstraintGroups('uniques', parseJsonArrayParam('uniques', uniquesJson));
+      const indexes = parseConstraintGroupsParam('indexes', indexesJson);
+      const uniques = parseConstraintGroupsParam('uniques', uniquesJson);
+      assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
       const body = { name, description, columns: [idColumn, ...userColumns], relations: userRelations };
       if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
       if (indexesJson !== undefined) body.indexes = indexes;
@@ -654,6 +688,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       'Update table properties: name (rename), alias, description, isSingleRecord, graphqlEnabled, indexes, and uniques.',
       'Does NOT modify columns or relations — use create_column, update_column, delete_column, create_relation for those.',
       'When passing `indexes` or `uniques`, pass the complete desired array of logical field groups; omitted fields are preserved. Relation property names are allowed and are resolved by Enfyra. Example indexes: [["member","isRead","conversation"],["conversation","member","isRead"]].',
+      'A field that appears in any `uniques` group must not appear in `indexes`; unique constraints already create indexed unique lookups.',
       'Run schema changes sequentially — migration locks DB per operation.',
     ].join(' '),
     {
@@ -663,7 +698,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('New description.'),
       isSingleRecord: z.boolean().optional().describe('Set to true for single-record table (e.g., settings/config).'),
       graphqlEnabled: z.boolean().optional().describe('Enable or disable GraphQL for this table by syncing enfyra_graphql.isEnabled. GraphQL table data still requires Bearer auth; anonymous root or schema probes may return 200.'),
-      indexes: z.string().optional().describe('Complete JSON array of logical index field groups to store on enfyra_table.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear.'),
+      indexes: z.string().optional().describe('Complete JSON array of logical non-unique index field groups to store on enfyra_table.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear. Do not include any field that appears in uniques; unique constraints already create indexed unique lookups.'),
       uniques: z.string().optional().describe('Complete JSON array of logical unique field groups to store on enfyra_table.uniques. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current uniques; pass [] to clear.'),
       globalRulesAckKey: globalRulesAckParam(z),
     },
@@ -675,8 +710,19 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       if (description !== undefined) body.description = description;
       if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
       if (graphqlEnabled !== undefined) body.graphqlEnabled = graphqlEnabled;
-      if (indexesJson !== undefined) body.indexes = normalizeConstraintGroups('indexes', parseJsonArrayParam('indexes', indexesJson));
-      if (uniquesJson !== undefined) body.uniques = normalizeConstraintGroups('uniques', parseJsonArrayParam('uniques', uniquesJson));
+      if (indexesJson !== undefined) body.indexes = parseConstraintGroupsParam('indexes', indexesJson);
+      if (uniquesJson !== undefined) body.uniques = parseConstraintGroupsParam('uniques', uniquesJson);
+
+      if (indexesJson !== undefined || uniquesJson !== undefined) {
+        let indexes = body.indexes;
+        let uniques = body.uniques;
+        if (indexes === undefined || uniques === undefined) {
+          const existing = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+          if (indexes === undefined) indexes = normalizeConstraintGroupsValue('indexes', existing.indexes);
+          if (uniques === undefined) uniques = normalizeConstraintGroupsValue('uniques', existing.uniques);
+        }
+        assertIndexesDoNotReferenceUniqueFields(indexes ?? [], uniques ?? []);
+      }
 
       const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, body);
       return jsonContent({

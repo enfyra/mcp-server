@@ -1,8 +1,8 @@
-export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::READ-LIVE-CONTEXT-FIRST::2bW-20260701';
+export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::UNIQUE-FIELDS-ARE-INDEXED::2bW-20260701B';
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::SECURE-REPO-CONTRACT::R9x-kelp-42Q::NO-RAW-TRUSTED';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-THEME-CONTRACT::VIOLET-IS-NOT-A-PLAN::7mQ';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-01.global-rules-v1';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-07-01.global-rules-v2';
 
 export function globalRulesAckParam(z) {
   return z.string().describe('Required global-rules acknowledgement key from get_enfyra_required_knowledge. Call that tool, read the global Enfyra MCP rules, then pass globalRulesAckKey exactly.');
@@ -82,6 +82,15 @@ export function buildRequiredKnowledgePayload() {
           'Destructive operations are preview-first; pass confirm=true only after explicit user approval.',
           'Do not manually reload caches unless natural partial reload is proven stale or a concrete reload error requires it.',
           'Never fabricate ids, field names, relation names, paths, package names, or permission scopes.',
+        ],
+      },
+      {
+        id: 'schema-constraints',
+        rules: [
+          'For table schema, a field that appears in any uniques group must not appear in indexes.',
+          'A unique constraint already creates the indexed unique lookup for its fields.',
+          'Use uniques for data integrity and indexes only for non-unique query-performance fields that are not already unique.',
+          'Before create_table or update_table with indexes/uniques, inspect the current table and remove indexes that reference unique fields.',
         ],
       },
       {
@@ -166,6 +175,7 @@ export function buildRequiredKnowledgePayload() {
         id: 'extension-runtime-contract',
         rules: [
           'Save extensions as enfyra_extension Vue SFC records; no static import statements in extension code.',
+          'Do not call resolveComponent() in extension SFCs. Use auto-injected components such as <UButton>, <UBadge>, <PermissionGate>, and <Widget> directly in the template so the app/compiler resolves them correctly.',
           'Load app packages with getPackages(["package-name"]) inside extension runtime code.',
           'Prefer FormEditor/FormEditorLazy for direct table-backed forms when the form maps to metadata fields.',
           'For long admin setup workflows, open CommonDrawer immediately and show loading/error/content inside it.',

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { compactSourceFields, writeSourceArtifact } from '../src/lib/source-artifacts.js';
+import { compactSourceFields, writeSourceArtifact } from '../dist/lib/source-artifacts.js';
 
 test('writeSourceArtifact stores full source in tmp and returns compact metadata', () => {
   const source = 'export default ' + 'x'.repeat(1600);

@@ -1,5 +1,6 @@
+// @ts-nocheck
 /**
- * Enfyra MCP — stdio server (loaded by index.mjs).
+ * Enfyra MCP — stdio server (loaded by index.ts / dist/index.js).
  */
 
 import { config } from 'dotenv';
@@ -22,7 +23,7 @@ import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instruct
 import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
 import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './lib/tool-routing.js';
 import { registerTableTools } from './lib/table-tools.js';
-import { registerPlatformOperationTools } from './lib/platform-operation-tools.js';
+import { registerPlatformOperationTools, validateExtensionCode } from './lib/platform-operation-tools.js';
 import { parseRecordData, prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
 import {
   assertDynamicCodeKnowledgeAck,
@@ -621,6 +622,11 @@ function assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, e
   const payload = parseRecordData(data);
   assertDynamicCodeKnowledgeAckIf(SCRIPT_BACKED_TABLE_SET.has(tableName) && typeof payload.sourceCode === 'string', knowledgeAckKey);
   assertExtensionKnowledgeAckIf(tableName === 'enfyra_extension' && typeof payload.code === 'string', extensionKnowledgeAckKey);
+}
+
+async function validateExtensionCodeForGenericMutation(tableName, payload, fallbackName) {
+  if (tableName !== 'enfyra_extension' || typeof payload?.code !== 'string') return null;
+  return validateExtensionCode(ENFYRA_API_URL, payload.code, payload.name || fallbackName);
 }
 
 function parseQueryParamsArg(queryParams) {
@@ -1501,7 +1507,7 @@ server.tool(
 // CRUD TOOLS
 // ============================================================================
 
-server.tool('create_record', 'Create a new record in any route-backed table. The tool validates body keys against live metadata and validates sourceCode before saving script-backed records.', {
+server.tool('create_record', 'Create a new record in any route-backed table. The tool validates body keys against live metadata, validates sourceCode before saving script-backed records, and validates enfyra_extension.code before saving extension records.', {
   tableName: z.string().describe('Table name to insert into'),
   data: z.string().describe('Record data as JSON string'),
   queryParams: z.string().optional().describe('Optional query params as JSON object string, e.g. {"expired_at":"2026-09-20"}. Use for route contracts that intentionally keep workflow fields out of the validated body.'),
@@ -1513,15 +1519,17 @@ server.tool('create_record', 'Create a new record in any route-backed table. The
   validateTableName(tableName);
   assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, extensionKnowledgeAckKey });
   const prepared = await prepareGenericMutation(tableName, data);
+  const extensionValidation = await validateExtensionCodeForGenericMutation(tableName, prepared.payload, prepared.payload?.name);
   const query = parseQueryParamsArg(queryParams);
   const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}`, query), { method: 'POST', body: JSON.stringify(prepared.payload) });
   return { content: [{ type: 'text', text: JSON.stringify({
     ...summarizeMutationResult(result, 'created', tableName),
     scriptValidation: prepared.scriptValidation,
+    extensionValidation,
   }, null, 2) }] };
 });
 
-server.tool('update_record', 'Update an existing record by ID using PATCH. The tool validates body keys against live metadata and validates sourceCode before saving script-backed records.', {
+server.tool('update_record', 'Update an existing record by ID using PATCH. The tool validates body keys against live metadata, validates sourceCode before saving script-backed records, and validates enfyra_extension.code before saving extension records. Prefer update_extension_code for normal extension edits.', {
   tableName: z.string().describe('Table name'),
   id: z.string().describe('Record ID to update'),
   data: z.string().describe('Fields to update as JSON string'),
@@ -1534,11 +1542,13 @@ server.tool('update_record', 'Update an existing record by ID using PATCH. The t
   validateTableName(tableName);
   assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, extensionKnowledgeAckKey });
   const prepared = await prepareGenericMutation(tableName, data);
+  const extensionValidation = await validateExtensionCodeForGenericMutation(tableName, prepared.payload, id);
   const query = parseQueryParamsArg(queryParams);
   const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${id}`, query), { method: 'PATCH', body: JSON.stringify(prepared.payload) });
   return { content: [{ type: 'text', text: JSON.stringify({
     ...summarizeMutationResult(result, 'updated', tableName),
     scriptValidation: prepared.scriptValidation,
+    extensionValidation,
   }, null, 2) }] };
 });
 

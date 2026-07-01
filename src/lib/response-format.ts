@@ -1,18 +1,20 @@
+import type { ToolResult, UnknownRecord } from "./types.js";
+
 const RESPONSE_FORMAT = 'json+columnar-v1';
 const COLUMNAR_FORMAT = 'columnar-v1';
 const COMPRESSION_STATS_FIELD = 'compressionStats';
 
-function isPlainObject(value) {
+function isPlainObject(value: unknown): value is UnknownRecord {
   if (!value || typeof value !== 'object') return false;
   const proto = Object.getPrototypeOf(value);
   return proto === Object.prototype || proto === null;
 }
 
-function valueForColumn(record, column) {
+function valueForColumn(record: UnknownRecord, column: string) {
   return Object.prototype.hasOwnProperty.call(record, column) ? record[column] : null;
 }
 
-function collectColumns(records) {
+function collectColumns(records: UnknownRecord[]) {
   const columns = [];
   const seen = new Set();
   for (const record of records) {
@@ -25,7 +27,7 @@ function collectColumns(records) {
   return columns;
 }
 
-function toColumnar(value, seen = new WeakSet()) {
+function toColumnar(value: unknown, seen = new WeakSet<object>()): unknown {
   if (Array.isArray(value)) {
     if (value.length > 0 && value.every(isPlainObject)) {
       const columns = collectColumns(value);
@@ -51,8 +53,8 @@ function toColumnar(value, seen = new WeakSet()) {
   return output;
 }
 
-function safeJsonStringify(value) {
-  const seen = new WeakSet();
+function safeJsonStringify(value: unknown) {
+  const seen = new WeakSet<object>();
   return JSON.stringify(value, (_key, entry) => {
     if (!entry || typeof entry !== 'object') return entry;
     if (seen.has(entry)) return '[Circular]';
@@ -61,12 +63,12 @@ function safeJsonStringify(value) {
   });
 }
 
-function estimateTokens(jsonText) {
+function estimateTokens(jsonText: string) {
   if (!jsonText) return 0;
   return Math.ceil(jsonText.length / 4);
 }
 
-function buildCompressionStats(originalPayload, candidatePayload, selectedPayload, applied) {
+function buildCompressionStats(originalPayload: unknown, candidatePayload: unknown, selectedPayload: unknown, applied: boolean) {
   const originalTokens = estimateTokens(safeJsonStringify(originalPayload));
   const candidateTokens = estimateTokens(safeJsonStringify(candidatePayload));
   const responseTokens = estimateTokens(safeJsonStringify(selectedPayload));
@@ -90,7 +92,7 @@ function buildCompressionStats(originalPayload, candidatePayload, selectedPayloa
   };
 }
 
-function attachCompressionStats(originalPayload, candidatePayload, selectedPayload, applied) {
+function attachCompressionStats(originalPayload: unknown, candidatePayload: unknown, selectedPayload: UnknownRecord, applied: boolean) {
   if (
     isPlainObject(selectedPayload)
     && selectedPayload.responseFormat === RESPONSE_FORMAT
@@ -104,7 +106,7 @@ function attachCompressionStats(originalPayload, candidatePayload, selectedPaylo
   };
 }
 
-function wrapPayload(payload) {
+function wrapPayload(payload: unknown): UnknownRecord {
   if (!isPlainObject(payload)) {
     return {
       responseFormat: RESPONSE_FORMAT,
@@ -117,7 +119,7 @@ function wrapPayload(payload) {
   };
 }
 
-export function formatJsonPayload(payload) {
+export function formatJsonPayload(payload: unknown): UnknownRecord {
   if (
     isPlainObject(payload)
     && payload.responseFormat === RESPONSE_FORMAT
@@ -131,11 +133,11 @@ export function formatJsonPayload(payload) {
   const originalTokens = estimateTokens(safeJsonStringify(originalPayload));
   const candidateTokens = estimateTokens(safeJsonStringify(columnarPayload));
   const shouldApplyColumnar = candidateTokens < originalTokens;
-  const selectedPayload = shouldApplyColumnar ? columnarPayload : originalPayload;
+  const selectedPayload: UnknownRecord = shouldApplyColumnar ? columnarPayload : originalPayload;
   return attachCompressionStats(originalPayload, columnarPayload, selectedPayload, shouldApplyColumnar);
 }
 
-export function jsonContent(payload, { pretty = false } = {}) {
+export function jsonContent(payload: unknown, { pretty = false }: { pretty?: boolean } = {}): ToolResult {
   return {
     content: [{
       type: 'text',
@@ -144,7 +146,7 @@ export function jsonContent(payload, { pretty = false } = {}) {
   };
 }
 
-function tryParseJson(text) {
+function tryParseJson(text: unknown) {
   if (typeof text !== 'string') return null;
   const trimmed = text.trim();
   if (!trimmed || !/^[\[{]/.test(trimmed)) return null;
@@ -155,7 +157,7 @@ function tryParseJson(text) {
   }
 }
 
-function formatContentItem(item) {
+function formatContentItem(item: any) {
   if (!item || item.type !== 'text') return item;
   const parsed = tryParseJson(item.text);
   if (!parsed) return item;
@@ -165,7 +167,7 @@ function formatContentItem(item) {
   };
 }
 
-export function formatToolResult(result) {
+export function formatToolResult(result: any) {
   if (!result || !Array.isArray(result.content)) return result;
   return {
     ...result,
@@ -173,7 +175,7 @@ export function formatToolResult(result) {
   };
 }
 
-export function installColumnarToolFormatter(server) {
+export function installColumnarToolFormatter(server: any) {
   const registerTool = server.tool.bind(server);
   server.tool = (name, description, schema, handler) => {
     if (typeof handler !== 'function') {

@@ -1,22 +1,26 @@
 {
   "name": "@enfyra/mcp-server",
-  "version": "0.1.10",
+  "version": "0.1.13",
   "description": "MCP server for Enfyra - manage Enfyra instances from MCP-compatible coding tools",
   "type": "module",
+  "packageManager": "yarn@4.17.0",
   "license": "MIT",
-  "main": "src/index.mjs",
+  "main": "dist/index.js",
   "bin": {
-    "mcp-server": "src/index.mjs",
-    "enfyra-mcp-server": "src/index.mjs"
+    "enfyra-mcp-server": "dist/index.js",
+    "mcp-server": "dist/index.js"
   },
   "files": [
-    "src"
+    "dist"
   ],
   "scripts": {
-    "start": "node src/index.mjs",
-    "dev": "node --watch src/index.mjs",
-    "mcp:config": "node src/index.mjs config",
-    "test": "node --test"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js",
+    "dev": "yarn build && node --watch dist/index.js",
+    "mcp:config": "node dist/index.js config",
+    "test": "yarn build && node --test",
+    "prepack": "yarn build"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
@@ -25,5 +29,9 @@
   },
   "publishConfig": {
     "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "typescript": "^6.0.3"
   }
 }

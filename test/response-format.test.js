@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { formatJsonPayload, formatToolResult } from '../src/lib/response-format.js';
+import { formatJsonPayload, formatToolResult } from '../dist/lib/response-format.js';
 
 test('formatJsonPayload encodes arrays of objects as columnar rows', () => {
   const formatted = formatJsonPayload({

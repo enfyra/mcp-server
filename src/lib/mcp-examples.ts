@@ -667,13 +667,13 @@ update_record({
   ]),
   uniques: JSON.stringify([["message", "member"]]),
   indexes: JSON.stringify([
-    ["member", "isRead", "conversation"],
-    ["conversation", "member", "isRead"]
+    ["conversation", "isRead"]
   ])
 })`,
         notes: [
           'Unread is per user and per message; do not put global read state on conversation.',
-          'readAt is a datetime field and gets its own auto index; the explicit indexes here are compound unread lookup indexes.',
+          'message and member appear in the unique constraint, so they must not be added to indexes; unique fields are already indexed by the unique constraint.',
+          'readAt is a datetime field and gets its own auto index; explicit indexes should cover only non-unique hot lookup fields.',
           'For chat-list UX, default to a boolean unread dot instead of exact counts.',
         ],
       },
@@ -1597,6 +1597,7 @@ ensure_page_extension({
           'Use enfyra_menu.label, not title.',
           'Sensitive admin menus should include a permission condition at creation time.',
           'For page extensions, create the menu first with ensure_menu and pass its id to ensure_page_extension.',
+          'When editing an existing extension by id or name, use update_extension_code so local guards plus /enfyra_extension/preview and the save happen in one atomic call. Do not spend a second LLM step on validate_extension_code followed by update_record unless the user requested validation-only output.',
           'Call get_extension_theme_contract before writing or reviewing page/widget/global extension UI; that tool is the authority for theme, color, layout, modal, drawer, and shell registry details.',
           'Call get_enfyra_required_knowledge before saving extension code, pass globalRulesAckKey as globalRulesAckKey, and pass extensionAckKey as extensionKnowledgeAckKey.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',

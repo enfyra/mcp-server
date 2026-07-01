@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import { emitKeypressEvents } from 'node:readline';
@@ -5,6 +6,7 @@ import { stdin as input, stdout as output, cwd } from 'node:process';
 import { dirname, join } from 'node:path';
 
 const SERVER_KEY = 'enfyra';
+const MCP_PACKAGE_SPEC = '@enfyra/mcp-server@latest';
 const forceColor = process.env.FORCE_COLOR != null && process.env.FORCE_COLOR !== '0';
 const canStyle = forceColor || (output.isTTY && process.env.NO_COLOR == null);
 const style = {
@@ -67,7 +69,7 @@ function printHelp() {
 ${style.dim('Write project-local MCP client config for Enfyra.')}
 
 ${style.bold('Usage')}
-  npx @enfyra/mcp-server config [options]
+  npx @enfyra/mcp-server@latest config [options]
 
 ${style.bold('Supported clients')}
   Codex        ./.codex/config.toml
@@ -99,15 +101,15 @@ ${style.bold('Interactive mode')}
   Existing Enfyra config and environment variables are used as defaults. Re-run anytime to update.
 
 ${style.bold('Examples')}
-  npx @enfyra/mcp-server config
-  npx @enfyra/mcp-server config --yes
-  npx @enfyra/mcp-server config --codex --cursor
-  npx @enfyra/mcp-server config --vscode
-  npx @enfyra/mcp-server config --antigravity
-  npx @enfyra/mcp-server config --claude-code
-  npx @enfyra/mcp-server config --reconfig
-  npx @enfyra/mcp-server config --app-url http://localhost:3000 -t 'efy_pat_...'
-  ENFYRA_APP_URL=https://demo.enfyra.io ENFYRA_API_TOKEN=efy_pat_... npx @enfyra/mcp-server config --yes
+  npx @enfyra/mcp-server@latest config
+  npx @enfyra/mcp-server@latest config --yes
+  npx @enfyra/mcp-server@latest config --codex --cursor
+  npx @enfyra/mcp-server@latest config --vscode
+  npx @enfyra/mcp-server@latest config --antigravity
+  npx @enfyra/mcp-server@latest config --claude-code
+  npx @enfyra/mcp-server@latest config --reconfig
+  npx @enfyra/mcp-server@latest config --app-url http://localhost:3000 -t 'efy_pat_...'
+  ENFYRA_APP_URL=https://demo.enfyra.io ENFYRA_API_TOKEN=efy_pat_... npx @enfyra/mcp-server@latest config --yes
 `);
 }
 
@@ -170,7 +172,7 @@ function parseArgs(argv) {
 function buildServerEntry(apiUrl, apiToken) {
   return {
     command: 'npx',
-    args: ['-y', '@enfyra/mcp-server'],
+    args: ['-y', MCP_PACKAGE_SPEC],
     env: {
       ENFYRA_API_URL: apiUrl,
       ENFYRA_API_TOKEN: apiToken,
@@ -256,7 +258,7 @@ function buildCodexTomlBlock(apiUrl, apiToken) {
   return [
     '[mcp_servers.enfyra]',
     'command = "npx"',
-    'args = ["-y", "@enfyra/mcp-server"]',
+    `args = ["-y", "${MCP_PACKAGE_SPEC}"]`,
     '',
     '[mcp_servers.enfyra.env]',
     `ENFYRA_API_URL = ${tomlString(apiUrl)}`,

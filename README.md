@@ -2,55 +2,70 @@
 
 Manage Enfyra instances from MCP-compatible coding tools such as **Codex**, **Claude Code**, **Cursor**, **VS Code / GitHub Copilot**, **Google Antigravity**, MCP Inspector, and other STDIO MCP hosts.
 
-This package is the MCP bridge only. Assistant rules, schema behavior, dynamic script guidance, and examples are served through the MCP server itself from `src/lib/mcp-instructions.js`, `src/lib/mcp-examples.js`, and tool descriptions in `src/mcp-server-entry.mjs`.
+This package is the MCP bridge only. Assistant rules, schema behavior, dynamic script guidance, and examples are served through the MCP server itself from TypeScript source in `src/lib/mcp-instructions.ts`, `src/lib/mcp-examples.ts`, and tool descriptions in `src/mcp-server-entry.ts`. Published packages run the compiled `dist/index.js` entry.
 
 ## Quick Start
 
 From your project root:
 
 ```bash
-npx @enfyra/mcp-server config
+npx @enfyra/mcp-server@latest config
 ```
 
 The config command writes project config for Codex, Claude Code, Cursor, VS Code / GitHub Copilot, and Google Antigravity. It preserves other MCP servers and replaces only the `enfyra` entry.
 
 Interactive setup asks for your Enfyra app/admin URL, then guides you to the token page when needed and asks for `ENFYRA_API_TOKEN`.
 
+Generated MCP host configs run `npx -y @enfyra/mcp-server@latest` so every host start resolves the current npm `latest` dist-tag published by Enfyra.
+
 ```bash
 # Non-interactive, all supported clients
-npx @enfyra/mcp-server config --yes \
+npx @enfyra/mcp-server@latest config --yes \
   --app-url http://localhost:3000 \
   -t efy_pat_your-token
 
 # One or more clients
-npx @enfyra/mcp-server config --codex
-npx @enfyra/mcp-server config --cursor --claude-code
-npx @enfyra/mcp-server config --vscode
-npx @enfyra/mcp-server config --antigravity
+npx @enfyra/mcp-server@latest config --codex
+npx @enfyra/mcp-server@latest config --cursor --claude-code
+npx @enfyra/mcp-server@latest config --vscode
+npx @enfyra/mcp-server@latest config --antigravity
 ```
 
 Equivalent in this repo:
 
 ```bash
+yarn build
 yarn mcp:config
 ```
+
+## Development
+
+This repo uses Yarn 4 through Corepack and TypeScript source compiled to `dist`.
+
+```bash
+yarn typecheck
+yarn build
+yarn test
+```
+
+`yarn test` builds first and then runs Node tests against `dist` while static source assertions read `src/**/*.ts`.
 
 ## Choose A Client
 
 | Client | Command | Project config |
 |--------|---------|----------------|
-| Codex | `npx @enfyra/mcp-server config --codex` | `.codex/config.toml` |
-| Claude Code | `npx @enfyra/mcp-server config --claude-code` | `.mcp.json` |
-| Cursor | `npx @enfyra/mcp-server config --cursor` | `.cursor/mcp.json` |
-| VS Code / GitHub Copilot | `npx @enfyra/mcp-server config --vscode` | `.vscode/mcp.json` |
-| Google Antigravity | `npx @enfyra/mcp-server config --antigravity` | `.agents/mcp_config.json` |
+| Codex | `npx @enfyra/mcp-server@latest config --codex` | `.codex/config.toml` |
+| Claude Code | `npx @enfyra/mcp-server@latest config --claude-code` | `.mcp.json` |
+| Cursor | `npx @enfyra/mcp-server@latest config --cursor` | `.cursor/mcp.json` |
+| VS Code / GitHub Copilot | `npx @enfyra/mcp-server@latest config --vscode` | `.vscode/mcp.json` |
+| Google Antigravity | `npx @enfyra/mcp-server@latest config --antigravity` | `.agents/mcp_config.json` |
 | MCP Inspector / other project-scoped hosts | Paste the shared STDIO config below | Host-specific project config |
 
 <details>
 <summary><strong>Codex setup</strong></summary>
 
 ```bash
-npx @enfyra/mcp-server config --codex
+npx @enfyra/mcp-server@latest config --codex
 ```
 
 Generated project config:
@@ -58,7 +73,7 @@ Generated project config:
 ```toml
 [mcp_servers.enfyra]
 command = "npx"
-args = ["-y", "@enfyra/mcp-server"]
+args = ["-y", "@enfyra/mcp-server@latest"]
 
 [mcp_servers.enfyra.env]
 ENFYRA_API_URL = "http://localhost:3000/api"
@@ -77,7 +92,7 @@ Official reference: [Codex config](https://developers.openai.com/codex/config-re
 <summary><strong>Claude Code setup</strong></summary>
 
 ```bash
-npx @enfyra/mcp-server config --claude-code
+npx @enfyra/mcp-server@latest config --claude-code
 ```
 
 Project config is written to `.mcp.json`. MCP server definitions do not belong in `.claude/settings.json`.
@@ -88,7 +103,7 @@ Claude Code also supports its own CLI:
 claude mcp add --transport stdio --scope project \
   --env ENFYRA_API_URL=http://localhost:3000/api \
   --env ENFYRA_API_TOKEN=efy_pat_your-token \
-  enfyra -- npx -y @enfyra/mcp-server
+  enfyra -- npx -y @enfyra/mcp-server@latest
 ```
 
 Scope precedence when the same server name exists in multiple places is local, then project, then user. Project-scoped `.mcp.json` may require approval in Claude Code.
@@ -101,7 +116,7 @@ Official references: [Claude Code MCP](https://docs.anthropic.com/en/docs/claude
 <summary><strong>Cursor setup</strong></summary>
 
 ```bash
-npx @enfyra/mcp-server config --cursor
+npx @enfyra/mcp-server@latest config --cursor
 ```
 
 Cursor project config is written to `.cursor/mcp.json`. Global config is `~/.cursor/mcp.json` on macOS/Linux or `%USERPROFILE%\.cursor\mcp.json` on Windows.
@@ -116,7 +131,7 @@ Official reference: [Cursor MCP](https://cursor.com/docs/context/mcp).
 <summary><strong>VS Code / GitHub Copilot setup</strong></summary>
 
 ```bash
-npx @enfyra/mcp-server config --vscode
+npx @enfyra/mcp-server@latest config --vscode
 ```
 
 VS Code workspace config is written to `.vscode/mcp.json`:
@@ -127,7 +142,7 @@ VS Code workspace config is written to `.vscode/mcp.json`:
     "enfyra": {
       "type": "stdio",
       "command": "npx",
-      "args": ["-y", "@enfyra/mcp-server"],
+      "args": ["-y", "@enfyra/mcp-server@latest"],
       "env": {
         "ENFYRA_API_URL": "http://localhost:3000/api",
         "ENFYRA_API_TOKEN": "efy_pat_your-token"
@@ -147,7 +162,7 @@ Official references: [VS Code MCP servers](https://code.visualstudio.com/docs/co
 <summary><strong>Google Antigravity setup</strong></summary>
 
 ```bash
-npx @enfyra/mcp-server config --antigravity
+npx @enfyra/mcp-server@latest config --antigravity
 ```
 
 Antigravity project config is written to `.agents/mcp_config.json`:
@@ -157,7 +172,7 @@ Antigravity project config is written to `.agents/mcp_config.json`:
   "mcpServers": {
     "enfyra": {
       "command": "npx",
-      "args": ["-y", "@enfyra/mcp-server"],
+      "args": ["-y", "@enfyra/mcp-server@latest"],
       "env": {
         "ENFYRA_API_URL": "http://localhost:3000/api",
         "ENFYRA_API_TOKEN": "efy_pat_your-token"
@@ -183,7 +198,7 @@ Use the shared STDIO config with any project-scoped host that accepts an `mcpSer
   "mcpServers": {
     "enfyra": {
       "command": "npx",
-      "args": ["-y", "@enfyra/mcp-server"],
+      "args": ["-y", "@enfyra/mcp-server@latest"],
       "env": {
         "ENFYRA_API_URL": "http://localhost:3000/api",
         "ENFYRA_API_TOKEN": "efy_pat_your-token"
@@ -202,7 +217,7 @@ Official reference: [MCP Inspector](https://modelcontextprotocol.io/docs/tools/i
 ## Config Command
 
 ```bash
-npx @enfyra/mcp-server config [options]
+npx @enfyra/mcp-server@latest config [options]
 ```
 
 | Option | Use |
@@ -256,7 +271,7 @@ The MCP server includes safety guards for LLM callers:
 - Write tools require `get_enfyra_required_knowledge` acknowledgement before mutating Enfyra state. Discovery, validation, and preview tools remain available without the acknowledgement so agents can read and plan first. If the acknowledgement is missing, the tool error tells the caller to read `get_enfyra_required_knowledge` and pass the required key.
 - Script-backed records validate `sourceCode` through `/admin/script/validate` before saving.
 - `validate_dynamic_script` checks handler, hook, flow, websocket, GraphQL, and bootstrap script source without saving.
-- `validate_extension_code` checks Enfyra admin extension code through `/enfyra_extension/preview` without saving.
+- `validate_extension_code` locally rejects common extension component-resolution mistakes, such as `resolveComponent()` or lowercase auto-injected component tags like `<ubutton>`, then checks Enfyra admin extension code through `/enfyra_extension/preview` without saving.
 - Dynamic script guidance distinguishes secure repositories (`@REPOS.main`, `@REPOS.secure.<table>`) from trusted internal repositories (`@REPOS.<table>`), and tells agents not to return raw trusted records to users.
 - `compiledCode` is generated from `sourceCode` and may differ textually because macros are expanded; the MCP server never accepts hand-written `compiledCode`.
 - Long source/code values in read responses are written to `/tmp/enfyra-mcp-sources` and returned as length/hash/preview/tmpFile metadata so LLM callers can inspect full source from the file path without truncating tool output.

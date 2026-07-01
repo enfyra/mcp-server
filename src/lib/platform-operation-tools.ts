@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { z } from 'zod';
 
 import { fetchAPI } from './fetch.js';
@@ -11,6 +12,36 @@ import {
   extensionKnowledgeAckParam,
   globalRulesAckParam,
 } from './required-knowledge.js';
+
+const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
+  'CommonDrawer',
+  'CommonModal',
+  'EmptyState',
+  'FormEditor',
+  'FormEditorLazy',
+  'NuxtLink',
+  'PermissionGate',
+  'UBadge',
+  'UButton',
+  'UCheckbox',
+  'UDropdownMenu',
+  'UForm',
+  'UFormField',
+  'UIcon',
+  'UInput',
+  'UModal',
+  'USelect',
+  'USelectMenu',
+  'USkeleton',
+  'USwitch',
+  'UTabs',
+  'UTextarea',
+  'UTooltip',
+  'Widget',
+];
+const AUTO_INJECTED_EXTENSION_COMPONENT_BY_LOWERCASE = new Map(
+  AUTO_INJECTED_EXTENSION_COMPONENT_TAGS.map((tag) => [tag.toLowerCase(), tag]),
+);
 
 function unwrapData(result) {
   return Array.isArray(result?.data) ? result.data : [];
@@ -360,6 +391,7 @@ function getExtensionThemeContract() {
     ],
     components: [
       'Use Nuxt UI/eApp components for normal controls: UButton, UInput, UTextarea, USelectMenu/USelect, USwitch, UCheckbox, UTabs, UBadge, UModal, and CommonDrawer when available.',
+      'Use auto-injected components directly in the template with PascalCase names. Do not call resolveComponent() to manually resolve Nuxt UI/eApp components inside extension SFCs; it can compile but render unresolved lowercase DOM tags such as <ubutton>.',
       'Buttons should have stable geometry: hover may change color, border, or shadow but must not move the button or resize its content. Disabled buttons keep disabled cursor/visual state.',
       'Inputs and textareas should not add hover movement or decorative hover states; focus, invalid, disabled, and loading states must be explicit.',
       'Dynamic extensions resolve UModal to the app CommonModal. Do not pass ui.content: "eapp-surface-card" or "surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller ui.content should only append z-index, width, or max-width classes.',
@@ -541,7 +573,66 @@ async function validateDynamicScript(apiUrl, sourceCode, scriptLanguage = 'javas
   };
 }
 
-async function validateExtensionCode(apiUrl, code, name) {
+function readTemplateBlocks(code) {
+  const blocks = [];
+  const lower = String(code || '').toLowerCase();
+  let index = 0;
+  while (index < lower.length) {
+    const openStart = lower.indexOf('<template', index);
+    if (openStart === -1) break;
+    const boundary = lower[openStart + '<template'.length];
+    if (boundary && !/\s|>/.test(boundary)) {
+      index = openStart + 1;
+      continue;
+    }
+    const openEnd = lower.indexOf('>', openStart + '<template'.length);
+    if (openEnd === -1) break;
+    const closeStart = lower.indexOf('</template', openEnd + 1);
+    if (closeStart === -1) break;
+    blocks.push(String(code).slice(openEnd + 1, closeStart));
+    index = closeStart + '</template'.length;
+  }
+  return blocks;
+}
+
+function readTemplateTagName(template, start) {
+  const next = template[start + 1];
+  if (!next || next === '!' || next === '?') return null;
+  let index = start + (next === '/' ? 2 : 1);
+  while (/\s/.test(template[index] || '')) index += 1;
+  const nameStart = index;
+  while (/[\w.-]/.test(template[index] || '')) index += 1;
+  return index > nameStart ? template.slice(nameStart, index) : null;
+}
+
+export function validateExtensionCodeLocally(code) {
+  if (/\bresolveComponent\s*\(/.test(String(code || ''))) {
+    throw new Error('Invalid extension component resolution: do not call resolveComponent() in Enfyra extensions. Use auto-injected components such as <UButton> directly in the template so the app/compiler resolves them correctly.');
+  }
+
+  const violations = [];
+  for (const template of readTemplateBlocks(code)) {
+    let index = 0;
+    while (index < template.length) {
+      const tagStart = template.indexOf('<', index);
+      if (tagStart === -1) break;
+      const tagName = readTemplateTagName(template, tagStart);
+      if (tagName && tagName === tagName.toLowerCase() && !tagName.includes('-')) {
+        const expected = AUTO_INJECTED_EXTENSION_COMPONENT_BY_LOWERCASE.get(tagName);
+        if (expected) violations.push({ tag: tagName, expected });
+      }
+      index = tagStart + 1;
+    }
+  }
+  if (violations.length) {
+    const first = violations[0];
+    throw new Error(`Invalid extension component casing: use <${first.expected}> instead of <${first.tag}>. Enfyra/Nuxt UI auto-injected components must keep PascalCase in extension templates; lowercase tags render as unresolved DOM elements.`);
+  }
+  return { componentCasing: 'passed' };
+}
+
+export async function validateExtensionCode(apiUrl, code, name) {
+  const localChecks = validateExtensionCodeLocally(code);
   const result = await fetchAPI(apiUrl, '/enfyra_extension/preview', {
     method: 'POST',
     body: JSON.stringify({ code, name }),
@@ -551,8 +642,48 @@ async function validateExtensionCode(apiUrl, code, name) {
   }
   return {
     valid: true,
+    localChecks,
     extensionId: result?.extensionId || name || null,
     compiledLength: typeof result?.compiledCode === 'string' ? result.compiledCode.length : undefined,
+  };
+}
+
+async function updateExtensionCode(apiUrl, {
+  id,
+  name,
+  code,
+  description,
+  isEnabled,
+  version,
+  globalRulesAckKey,
+  extensionKnowledgeAckKey,
+}) {
+  assertGlobalRulesAck(globalRulesAckKey);
+  assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
+  if (!id && !name) throw new Error('Provide id or name to update an existing extension.');
+  const existing = id
+    ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,menu.id')
+    : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,menu.id');
+  if (!existing) throw new Error(`Extension not found: ${id || name}`);
+  const extensionId = getId(existing);
+  const validation = await validateExtensionCode(apiUrl, code, name || existing.name || extensionId);
+  const body = {
+    code,
+    ...(description !== undefined ? { description } : {}),
+    ...(isEnabled !== undefined ? { isEnabled } : {}),
+    ...(version !== undefined ? { version } : {}),
+  };
+  const result = await fetchAPI(apiUrl, `/enfyra_extension/${encodeURIComponent(String(extensionId))}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+  return {
+    action: 'extension_code_updated',
+    id: extensionId,
+    name: existing.name || name || null,
+    type: existing.type || null,
+    result,
+    validation,
   };
 }
 
@@ -1436,7 +1567,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     'validate_extension_code',
     [
       'Validate Enfyra admin extension code before saving it to enfyra_extension.',
-      'Use this for Vue SFC page/widget/global extension code. It calls /enfyra_extension/preview and does not save anything.',
+      'Use this only when the user explicitly wants a validation-only check. For normal edits, use update_extension_code or ensure_*_extension so successful validation saves in the same tool call.',
+      'This calls /enfyra_extension/preview and does not save anything.',
       'Call get_extension_theme_contract first when generating or reviewing UI.',
     ].join(' '),
     {
@@ -1447,6 +1579,27 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       action: 'extension_code_validated',
       validation: await validateExtensionCode(ENFYRA_API_URL, code, name),
     }),
+  );
+
+  server.tool(
+    'update_extension_code',
+    [
+      'Business operation: update an existing Enfyra admin extension code by id or name.',
+      'It runs local extension guards and /enfyra_extension/preview first, then saves the code in the same call only when validation succeeds.',
+      'Use this instead of validate_extension_code followed by update_record when editing an existing page/widget/global extension.',
+      'Call get_extension_theme_contract first when generating or reviewing UI.',
+    ].join(' '),
+    {
+      id: z.union([z.string(), z.number()]).optional().describe('Existing extension id. Provide id or name.'),
+      name: z.string().optional().describe('Existing extension unique name. Provide id or name.'),
+      code: z.string().describe('Vue SFC extension code.'),
+      description: z.string().optional().describe('Optional replacement extension description. Omit to preserve.'),
+      isEnabled: z.boolean().optional().describe('Optional enabled state. Omit to preserve.'),
+      version: z.string().optional().describe('Optional extension version. Omit to preserve.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
+    },
+    async (input) => jsonText(await updateExtensionCode(ENFYRA_API_URL, input)),
   );
 
   server.tool(

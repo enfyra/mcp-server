@@ -8,6 +8,10 @@ import { getValidToken, hasApiToken, resetTokens } from './auth.js';
 // Timeout configuration
 const FETCH_TIMEOUT = 30000; // 30 seconds
 
+type FetchApiOptions = RequestInit & {
+  headers?: Record<string, string>;
+};
+
 /**
  * Make HTTP request to Enfyra API
  * @param {string} apiUrl - Base API URL
@@ -15,12 +19,12 @@ const FETCH_TIMEOUT = 30000; // 30 seconds
  * @param {object} options - Fetch options
  * @returns {Promise<any>} Response data
  */
-export async function fetchAPI(apiUrl, path, options = {}) {
+export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOptions = {}) {
   const url = `${apiUrl}${path}`;
 
   async function requestWithCurrentToken() {
     const token = await getValidToken(apiUrl);
-    const headersList = [
+    const headersList: [string, string][] = [
       ['Content-Type', 'application/json'],
       ['Authorization', `Bearer ${token}`],
     ];
@@ -47,7 +51,7 @@ export async function fetchAPI(apiUrl, path, options = {}) {
       });
       clearTimeout(timeoutId);
       return res;
-    } catch (error) {
+    } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
         throw new Error(`Request timeout after ${FETCH_TIMEOUT}ms`);
@@ -75,12 +79,12 @@ export async function fetchAPI(apiUrl, path, options = {}) {
  * @param {string} filterStr - Filter JSON string
  * @returns {object|null} Parsed filter object
  */
-export function validateFilter(filterStr) {
+export function validateFilter(filterStr: string) {
   if (!filterStr) return null;
   try {
     const parsed = JSON.parse(filterStr);
     // Check depth limit (max 10 levels)
-    function checkDepth(obj, depth = 0) {
+    function checkDepth(obj: any, depth = 0) {
       if (depth > 10) {
         throw new Error('Filter depth exceeds maximum of 10 levels');
       }
@@ -92,7 +96,7 @@ export function validateFilter(filterStr) {
     }
     checkDepth(parsed);
     return parsed;
-  } catch (e) {
+  } catch (e: any) {
     if (e.message.includes('depth')) throw e;
     throw new Error(`Invalid filter JSON: ${e.message}`);
   }
@@ -103,7 +107,7 @@ export function validateFilter(filterStr) {
  * @param {string} tableName - Table name to validate
  * @returns {string} Validated table name
  */
-export function validateTableName(tableName) {
+export function validateTableName(tableName: string) {
   if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
     throw new Error(`Invalid table name: ${tableName}. Must start with letter/underscore and contain only alphanumeric characters and underscores.`);
   }
