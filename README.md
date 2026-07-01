@@ -265,7 +265,7 @@ The MCP server includes safety guards for LLM callers:
 - Generated code should use relation property names such as `conversation`, `sender`, and `member` instead of physical FK fields such as `conversationId`, `senderId`, or `memberId`.
 - Custom route tools reject `mainTableId` unless the route is the canonical table route.
 - `discover_enfyra_workflows` maps task intent to workflow surfaces before the agent loads detailed examples or guesses between similar tools.
-- Platform operation tools such as `api_endpoint_workflow`, `create_api_endpoint`, `enable_route`, `disable_route`, `delete_route`, `public_route_methods`, `add_route_methods`, `set_table_graphql`, `ensure_guard`, `ensure_field_permission`, `ensure_column_rule`, `ensure_websocket_event`, `choose_flow_step_tool`, fixed-type flow step tools, `ensure_menu`, `ensure_page_extension`, `ensure_global_extension`, and `ensure_widget_extension` resolve metadata ids and validate code before saving.
+- Platform operation tools such as `api_endpoint_workflow`, `extension_workflow`, `create_api_endpoint`, `enable_route`, `disable_route`, `delete_route`, `public_route_methods`, `add_route_methods`, `set_table_graphql`, `ensure_guard`, `ensure_field_permission`, `ensure_column_rule`, `ensure_websocket_event`, `choose_flow_step_tool`, fixed-type flow step tools, `ensure_menu`, `reorder_menus`, `ensure_page_extension`, `ensure_global_extension`, and `ensure_widget_extension` resolve metadata ids and validate code before saving.
 - Schema changes are serialized.
 - Destructive deletes return a preview before requiring `confirm=true`.
 
@@ -306,6 +306,8 @@ Do not create custom login/logout/me routes that manually set Enfyra token cooki
 The MCP server exposes tools for workflow routing, metadata discovery, required knowledge, examples, query/CRUD, method management, route lifecycle, route access audit/grant, routes, handlers, hooks, tables, columns, relations, cache reloads, logs, users, roles, packages, menus, extensions, scripts, flows, websocket, files, `get_enfyra_api_context`, and `get_enfyra_required_knowledge`.
 
 Routes have two separate controls. `isEnabled` controls runtime registration: disabled routes return `404`. Use `enable_route` and `disable_route` for this lifecycle. `publicMethods` controls anonymous access for enabled routes; use `public_route_methods` and `private_route_methods` for that access boundary.
+
+Use `reorder_menus` for menu order or parent changes. It calls the Enfyra 2.2.6 `/admin/menu/reorder` operation route so hierarchy validation and menu cache invalidation are handled by the server instead of PATCHing individual `enfyra_menu` records.
 
 Admin app page paths and API paths are different surfaces. A page extension path such as `/cloud/projects/:id` is a UI route unless an enabled Enfyra API route with that exact path exists. Use `test_rest_endpoint` only for actual API routes under `ENFYRA_API_URL`; verify page extensions through the app URL/browser or extension/menu metadata.
 

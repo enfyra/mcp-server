@@ -47,6 +47,8 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
   assert.equal(extension.key, 'extension');
   assert.ok(extension.firstTools.includes('get_extension_theme_contract'));
   assert.ok(extension.requiredAck.includes('extensionAckKey when saving extension code'));
+  assert.ok(extension.writeTools.includes('extension_workflow'));
+  assert.ok(extension.writeTools.includes('reorder_menus'));
   assert.ok(extension.writeTools.includes('ensure_global_extension'));
   assert.ok(extension.verifyTools.includes('validate_extension_code'));
   assert.match(JSON.stringify(extension.avoidTools), /destination domain lists/);
@@ -793,6 +795,8 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(entry, /\/admin\/script\/validate/);
   assert.match(entry, /\/admin\/test\/run/);
   assert.match(entry, /\/admin\/flow\/trigger\/:id/);
+  assert.match(entry, /\/admin\/menu\/reorder/);
+  assert.match(entry, /tools: \['reorder_menus'\]/);
   assert.match(platformTools, /server\.tool\(\s*['"]set_table_graphql['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_column_rule['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_field_permission['"]/);
@@ -822,6 +826,16 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_trigger_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_log_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]reorder_menus['"]/);
+  assert.match(platformTools, /\/admin\/menu\/reorder/);
+  assert.match(platformTools, /Duplicate menu id in reorder payload/);
+  assert.match(platformTools, /emits enfyra_menu cache invalidation/);
+  assert.match(platformTools, /server\.tool\(\s*['"]extension_workflow['"]/);
+  assert.match(platformTools, /runExtensionWorkflow/);
+  assert.match(platformTools, /extension_workflow_planned/);
+  assert.match(platformTools, /extension_workflow_advanced/);
+  assert.match(platformTools, /assertExtensionKnowledgeAck/);
+  assert.match(platformTools, /get_extension_theme_contract before generating or reviewing extension UI/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_page_extension['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_global_extension['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_widget_extension['"]/);
@@ -893,6 +907,9 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(instructions, /\/admin\/script\/validate/);
   assert.match(instructions, /discover_enfyra_workflows/);
   assert.match(routing, /ensure_websocket_event/);
+  assert.match(routing, /extension_workflow/);
+  assert.match(routing, /reorder_menus/);
+  assert.match(routing, /PATCH enfyra_menu for order or parent changes/);
   assert.match(routing, /api_endpoint_workflow/);
   assert.match(routing, /create_api_endpoint/);
   assert.match(routing, /public_route_methods/);

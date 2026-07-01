@@ -673,6 +673,42 @@ async function ensureMenu(apiUrl, {
   };
 }
 
+async function reorderMenus(apiUrl, { updates, globalRulesAckKey }) {
+  assertGlobalRulesAck(globalRulesAckKey);
+  const seen = new Set();
+  const normalizedUpdates = updates.map((item, index) => {
+    const id = item?.id;
+    if (id === null || id === undefined || String(id).trim() === '') {
+      throw new Error(`updates[${index}].id is required.`);
+    }
+    const key = String(id);
+    if (seen.has(key)) throw new Error(`Duplicate menu id in reorder payload: ${key}`);
+    seen.add(key);
+    const order = Number(item.order);
+    if (!Number.isInteger(order) || order < 0) {
+      throw new Error(`updates[${index}].order must be a non-negative integer.`);
+    }
+    const parent = item.parent === undefined || item.parent === null || String(item.parent).trim() === ''
+      ? null
+      : item.parent;
+    return { id, order, parent };
+  });
+  const result = await fetchAPI(apiUrl, '/admin/menu/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ updates: normalizedUpdates }),
+  });
+  return {
+    action: 'menus_reordered',
+    updates: normalizedUpdates,
+    result,
+    reload: {
+      attempted: false,
+      succeeded: true,
+      reason: '/admin/menu/reorder persists order/parent updates and emits enfyra_menu cache invalidation.',
+    },
+  };
+}
+
 async function ensureExtension(apiUrl, {
   name,
   type,
@@ -870,6 +906,18 @@ function sourceMatches(existingHandler, sourceCode, scriptLanguage, timeout) {
   if (String(existingHandler.sourceCode ?? '') !== String(sourceCode ?? '')) return false;
   if (scriptLanguage && String(existingHandler.scriptLanguage || 'javascript') !== String(scriptLanguage)) return false;
   if (timeout !== undefined && Number(existingHandler.timeout) !== Number(timeout)) return false;
+  return true;
+}
+
+function extensionMatches(existingExtension, opts, menuId) {
+  if (!existingExtension) return false;
+  if (String(existingExtension.type || '') !== String(opts.type || 'page')) return false;
+  if (String(existingExtension.code ?? '') !== String(opts.code ?? '')) return false;
+  if (opts.description !== undefined && String(existingExtension.description || '') !== String(opts.description || '')) return false;
+  if (opts.isEnabled !== undefined && Boolean(existingExtension.isEnabled) !== Boolean(opts.isEnabled)) return false;
+  if (opts.version !== undefined && String(existingExtension.version || '') !== String(opts.version)) return false;
+  if ((opts.type || 'page') === 'page' && menuId && String(refId(existingExtension.menu)) !== String(menuId)) return false;
+  if ((opts.type || 'page') !== 'page' && refId(existingExtension.menu)) return false;
   return true;
 }
 
@@ -1183,6 +1231,189 @@ async function runApiEndpointWorkflow(apiUrl, opts) {
   };
 }
 
+async function resolveExtensionWorkflowState(apiUrl, opts) {
+  const type = opts.type || 'page';
+  if (type === 'page' && opts.menuId && (opts.menuLabel || opts.menuPath)) {
+    throw new Error('Provide menuId or menuLabel/menuPath for page extension workflow, not both.');
+  }
+  if (type !== 'page' && (opts.menuId || opts.menuLabel || opts.menuPath)) {
+    throw new Error('Menu fields are only valid for page extensions.');
+  }
+  const validation = await validateExtensionCode(apiUrl, opts.code, opts.name);
+  const existingExtension = await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: opts.name } }, 'id,_id,name,type,menu.id,description,isEnabled,version,code');
+  let menu = null;
+  if (type === 'page' && opts.menuId) {
+    menu = await findRecord(apiUrl, 'enfyra_menu', { id: { _eq: opts.menuId } }, 'id,_id,label,path,type,order,isEnabled');
+    if (!menu) throw new Error(`Menu not found: ${opts.menuId}`);
+  } else if (type === 'page' && (opts.menuPath || opts.menuLabel)) {
+    const normalizedPath = opts.menuPath ? normalizeRestPath(opts.menuPath) : undefined;
+    menu = normalizedPath
+      ? await findRecord(apiUrl, 'enfyra_menu', { path: { _eq: normalizedPath } }, 'id,_id,label,path,type,order,isEnabled')
+      : await findRecord(apiUrl, 'enfyra_menu', { label: { _eq: opts.menuLabel } }, 'id,_id,label,path,type,order,isEnabled');
+  }
+
+  const menuId = opts.menuId || getId(menu);
+  const steps = [];
+  steps.push(step('completed', 'validate_extension', 'Validate extension code', { validation }));
+  if (type === 'page') {
+    if (menuId) {
+      const menuNeedsUpdate = Boolean(menu && (
+        (opts.menuLabel !== undefined && menu.label !== opts.menuLabel)
+        || (opts.menuPath !== undefined && menu.path !== normalizeRestPath(opts.menuPath))
+        || (opts.menuType !== undefined && menu.type !== opts.menuType)
+        || (opts.menuOrder !== undefined && Number(menu.order || 0) !== Number(opts.menuOrder))
+        || (opts.menuIsEnabled !== undefined && Boolean(menu.isEnabled) !== Boolean(opts.menuIsEnabled))
+      ));
+      steps.push(step(menuNeedsUpdate ? 'pending' : 'completed', 'ensure_menu', 'Ensure page menu', {
+        menuId,
+        menu: menu ? { id: getId(menu), label: menu.label, path: menu.path } : { id: menuId },
+      }));
+    } else if (opts.menuLabel) {
+      steps.push(step('pending', 'ensure_menu', 'Create page menu', {
+        reason: 'No existing menu matched; ensure_menu will create it.',
+      }));
+    } else {
+      steps.push(step('blocked', 'ensure_menu', 'Create or select page menu', {
+        reason: 'Page extensions require menuId or menuLabel. Provide menuId for an existing menu or menuLabel/menuPath to create/update one.',
+      }));
+    }
+  }
+
+  const effectiveMenuId = type === 'page' ? menuId : undefined;
+  const saveStatus = steps.some((item) => ['blocked', 'waiting'].includes(item.status))
+    ? 'waiting'
+    : extensionMatches(existingExtension, { ...opts, type }, effectiveMenuId)
+      ? 'completed'
+      : 'pending';
+  steps.push(step(saveStatus, 'save_extension', `Ensure ${type} extension`, {
+    extensionId: getId(existingExtension),
+    currentType: existingExtension?.type || null,
+    desiredType: type,
+    menuId: effectiveMenuId || null,
+    reason: saveStatus === 'waiting' ? 'Menu must exist before saving page extension.' : undefined,
+  }));
+
+  const firstRunnable = steps.find((item) => item.status === 'pending') || null;
+  const blocked = steps.find((item) => item.status === 'blocked') || null;
+  return {
+    extension: {
+      name: opts.name,
+      type,
+      id: getId(existingExtension),
+      menuId: effectiveMenuId || null,
+    },
+    validation,
+    existingExtension: existingExtension ? {
+      id: getId(existingExtension),
+      name: existingExtension.name,
+      type: existingExtension.type,
+      menuId: refId(existingExtension.menu) || null,
+    } : null,
+    menu: menu ? { id: getId(menu), label: menu.label, path: menu.path } : null,
+    steps,
+    firstRunnable,
+    blocked,
+    nextSteps: blocked
+      ? [{ tool: 'extension_workflow', input: { name: opts.name, type }, reason: blocked.reason }]
+      : firstRunnable
+        ? [{
+          tool: 'extension_workflow',
+          input: { name: opts.name, type, apply: true, stepId: firstRunnable.id },
+          stepId: firstRunnable.id,
+          requiresKnowledgeAck: 'globalRulesAckKey and extensionAckKey from get_enfyra_required_knowledge',
+        }]
+        : [],
+  };
+}
+
+async function applyExtensionWorkflowStep(apiUrl, state, opts, stepId) {
+  const selectedStep = stepId
+    ? state.steps.find((item) => item.id === stepId)
+    : state.firstRunnable;
+  if (!selectedStep) return { action: 'noop', reason: 'No runnable step remains.' };
+  if (selectedStep.status !== 'pending') {
+    throw new Error(`Step "${selectedStep.id}" is ${selectedStep.status}, not pending.`);
+  }
+
+  const type = opts.type || 'page';
+  if (selectedStep.id === 'ensure_menu') {
+    if (type !== 'page') throw new Error('ensure_menu step is only valid for page extensions.');
+    if (!opts.menuLabel && !opts.menuId) throw new Error('menuLabel or menuId is required for ensure_menu.');
+    return {
+      action: 'menu_ensured',
+      menu: await ensureMenu(apiUrl, {
+        label: opts.menuLabel || state.menu?.label || opts.name,
+        path: opts.menuPath || state.menu?.path,
+        icon: opts.menuIcon,
+        type: opts.menuType,
+        order: opts.menuOrder,
+        permission: opts.menuPermission,
+        description: opts.menuDescription,
+        isEnabled: opts.menuIsEnabled,
+        globalRulesAckKey: opts.globalRulesAckKey,
+      }),
+    };
+  }
+
+  if (selectedStep.id === 'save_extension') {
+    let menuId = opts.menuId || state.extension.menuId;
+    if (type === 'page' && !menuId) {
+      const freshState = await resolveExtensionWorkflowState(apiUrl, opts);
+      menuId = freshState.extension.menuId;
+    }
+    if (type === 'page' && !menuId) throw new Error('Page extension menu is missing. Apply ensure_menu first.');
+    return {
+      action: `${type}_extension_ensured`,
+      extension: await ensureExtension(apiUrl, {
+        name: opts.name,
+        type,
+        code: opts.code,
+        menuId,
+        description: opts.description,
+        isEnabled: opts.isEnabled,
+        version: opts.version,
+        globalRulesAckKey: opts.globalRulesAckKey,
+        extensionKnowledgeAckKey: opts.extensionKnowledgeAckKey,
+      }),
+    };
+  }
+
+  throw new Error(`Unsupported extension workflow step: ${selectedStep.id}`);
+}
+
+async function runExtensionWorkflow(apiUrl, opts) {
+  let state = await resolveExtensionWorkflowState(apiUrl, opts);
+  const operations = [];
+  if (opts.apply || opts.applyAll) {
+    assertGlobalRulesAck(opts.globalRulesAckKey);
+    assertExtensionKnowledgeAck(opts.extensionKnowledgeAckKey);
+    const maxSteps = opts.applyAll ? 5 : 1;
+    for (let i = 0; i < maxSteps; i += 1) {
+      if (state.blocked || !state.firstRunnable) break;
+      operations.push(await applyExtensionWorkflowStep(apiUrl, state, opts, opts.stepId));
+      if (!opts.applyAll) break;
+      state = await resolveExtensionWorkflowState(apiUrl, opts);
+    }
+  }
+  const latestState = operations.length ? await resolveExtensionWorkflowState(apiUrl, opts) : state;
+  return {
+    action: operations.length ? 'extension_workflow_advanced' : 'extension_workflow_planned',
+    extension: latestState.extension,
+    validation: latestState.validation,
+    menu: latestState.menu,
+    existingExtension: latestState.existingExtension,
+    steps: latestState.steps,
+    operations,
+    complete: latestState.steps.every((item) => ['completed', 'skipped'].includes(item.status)),
+    nextSteps: latestState.nextSteps,
+    guidance: [
+      'Call get_extension_theme_contract before generating or reviewing extension UI.',
+      'For menu/account-panel notifications, use counts only when the signal source already owns an exact count; otherwise use a dot/chip for new attention.',
+      'Do not fetch destination domain lists solely to decorate the shell; destination pages own domain fetching after click.',
+    ],
+  };
+}
+
 export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
   server.tool(
     'validate_dynamic_script',
@@ -1234,6 +1465,40 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     ].join(' '),
     {},
     async () => jsonText(getThemeClassReference()),
+  );
+
+  server.tool(
+    'extension_workflow',
+    [
+      'Step-by-step workflow for creating or updating Enfyra admin page, global, or widget extensions.',
+      'Use this when an LLM is building extension UI, menu shell notifications, account panel entries, or page/menu wiring and should follow live nextSteps instead of guessing raw enfyra_extension mutations.',
+      'With apply=false it validates code, reads live menu/extension state, and returns pending steps.',
+      'With apply=true it applies exactly the next pending step. With applyAll=true it advances all currently safe pending steps.',
+      'Call get_extension_theme_contract before generating or reviewing UI.',
+    ].join(' '),
+    {
+      name: z.string().describe('Extension unique name.'),
+      type: z.enum(['page', 'global', 'widget']).optional().default('page').describe('Extension type. Page extensions need a menu. Global extensions are for shell-wide registration.'),
+      code: z.string().describe('Vue SFC extension code.'),
+      menuId: z.union([z.string(), z.number()]).optional().describe('Existing menu id for a page extension. Provide this or menuLabel/menuPath.'),
+      menuLabel: z.string().optional().describe('Menu label to create or update for a page extension when menuId is not provided.'),
+      menuPath: z.string().optional().describe('Admin app route path for the page menu, e.g. /cloud/support.'),
+      menuIcon: z.string().optional().describe('Optional menu icon name.'),
+      menuType: z.enum(['Menu', 'Dropdown Menu']).optional().describe('Menu type. Omit to preserve an existing menu value or use the platform default for a new menu.'),
+      menuOrder: z.number().optional().describe('Menu display order. Omit to preserve an existing menu value or use the platform default for a new menu.'),
+      menuPermission: z.string().optional().describe('Optional menu permission JSON object.'),
+      menuDescription: z.string().optional().describe('Optional menu admin note.'),
+      menuIsEnabled: z.boolean().optional().describe('Enable the menu. Omit to preserve an existing menu value or use the platform default for a new menu.'),
+      description: z.string().optional().describe('Extension description.'),
+      isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
+      version: z.string().optional().default('1.0.0').describe('Extension version.'),
+      apply: z.boolean().optional().default(false).describe('false returns plan only; true applies exactly the next pending step.'),
+      applyAll: z.boolean().optional().default(false).describe('true applies all safe pending steps in order. Prefer apply=true for production changes.'),
+      stepId: z.string().optional().describe('Optional pending step id to apply. Omit to apply the next pending step.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when apply/applyAll mutates metadata. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required when apply/applyAll saves extension code. Use extensionAckKey from get_enfyra_required_knowledge.'),
+    },
+    async (input) => jsonText(await runExtensionWorkflow(ENFYRA_API_URL, input)),
   );
 
   server.tool(
@@ -2121,6 +2386,24 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       action: 'menu_ensured',
       menu: await ensureMenu(ENFYRA_API_URL, input),
     }),
+  );
+
+  server.tool(
+    'reorder_menus',
+    [
+      'Business operation: reorder Enfyra admin menus and optionally move menus under a new parent.',
+      'Uses the server /admin/menu/reorder route introduced in Enfyra 2.2.6 instead of PATCHing each enfyra_menu record.',
+      'The server validates duplicate ids, non-negative integer order, dropdown-only parents, /data child restrictions, system menu parent locks, cycle prevention, persistence, and menu cache invalidation.',
+    ].join(' '),
+    {
+      updates: z.array(z.object({
+        id: z.union([z.string(), z.number()]).describe('Menu id to reorder.'),
+        order: z.number().int().nonnegative().describe('Sibling order index. Must be a non-negative integer.'),
+        parent: z.union([z.string(), z.number(), z.null()]).optional().describe('New parent menu id, or null for a root menu. Parent must be a Dropdown Menu.'),
+      })).min(1).describe('Menu order/parent updates, usually the changed siblings from drag-and-drop.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+    },
+    async (input) => jsonText(await reorderMenus(ENFYRA_API_URL, input)),
   );
 
   server.tool(

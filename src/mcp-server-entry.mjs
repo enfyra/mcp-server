@@ -174,6 +174,12 @@ const MCP_PERMISSION_REQUIREMENTS = [
     methods: ['POST'],
   },
   {
+    area: 'menu reorder',
+    tools: ['reorder_menus'],
+    route: '/admin/menu/reorder',
+    methods: ['POST'],
+  },
+  {
     area: 'metadata cache reload',
     tools: ['reload_metadata'],
     route: '/admin/reload/metadata',

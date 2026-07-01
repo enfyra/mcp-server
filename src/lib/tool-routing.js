@@ -67,14 +67,14 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'inspect_feature'],
     inspectTools: ['inspect_feature', 'trace_metadata_usage', 'get_script_source'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'get_theme_class_reference'],
-    writeTools: ['ensure_menu', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
+    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
     verifyTools: ['validate_extension_code', 'inspect_feature'],
     avoidTools: [
       {
         tool: 'create_record/update_record on enfyra_extension',
         when: 'creating or changing extension code',
-        useInstead: 'ensure_page_extension, ensure_global_extension, or ensure_widget_extension',
-        reason: 'Ensure tools validate extension code and preserve extension/menu contracts before saving.',
+        useInstead: 'extension_workflow, ensure_page_extension, ensure_global_extension, or ensure_widget_extension',
+        reason: 'Workflow and ensure tools validate extension code and preserve extension/menu contracts before saving.',
       },
       {
         tool: 'query_table on destination domain lists',
@@ -82,12 +82,20 @@ export const TOOL_WORKFLOWS = [
         useInstead: 'notification summary/realtime shell signal plus destination-page fetch on click',
         reason: 'Shell notifications should not fetch messages, tickets, orders, or jobs lists solely for a badge.',
       },
+      {
+        tool: 'update_record/PATCH enfyra_menu for order or parent changes',
+        when: 'drag-and-drop or programmatic menu ordering changes sibling order or parent',
+        useInstead: 'reorder_menus',
+        reason: 'The Enfyra 2.2.6 /admin/menu/reorder route validates menu hierarchy constraints and emits menu cache invalidation.',
+      },
     ],
     requiredAck: ['globalRulesAckKey', 'extensionAckKey when saving extension code'],
     exampleCategories: ['extensions'],
     nextStepTemplate: [
       'Call get_extension_theme_contract before writing or reviewing UI.',
       'Inspect the existing menu/extension/global shell registration.',
+      'Use extension_workflow with apply=false when page/menu wiring or shell notification behavior needs multiple steps.',
+      'Use reorder_menus for menu order/parent changes instead of patching individual enfyra_menu records.',
       'Choose count only when the source already owns an exact count; choose dot/chip for new-attention signals.',
       'Validate extension code or use an ensure_*_extension tool that validates before saving.',
     ],
