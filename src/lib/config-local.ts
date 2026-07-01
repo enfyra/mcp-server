@@ -1,27 +1,58 @@
-// @ts-nocheck
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
 import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output, cwd } from 'node:process';
 import { dirname, join } from 'node:path';
 
+type ClientKey = 'codex' | 'claude' | 'cursor' | 'vscode' | 'antigravity';
+type ChoiceClientKey = ClientKey | 'all';
+
+type ClientSelection = Record<ClientKey, boolean>;
+
+type ParsedArgs = ClientSelection & {
+  appUrl?: string;
+  apiToken?: string;
+  help: boolean;
+  yes: boolean;
+  reconfig: boolean;
+  targetExplicit: boolean;
+};
+
+type ExistingEnv = {
+  apiUrl: string;
+  apiToken: string;
+};
+
+type TargetChoice = {
+  client: ChoiceClientKey;
+  value: ClientSelection;
+};
+
+type ServerEntry = ReturnType<typeof buildServerEntry>;
+type JsonRecord = Record<string, any>;
+
+type KeypressInfo = {
+  ctrl?: boolean;
+  name?: string;
+};
+
 const SERVER_KEY = 'enfyra';
 const MCP_PACKAGE_SPEC = '@enfyra/mcp-server@latest';
 const forceColor = process.env.FORCE_COLOR != null && process.env.FORCE_COLOR !== '0';
 const canStyle = forceColor || (output.isTTY && process.env.NO_COLOR == null);
 const style = {
-  bold: value => canStyle ? `\x1B[1m${value}\x1B[22m` : value,
-  dim: value => canStyle ? `\x1B[2m${value}\x1B[22m` : value,
-  cyan: value => canStyle ? `\x1B[36m${value}\x1B[39m` : value,
-  green: value => canStyle ? `\x1B[32m${value}\x1B[39m` : value,
-  magenta: value => canStyle ? `\x1B[35m${value}\x1B[39m` : value,
-  blue: value => canStyle ? `\x1B[34m${value}\x1B[39m` : value,
-  yellow: value => canStyle ? `\x1B[33m${value}\x1B[39m` : value,
-  underline: value => canStyle ? `\x1B[4m${value}\x1B[24m` : value,
-  inverse: value => canStyle ? `\x1B[7m${value}\x1B[27m` : value,
+  bold: (value: string) => canStyle ? `\x1B[1m${value}\x1B[22m` : value,
+  dim: (value: string) => canStyle ? `\x1B[2m${value}\x1B[22m` : value,
+  cyan: (value: string) => canStyle ? `\x1B[36m${value}\x1B[39m` : value,
+  green: (value: string) => canStyle ? `\x1B[32m${value}\x1B[39m` : value,
+  magenta: (value: string) => canStyle ? `\x1B[35m${value}\x1B[39m` : value,
+  blue: (value: string) => canStyle ? `\x1B[34m${value}\x1B[39m` : value,
+  yellow: (value: string) => canStyle ? `\x1B[33m${value}\x1B[39m` : value,
+  underline: (value: string) => canStyle ? `\x1B[4m${value}\x1B[24m` : value,
+  inverse: (value: string) => canStyle ? `\x1B[7m${value}\x1B[27m` : value,
 };
 
-const clients = {
+const clients: Record<ClientKey, { label: string; path: string; color: (value: string) => string }> = {
   codex: {
     label: 'Codex',
     path: './.codex/config.toml',
@@ -49,14 +80,15 @@ const clients = {
   },
 };
 
-function statusIcon(kind) {
+function statusIcon(kind: 'success' | 'warn' | string) {
   if (kind === 'success') return canStyle ? style.green('✓') : 'Done';
   if (kind === 'warn') return canStyle ? style.yellow('!') : 'Warning';
   return canStyle ? style.cyan('•') : '-';
 }
 
-function isCancelError(error) {
-  return error?.code === 'ABORT_ERR' || (error?.message || '') === 'Cancelled';
+function isCancelError(error: unknown) {
+  const item = error as { code?: unknown; message?: unknown };
+  return item?.code === 'ABORT_ERR' || (item?.message || '') === 'Cancelled';
 }
 
 function exitCancelled() {
@@ -113,8 +145,8 @@ ${style.bold('Examples')}
 `);
 }
 
-function parseArgs(argv) {
-  const out = {
+function parseArgs(argv: string[]): ParsedArgs {
+  const out: ParsedArgs = {
     appUrl: undefined,
     apiToken: undefined,
     claude: true,
@@ -125,6 +157,7 @@ function parseArgs(argv) {
     reconfig: false,
     vscode: true,
     antigravity: true,
+    targetExplicit: false,
   };
   let pickClaude = false;
   let pickCursor = false;
@@ -169,7 +202,7 @@ function parseArgs(argv) {
   return out;
 }
 
-function buildServerEntry(apiUrl, apiToken) {
+function buildServerEntry(apiUrl: string, apiToken: string) {
   return {
     command: 'npx',
     args: ['-y', MCP_PACKAGE_SPEC],
@@ -180,27 +213,27 @@ function buildServerEntry(apiUrl, apiToken) {
   };
 }
 
-function normalizeAppUrl(appUrl) {
+function normalizeAppUrl(appUrl: unknown) {
   const raw = String(appUrl || '').trim().replace(/\/+$/, '');
   if (!raw) return '';
   return raw.replace(/\/(?:api|enfyra)$/i, '') || raw;
 }
 
-function deriveApiUrlFromAppUrl(appUrl) {
+function deriveApiUrlFromAppUrl(appUrl: unknown) {
   const normalized = normalizeAppUrl(appUrl);
   return normalized ? `${normalized}/api` : 'http://localhost:3000/api';
 }
 
-function deriveAppUrlFromApiUrl(apiUrl) {
+function deriveAppUrlFromApiUrl(apiUrl: unknown) {
   return normalizeAppUrl(apiUrl);
 }
 
-function deriveMeUrl(appUrl) {
+function deriveMeUrl(appUrl: unknown) {
   const normalized = normalizeAppUrl(appUrl);
   return normalized ? `${normalized}/me` : '/me';
 }
 
-function resolveDefaultAppUrl(opts, existing) {
+function resolveDefaultAppUrl(opts: ParsedArgs, existing: ExistingEnv) {
   const appCandidate = opts.appUrl ?? process.env.ENFYRA_APP_URL;
   if (appCandidate) return normalizeAppUrl(appCandidate);
   const apiCandidate = process.env.ENFYRA_API_URL ?? existing.apiUrl;
@@ -208,15 +241,15 @@ function resolveDefaultAppUrl(opts, existing) {
   return 'http://localhost:3000';
 }
 
-async function mergeMcpFile(absPath, serverEntry) {
-  let data = { mcpServers: {} };
+async function mergeMcpFile(absPath: string, serverEntry: ServerEntry) {
+  let data: JsonRecord & { mcpServers: JsonRecord } = { mcpServers: {} };
   try {
     const raw = await readFile(absPath, 'utf8');
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       data = { ...parsed, mcpServers: parsed.mcpServers && typeof parsed.mcpServers === 'object' ? { ...parsed.mcpServers } : {} };
     }
-  } catch (e) {
+  } catch (e: any) {
     if (e.code !== 'ENOENT') throw e;
   }
   data.mcpServers = { ...data.mcpServers, [SERVER_KEY]: serverEntry };
@@ -225,8 +258,8 @@ async function mergeMcpFile(absPath, serverEntry) {
   await writeFile(absPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 
-async function mergeVscodeMcpFile(absPath, serverEntry) {
-  let data = { servers: {} };
+async function mergeVscodeMcpFile(absPath: string, serverEntry: ServerEntry) {
+  let data: JsonRecord & { servers: JsonRecord } = { servers: {} };
   try {
     const raw = await readFile(absPath, 'utf8');
     const parsed = JSON.parse(raw);
@@ -236,7 +269,7 @@ async function mergeVscodeMcpFile(absPath, serverEntry) {
         servers: parsed.servers && typeof parsed.servers === 'object' ? { ...parsed.servers } : {},
       };
     }
-  } catch (e) {
+  } catch (e: any) {
     if (e.code !== 'ENOENT') throw e;
   }
   data.servers = {
@@ -250,11 +283,11 @@ async function mergeVscodeMcpFile(absPath, serverEntry) {
   await writeFile(absPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
 }
 
-function tomlString(value) {
+function tomlString(value: unknown) {
   return JSON.stringify(String(value ?? ''));
 }
 
-function buildCodexTomlBlock(apiUrl, apiToken) {
+function buildCodexTomlBlock(apiUrl: string, apiToken: string) {
   return [
     '[mcp_servers.enfyra]',
     'command = "npx"',
@@ -267,11 +300,11 @@ function buildCodexTomlBlock(apiUrl, apiToken) {
   ].join('\n');
 }
 
-async function mergeCodexConfig(absPath, apiUrl, apiToken) {
+async function mergeCodexConfig(absPath: string, apiUrl: string, apiToken: string) {
   let raw = '';
   try {
     raw = await readFile(absPath, 'utf8');
-  } catch (e) {
+  } catch (e: any) {
     if (e.code !== 'ENOENT') throw e;
   }
 
@@ -292,7 +325,7 @@ async function mergeCodexConfig(absPath, apiUrl, apiToken) {
   await writeFile(absPath, next, 'utf8');
 }
 
-function parseTomlString(value) {
+function parseTomlString(value: unknown) {
   const trimmed = String(value || '').trim();
   if (!trimmed) return '';
   try {
@@ -302,7 +335,7 @@ function parseTomlString(value) {
   }
 }
 
-async function readCodexEnfyraEnv(absPath) {
+async function readCodexEnfyraEnv(absPath: string): Promise<ExistingEnv | null> {
   try {
     const raw = await readFile(absPath, 'utf8');
     const values = { apiUrl: '', apiToken: '' };
@@ -328,23 +361,23 @@ async function readCodexEnfyraEnv(absPath) {
   return null;
 }
 
-function getCodexConfigPath(root) {
+function getCodexConfigPath(root: string) {
   return join(root, '.codex', 'config.toml');
 }
 
-function getClaudeConfigPath(root) {
+function getClaudeConfigPath(root: string) {
   return join(root, '.mcp.json');
 }
 
-function getCursorConfigPath(root) {
+function getCursorConfigPath(root: string) {
   return join(root, '.cursor', 'mcp.json');
 }
 
-function getVscodeConfigPath(root) {
+function getVscodeConfigPath(root: string) {
   return join(root, '.vscode', 'mcp.json');
 }
 
-function getAntigravityConfigPath(root) {
+function getAntigravityConfigPath(root: string) {
   return join(root, '.agents', 'mcp_config.json');
 }
 
@@ -357,7 +390,7 @@ function getClientPath(client, root) {
   throw new Error(`Unknown MCP client: ${client}`);
 }
 
-async function readMcpServerEnv(absPath, serverRootKey) {
+async function readMcpServerEnv(absPath: string, serverRootKey: 'mcpServers' | 'servers'): Promise<ExistingEnv | null> {
   try {
     const raw = await readFile(absPath, 'utf8');
     const j = JSON.parse(raw);
@@ -374,8 +407,8 @@ async function readMcpServerEnv(absPath, serverRootKey) {
   return null;
 }
 
-async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, readVscode, readAntigravity) {
-  const paths = [];
+async function loadExistingEnfyraEnv(root: string, readClaude: boolean, readCursor: boolean, readCodex: boolean, readVscode: boolean, readAntigravity: boolean): Promise<ExistingEnv> {
+  const paths: Array<{ path: string; rootKey: 'mcpServers' | 'servers' }> = [];
   if (readClaude) paths.push({ path: getClaudeConfigPath(root), rootKey: 'mcpServers' });
   if (readCursor) paths.push({ path: getCursorConfigPath(root), rootKey: 'mcpServers' });
   if (!readClaude && readCursor) paths.push({ path: getClaudeConfigPath(root), rootKey: 'mcpServers' });
@@ -396,8 +429,8 @@ async function loadExistingEnfyraEnv(root, readClaude, readCursor, readCodex, re
   return { apiUrl: '', apiToken: '' };
 }
 
-async function promptTargetChoice() {
-  const choices = [
+async function promptTargetChoice(): Promise<ClientSelection> {
+  const choices: TargetChoice[] = [
     {
       client: 'codex',
       value: { claude: false, cursor: false, codex: true, vscode: false, antigravity: false },
@@ -460,11 +493,11 @@ async function promptTargetChoice() {
   return { claude: true, cursor: true, codex: true, vscode: true, antigravity: true };
 }
 
-async function promptTargetSelect(choices, initialIndex = 0) {
+async function promptTargetSelect(choices: TargetChoice[], initialIndex = 0): Promise<ClientSelection> {
   let selected = Math.max(0, Math.min(initialIndex, choices.length - 1));
   let renderedLines = 0;
 
-  const formatChoice = (choice, active) => {
+  const formatChoice = (choice: TargetChoice, active: boolean) => {
     const indicator = active ? style.cyan('◆') : style.dim('◇');
     const accent = active ? style.cyan('│') : style.dim('│');
     if (choice.client === 'all') {
@@ -474,7 +507,7 @@ async function promptTargetSelect(choices, initialIndex = 0) {
       return `${accent} ${indicator} ${paddedLabel} ${hint}`;
     }
 
-    const meta = clients[choice.client];
+    const meta = clients[choice.client as ClientKey];
     const label = active ? style.bold(meta.color(meta.label)) : meta.color(meta.label);
     const paddedLabel = label + ' '.repeat(Math.max(1, 22 - meta.label.length));
     const path = active ? style.cyan(meta.path) : style.dim(meta.path);
@@ -509,7 +542,7 @@ async function promptTargetSelect(choices, initialIndex = 0) {
       cleanup();
       resolve(choices[selected].value);
     };
-    const onKeypress = (_str, key = {}) => {
+    const onKeypress = (_str: string, key: KeypressInfo = {}) => {
       if (key.ctrl && key.name === 'c') {
         cleanup();
         output.write('\n');
@@ -540,7 +573,7 @@ async function promptTargetSelect(choices, initialIndex = 0) {
   });
 }
 
-async function promptConfig(opts, existing) {
+async function promptConfig(opts: ParsedArgs, existing: ExistingEnv) {
   let appUrl = opts.appUrl ? normalizeAppUrl(opts.appUrl) : '';
   let apiToken = opts.apiToken;
   if (appUrl && apiToken !== undefined) {
@@ -548,7 +581,7 @@ async function promptConfig(opts, existing) {
   }
 
   const rl = createInterface({ input, output });
-  const q = async (msg) => {
+  const q = async (msg: string) => {
     try {
       return await rl.question(msg);
     } catch (error) {
@@ -583,19 +616,19 @@ async function promptConfig(opts, existing) {
   return { apiUrl, apiToken };
 }
 
-function resolveNonInteractive(opts, existing) {
+function resolveNonInteractive(opts: ParsedArgs, existing: ExistingEnv) {
   const appUrl = resolveDefaultAppUrl(opts, existing);
   const apiUrl = deriveApiUrlFromAppUrl(appUrl);
   const apiToken = opts.apiToken ?? process.env.ENFYRA_API_TOKEN ?? existing.apiToken ?? '';
   return { apiUrl, apiToken };
 }
 
-export async function runLocalConfig(argv) {
+export async function runLocalConfig(argv: string[]) {
   const onSigint = () => exitCancelled();
-  const onUnhandledRejection = (error) => {
+  const onUnhandledRejection = (error: unknown) => {
     if (isCancelError(error)) exitCancelled();
   };
-  const onUncaughtException = (error) => {
+  const onUncaughtException = (error: unknown) => {
     if (isCancelError(error)) exitCancelled();
     throw error;
   };
@@ -603,10 +636,10 @@ export async function runLocalConfig(argv) {
   process.once('unhandledRejection', onUnhandledRejection);
   process.once('uncaughtException', onUncaughtException);
 
-  let opts;
+  let opts: ParsedArgs;
   try {
     opts = parseArgs(argv);
-  } catch (e) {
+  } catch (e: any) {
     console.error(e.message || e);
     printHelp();
     process.exit(1);
@@ -648,7 +681,7 @@ export async function runLocalConfig(argv) {
       apiUrl = resolved.apiUrl;
       apiToken = resolved.apiToken;
     }
-  } catch (error) {
+  } catch (error: any) {
     if (isCancelError(error)) {
       exitCancelled();
       return;
