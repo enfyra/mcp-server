@@ -1,4 +1,3 @@
-// @ts-nocheck
 export const WORKFLOW_SURFACES = [
   'api-endpoint',
   'extension',
@@ -14,9 +13,43 @@ export const WORKFLOW_SURFACES = [
   'cache',
   'logs-debug',
   'auth-context',
-];
+] as const;
 
-const ALL_DETAILS = ['summary', 'plan', 'full'];
+const ALL_DETAILS = ['summary', 'plan', 'full'] as const;
+
+type WorkflowSurface = typeof WORKFLOW_SURFACES[number];
+type WorkflowDetail = typeof ALL_DETAILS[number];
+
+type AvoidToolRule = {
+  tool: string;
+  when: string;
+  useInstead: string;
+  reason: string;
+};
+
+type ToolWorkflow = {
+  key: WorkflowSurface;
+  title: string;
+  useWhen: string[];
+  keywords: string[];
+  firstTools: string[];
+  inspectTools: string[];
+  knowledgeTools: string[];
+  writeTools: string[];
+  verifyTools: string[];
+  avoidTools: AvoidToolRule[];
+  requiredAck: string[];
+  exampleCategories: string[];
+  nextStepTemplate: string[];
+};
+
+type WorkflowRouteOptions = {
+  intent?: string;
+  surface?: string;
+  risk?: string;
+  detail?: string;
+  limit?: number;
+};
 
 export const TOOL_WORKFLOWS = [
   {
@@ -488,9 +521,9 @@ export const TOOL_WORKFLOWS = [
       'Use login only when an interactive credential login is explicitly needed.',
     ],
   },
-];
+] satisfies ToolWorkflow[];
 
-function compactWorkflow(workflow) {
+function compactWorkflow(workflow: ToolWorkflow) {
   return {
     key: workflow.key,
     title: workflow.title,
@@ -498,7 +531,7 @@ function compactWorkflow(workflow) {
   };
 }
 
-function planWorkflow(workflow) {
+function planWorkflow(workflow: ToolWorkflow) {
   return {
     ...compactWorkflow(workflow),
     firstTools: workflow.firstTools,
@@ -513,18 +546,18 @@ function planWorkflow(workflow) {
   };
 }
 
-function fullWorkflow(workflow) {
+function fullWorkflow(workflow: ToolWorkflow) {
   return {
     ...planWorkflow(workflow),
     keywords: workflow.keywords,
   };
 }
 
-function normalize(value) {
+function normalize(value: unknown) {
   return String(value || '').trim().toLowerCase();
 }
 
-function scoreWorkflow(workflow, { intent, surface, risk }) {
+function scoreWorkflow(workflow: ToolWorkflow, { intent, surface, risk }: { intent: string; surface?: string; risk: string }) {
   let score = 0;
   const text = normalize(intent);
   if (surface && workflow.key === surface) score += 20;
@@ -548,15 +581,19 @@ export function listWorkflowSurfaces() {
   return TOOL_WORKFLOWS.map(compactWorkflow);
 }
 
+function normalizeDetail(detail: string): WorkflowDetail {
+  return (ALL_DETAILS as readonly string[]).includes(detail) ? detail as WorkflowDetail : 'summary';
+}
+
 export function discoverWorkflowRoutes({
   intent = '',
   surface,
   risk = 'unknown',
   detail = 'summary',
   limit = 5,
-} = {}) {
+}: WorkflowRouteOptions = {}) {
   const normalizedSurface = surface ? normalize(surface) : undefined;
-  const normalizedDetail = ALL_DETAILS.includes(detail) ? detail : 'summary';
+  const normalizedDetail = normalizeDetail(detail);
   const normalizedRisk = normalize(risk) || 'unknown';
   const formatter = normalizedDetail === 'full'
     ? fullWorkflow
