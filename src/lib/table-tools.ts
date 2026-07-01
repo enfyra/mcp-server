@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * Table & Column tools for Enfyra MCP Server
  */
@@ -6,6 +5,48 @@ import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
 import { jsonContent } from './response-format.js';
 import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
+
+type AnyRecord = Record<string, any>;
+type ConstraintGroup = string[];
+
+type ColumnPatch = AnyRecord & {
+  id?: unknown;
+  _id?: unknown;
+  name?: string;
+  type?: string;
+  isNullable?: boolean;
+  isPrimary?: boolean;
+  isGenerated?: boolean;
+  isSystem?: boolean;
+  isPublished?: boolean;
+  isUpdatable?: boolean;
+  isEncrypted?: boolean;
+  isUnique?: boolean;
+  defaultValue?: unknown;
+  description?: string;
+  options?: unknown;
+};
+
+type RelationPatch = AnyRecord & {
+  id?: unknown;
+  _id?: unknown;
+  targetTable?: unknown;
+  type?: string;
+  propertyName?: string;
+  inversePropertyName?: string | null;
+  mappedBy?: unknown;
+  isNullable?: boolean;
+  onDelete?: string;
+  description?: string;
+};
+
+type CascadeVerifyOptions = {
+  action: 'create' | 'update' | 'delete';
+  columnId?: unknown;
+  columnName?: string;
+  relationId?: unknown;
+  propertyName?: string;
+};
 
 let schemaQueue = Promise.resolve();
 
@@ -130,7 +171,7 @@ function parseConstraintGroupsParam(name, value) {
   return normalizeConstraintGroups(name, parseJsonArrayParam(name, value));
 }
 
-function normalizeConstraintGroupsValue(name, value) {
+function normalizeConstraintGroupsValue(name, value): ConstraintGroup[] {
   if (value == null) return [];
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
   if (!Array.isArray(parsed)) {
@@ -139,7 +180,7 @@ function normalizeConstraintGroupsValue(name, value) {
   return normalizeConstraintGroups(name, parsed);
 }
 
-export function assertIndexesDoNotReferenceUniqueFields(indexes, uniques) {
+export function assertIndexesDoNotReferenceUniqueFields(indexes: ConstraintGroup[], uniques: ConstraintGroup[]) {
   const uniqueFields = new Set(uniques.flat());
   const conflicts = indexes
     .map((group) => ({
@@ -157,7 +198,7 @@ export function assertIndexesDoNotReferenceUniqueFields(indexes, uniques) {
   }
 }
 
-export function normalizeRelationForTablePatch(relation) {
+export function normalizeRelationForTablePatch(relation: AnyRecord): RelationPatch {
   for (const key of FORBIDDEN_RELATION_KEYS) {
     if (Object.prototype.hasOwnProperty.call(relation, key)) {
       throw new Error(`Relation schema must not include physical column field "${key}". Use propertyName/targetTable only; Enfyra derives FK and junction columns.`);
@@ -177,7 +218,7 @@ export function normalizeRelationForTablePatch(relation) {
     junctionTargetColumn,
     ...rest
   } = relation;
-  const normalized = { ...rest };
+  const normalized: RelationPatch = { ...rest };
   const resolvedTargetTable =
     targetTableId ??
     (targetTable && typeof targetTable === 'object'
@@ -194,7 +235,7 @@ export function normalizeRelationForTablePatch(relation) {
   return normalized;
 }
 
-function assertNoForbiddenRelationKeys(args) {
+function assertNoForbiddenRelationKeys(args: AnyRecord) {
   for (const key of FORBIDDEN_RELATION_KEYS) {
     if (Object.prototype.hasOwnProperty.call(args, key)) {
       throw new Error(`create_relation must not include physical column field "${key}". Use sourceTableId/targetTableId and relation propertyName only; Enfyra derives FK and junction columns.`);
@@ -202,7 +243,7 @@ function assertNoForbiddenRelationKeys(args) {
   }
 }
 
-export function sanitizeExistingRelationForTablePatch(relation) {
+export function sanitizeExistingRelationForTablePatch(relation: AnyRecord): RelationPatch {
   const {
     fkCol,
     fkColumn,
@@ -219,7 +260,7 @@ export function sanitizeExistingRelationForTablePatch(relation) {
   return normalizeRelationForTablePatch(rest);
 }
 
-export function resolveRelationTargetsFromMetadata(metadata, relations) {
+export function resolveRelationTargetsFromMetadata(metadata, relations: RelationPatch[]) {
   return relations.map((relation) => {
     const targetTable = relation.targetTable;
     if (typeof targetTable !== 'string' || !targetTable.trim()) return relation;
@@ -229,22 +270,22 @@ export function resolveRelationTargetsFromMetadata(metadata, relations) {
   });
 }
 
-function getId(record) {
+function getId(record: any) {
   return record?.id ?? record?._id ?? null;
 }
 
-function normalizeColumnForTablePatch(column) {
+function normalizeColumnForTablePatch(column: AnyRecord): ColumnPatch {
   const { table, ...rest } = column;
   return rest;
 }
 
-function getPatchableColumns(columns) {
+function getPatchableColumns(columns: AnyRecord[] = []): ColumnPatch[] {
   return (columns || [])
     .filter((column) => getId(column) !== null)
     .map(normalizeColumnForTablePatch);
 }
 
-function getMissingIds(beforeIds, afterIds, excludedIds = []) {
+function getMissingIds(beforeIds: unknown[], afterIds: unknown[], excludedIds: unknown[] = []) {
   const afterSet = new Set(afterIds.map(String));
   const excludedSet = new Set(excludedIds.map(String));
   return beforeIds
@@ -256,7 +297,7 @@ async function verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
   action,
   columnId,
   columnName,
-}) {
+}: CascadeVerifyOptions) {
   const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
   const afterColumns = getPatchableColumns(tableData.columns);
   const afterIds = afterColumns.map((column) => String(getId(column)));
@@ -283,7 +324,7 @@ async function verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
   action,
   relationId,
   propertyName,
-}) {
+}: CascadeVerifyOptions) {
   const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
   const afterRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
   const afterIds = afterRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
@@ -315,8 +356,8 @@ export function buildColumnDefinition({
   defaultValue,
   description,
   options,
-}) {
-  const column = {
+}: AnyRecord): ColumnPatch {
+  const column: ColumnPatch = {
     name,
     type,
     isNullable: isNullable ?? true,
@@ -380,7 +421,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     }
     const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
     const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
-    const newRelation = { targetTable: resolvedTargetTableId, type, propertyName };
+    const newRelation: RelationPatch = { targetTable: resolvedTargetTableId, type, propertyName };
     if (inversePropertyName !== undefined) newRelation.inversePropertyName = inversePropertyName || null;
     if (mappedBy !== undefined) newRelation.mappedBy = mappedBy;
     if (isNullable !== undefined) newRelation.isNullable = isNullable;
@@ -632,7 +673,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       const indexes = parseConstraintGroupsParam('indexes', indexesJson);
       const uniques = parseConstraintGroupsParam('uniques', uniquesJson);
       assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
-      const body = { name, description, columns: [idColumn, ...userColumns], relations: userRelations };
+      const body: AnyRecord = { name, description, columns: [idColumn, ...userColumns], relations: userRelations };
       if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
       if (indexesJson !== undefined) body.indexes = indexes;
       if (uniquesJson !== undefined) body.uniques = uniques;
@@ -704,7 +745,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     },
     async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled, indexes: indexesJson, uniques: uniquesJson, globalRulesAckKey }) => withSchemaQueue(async () => {
       assertGlobalRulesAck(globalRulesAckKey);
-      const body = {};
+      const body: AnyRecord = {};
       if (name !== undefined) body.name = name;
       if (alias !== undefined) body.alias = alias;
       if (description !== undefined) body.description = description;
