@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { z } from 'zod';
 
 import { fetchAPI } from './fetch.js';
@@ -12,6 +11,42 @@ import {
   extensionKnowledgeAckParam,
   globalRulesAckParam,
 } from './required-knowledge.js';
+
+type AnyRecord = Record<string, any>;
+type MethodMap = Record<string, string | number>;
+type MethodIdNameMap = Record<string, string>;
+type RouteMethodBody = {
+  availableMethods: Array<{ id: string | number }>;
+  publicMethods: Array<{ id: string | number }>;
+  isEnabled?: boolean;
+};
+type FlowStepBody = {
+  key: any;
+  type: any;
+  stepOrder: any;
+  config: any;
+  timeout: any;
+  isEnabled: any;
+  flow: { id: any };
+  sourceCode?: any;
+  scriptLanguage?: any;
+};
+type HandlerBody = {
+  sourceCode: any;
+  scriptLanguage: any;
+  timeout?: any;
+};
+type RouteHandlerBody = HandlerBody & {
+  route: { id: any };
+  method: { id: any };
+};
+type WorkflowNextStep = {
+  tool: string;
+  input: AnyRecord;
+  reason?: string;
+  stepId?: string;
+  requiresKnowledgeAck?: string;
+};
 
 const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
   'CommonDrawer',
@@ -72,7 +107,7 @@ function normalizeRestPath(path) {
   return path.startsWith('/') ? path : `/${path}`;
 }
 
-function normalizeMethodName(method) {
+function normalizeMethodName(method): string {
   const value = String(method || '').trim().toUpperCase();
   if (!/^[A-Z][A-Z0-9_]*$/.test(value)) {
     throw new Error(`Invalid method "${method}". Method names must start with A-Z and contain only A-Z, 0-9, or underscore.`);
@@ -80,18 +115,18 @@ function normalizeMethodName(method) {
   return value;
 }
 
-function methodNamesFromRecords(records, methodIdNameMap) {
+function methodNamesFromRecords(records, methodIdNameMap): string[] {
   return (records || [])
     .map((method) => method?.name || methodIdNameMap[String(getId(method))] || null)
     .filter(Boolean)
     .map(normalizeMethodName);
 }
 
-function uniqueMethodNames(names) {
-  return [...new Set((names || []).map(normalizeMethodName))];
+function uniqueMethodNames(names): string[] {
+  return Array.from(new Set<string>((names || []).map((name) => normalizeMethodName(name))));
 }
 
-function resolveMethodRefs(methodMap, names) {
+function resolveMethodRefs(methodMap: MethodMap, names): Array<{ id: string | number }> {
   return uniqueMethodNames(names).map((name) => {
     const id = methodMap[name];
     if (!id) throw new Error(`Unknown method "${name}". Valid methods: ${Object.keys(methodMap).sort().join(', ')}`);
@@ -113,8 +148,8 @@ async function fetchAll(apiUrl, path) {
 
 async function getMethodContext(apiUrl) {
   const methods = await fetchAll(apiUrl, '/enfyra_method?limit=0&fields=id,_id,name');
-  const methodMap = {};
-  const methodIdNameMap = {};
+  const methodMap: MethodMap = {};
+  const methodIdNameMap: MethodIdNameMap = {};
   for (const method of methods) {
     if (!method?.name) continue;
     const name = normalizeMethodName(method.name);
@@ -154,7 +189,7 @@ async function updateRouteMethods(apiUrl, { path, routeId, methods, mode, isEnab
   const existingPublic = methodNamesFromRecords(route.publicMethods, methodIdNameMap);
   const finalAvailable = mergeMethods(existingAvailable, methods, mode);
   const finalPublic = existingPublic.filter((method) => finalAvailable.includes(method));
-  const body = {
+  const body: RouteMethodBody = {
     availableMethods: resolveMethodRefs(methodMap, finalAvailable),
     publicMethods: resolveMethodRefs(methodMap, finalPublic),
   };
@@ -755,7 +790,7 @@ function assertOneScope({ roleId, roleName, allowedUserIds }) {
 }
 
 function normalizeFlowStepBody(step, flowId) {
-  const body = {
+  const body: FlowStepBody = {
     key: step.key,
     type: step.type,
     stepOrder: step.order ?? 0,
@@ -1052,7 +1087,7 @@ function extensionMatches(existingExtension, opts, menuId) {
   return true;
 }
 
-function step(status, id, title, detail = {}) {
+function step(status, id, title, detail: AnyRecord = {}): AnyRecord {
   return { id, title, status, ...detail };
 }
 
@@ -1164,6 +1199,17 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
   const firstRunnable = steps.find((item) => item.status === 'pending') || null;
   const blocked = steps.find((item) => item.status === 'blocked') || null;
 
+  const nextSteps: WorkflowNextStep[] = blocked
+    ? [{ tool: 'api_endpoint_workflow', input: { path: normalizedPath, method: methodName, overwrite: true }, reason: blocked.reason }]
+    : firstRunnable
+      ? [{
+        tool: 'api_endpoint_workflow',
+        input: { path: normalizedPath, method: methodName, apply: true },
+        stepId: firstRunnable.id,
+        requiresKnowledgeAck: firstRunnable.id === 'save_handler' ? 'dynamicCodeAckKey from get_enfyra_required_knowledge' : undefined,
+      }]
+      : [];
+
   return {
     endpoint: {
       path: normalizedPath,
@@ -1182,16 +1228,7 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
     steps,
     firstRunnable,
     blocked,
-    nextSteps: blocked
-      ? [{ tool: 'api_endpoint_workflow', input: { path: normalizedPath, method: methodName, overwrite: true }, reason: blocked.reason }]
-      : firstRunnable
-        ? [{
-          tool: 'api_endpoint_workflow',
-          input: { path: normalizedPath, method: methodName, apply: true },
-          stepId: firstRunnable.id,
-          requiresKnowledgeAck: firstRunnable.id === 'save_handler' ? 'dynamicCodeAckKey from get_enfyra_required_knowledge' : undefined,
-        }]
-        : [],
+    nextSteps,
   };
 }
 
@@ -1933,7 +1970,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
           throw new Error(`Handler already exists for ${methodName} ${normalizedPath} with id ${getId(existingHandler)}. Re-run with overwrite=true to update it.`);
         }
         handlerAction = 'updated';
-        const body = { sourceCode, scriptLanguage };
+        const body: HandlerBody = { sourceCode, scriptLanguage };
         if (timeout !== undefined) body.timeout = timeout;
         handlerResult = await fetchAPI(ENFYRA_API_URL, `/enfyra_route_handler/${encodeURIComponent(String(getId(existingHandler)))}`, {
           method: 'PATCH',
@@ -1941,7 +1978,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
         });
       } else {
         handlerAction = 'created';
-        const body = {
+        const body: RouteHandlerBody = {
           route: { id: routeId },
           method: { id: methodId },
           sourceCode,
@@ -2271,6 +2308,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     async ({ name, timeout, maxExecutions, isEnabled, description, globalRulesAckKey }) => jsonText(await ensureFlow(ENFYRA_API_URL, {
       name,
       triggerType: 'manual',
+      triggerConfig: {},
       timeout,
       maxExecutions,
       isEnabled,
