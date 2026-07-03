@@ -28,9 +28,8 @@ test('formatJsonPayload keeps raw object shape when columnar is larger', () => {
   });
 
   assert.equal(formatted.responseFormat, 'json+columnar-v1');
-  assert.equal(formatted.compressionStats.applied, false);
+  assert.equal(formatted.compressionStats, undefined);
   assert.deepEqual(formatted.data, [{ id: 1, name: 'Alpha' }]);
-  assert.ok(formatted.compressionStats.candidateSavedTokens <= 0);
 });
 
 test('formatToolResult rewrites JSON text content without changing plain text', () => {
@@ -43,8 +42,7 @@ test('formatToolResult rewrites JSON text content without changing plain text', 
 
   const parsed = JSON.parse(result.content[0].text);
   assert.equal(parsed.responseFormat, 'json+columnar-v1');
-  assert.equal(typeof parsed.compressionStats.savedPercent, 'number');
-  assert.equal(parsed.compressionStats.applied, false);
+  assert.equal(parsed.compressionStats, undefined);
   assert.deepEqual(parsed.data, [{ id: 1, name: 'Alpha' }]);
   assert.equal(result.content[1].text, 'Saved successfully.');
 });

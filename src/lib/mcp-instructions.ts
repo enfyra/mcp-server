@@ -1,9 +1,3 @@
-/**
- * MCP server instructions are sent to the host model on connect.
- * Keep this small: route the model to the right discovery/example tools and
- * keep only contracts that must be known before any tool call.
- */
-
 /** GraphQL SDL + HTTP endpoint are under the same base as REST. */
 export function buildGraphqlUrls(apiBaseUrl) {
   const base = String(apiBaseUrl || '').replace(/\/$/, '');
@@ -13,51 +7,68 @@ export function buildGraphqlUrls(apiBaseUrl) {
   };
 }
 
-export function buildMcpServerInstructions(apiBaseUrl) {
+type McpInstructionOptions = {
+  toolsetSummary?: string | null;
+};
+
+export function buildMcpServerInstructions(apiBaseUrl, options: McpInstructionOptions = {}) {
   const base = String(apiBaseUrl || '').replace(/\/$/, '');
   const { graphqlHttpUrl, graphqlSchemaUrl } = buildGraphqlUrls(apiBaseUrl);
+  const toolsetSummary = options?.toolsetSummary || null;
 
   return [
     '## Enfyra MCP',
     '',
     `API base for this session: \`${base}\`.`,
     `GraphQL endpoints: \`${graphqlHttpUrl}\` and \`${graphqlSchemaUrl}\`.`,
+    ...(toolsetSummary ? ['', toolsetSummary] : []),
     '',
     '### Work Flow',
     '- For a quick target/base sanity check, call `get_enfyra_api_context`; do not call broad discovery just to confirm which instance this MCP is connected to.',
-    '- When the task intent is clear but the right tool path is not, call `discover_enfyra_workflows` with the intent, risk, and optional surface. Use `detail: "plan"` before writes to get firstTools, required acknowledgements, verify tools, and avoidTools.',
+    '- When the task intent is clear but the right tool path is not, call `discover_enfyra_workflows` with the intent, risk, and optional surface. Use `detail: "plan"` before writes and follow `primaryPath` in order; do not choose from the flat tool list first.',
     '- Discover before deciding. For architecture/capability questions call `discover_enfyra_system`; for DB/pk/runtime/cache context call `discover_runtime_context`; for filters/deep/sort/relation query shape call `discover_query_capabilities`. Run broad discovery tools sequentially, not in parallel.',
-    '- Inspect narrowly. Use `inspect_table`, `inspect_route`, and `inspect_feature` for the table/route/feature being changed instead of loading broad metadata.',
+    '- Inspect narrowly. Use `inspect_table`, `inspect_route`, `inspect_feature`, and DB-backed runtime zone tools for the table/route/feature/surface being changed instead of loading broad metadata.',
+    '- For admin UI/menu/extensions use `search_admin_extensions`; for other DB-backed artifacts use `search_runtime_zone`: search then inspect with `nextInspect.input`.',
     '- Load examples only when needed. Use `get_enfyra_examples` by category. Before extension UI, call `get_extension_theme_contract`; call `get_theme_class_reference` for exact eapp/Nuxt UI theme classes.',
     '- For server scripts, call `discover_script_contexts` before writing or reviewing handler/hook/flow/websocket/GraphQL logic.',
-    '- Before mutating metadata, schema, routes, permissions, menus, packages, cache state, dynamic code, or extension UI, call `get_enfyra_required_knowledge`, read the global rules, and pass `globalRulesAckKey` into write tools. Dynamic server code also requires `dynamicCodeAckKey`; extension code also requires `extensionAckKey`.',
-    '- With non-root API tokens, call `get_permission_profile` before relying on admin helper tools or when debugging 403s. MCP admin helpers require ordinary route permissions for static admin routes such as `/admin/script/validate`, `/admin/test/run`, `/admin/flow/trigger/:id`, and `/admin/reload/*`.',
+    '- Before mutating metadata/schema/routes/permissions/menus/packages/cache/code/extensions, call `get_enfyra_required_knowledge` and pass `globalRulesAckKey` plus required code/extension ack keys.',
+    '- With non-root API tokens, call `get_permission_profile` before admin helper tools or 403 debugging.',
     '- Prefer the most specific business operation tool over raw metadata CRUD. `discover_enfyra_workflows` provides the current operation-tool map and negative-routing avoidTools.',
-    '- Before saving standalone dynamic script code, call `validate_dynamic_script` unless the chosen write tool already validates the code. For extension edits, prefer `update_extension_code`, `extension_workflow`, or `ensure_*_extension`; these validate and save atomically. Use `validate_extension_code` only for validation-only checks.',
+    '- Before saving standalone dynamic script code, call `validate_dynamic_script` or `/admin/script/validate` unless the write tool validates. For extensions, prefer atomic save tools.',
     '- Extension SFCs must use auto-injected components directly in templates, such as `<UButton>`, and must not call `resolveComponent()` for Nuxt UI/eApp components.',
     '- For existing script-backed records, use `trace_metadata_usage` then `get_script_source`; edit with `patch_script_source` or `update_script_source` so source is hash-checked and validated.',
     '- Validate behavior with `test_rest_endpoint`, `run_admin_test`, `test_flow_step`, or the route-specific tool before claiming a dynamic feature works.',
     '',
     '### Core Contracts',
     '- Tool JSON responses use `responseFormat: "json+columnar-v1"`. If rows are columnar, read values by matching `columns[index]` to `rows[n][index]`; do not guess row keys.',
-    '- `query_table`, `get_all_routes`, and `get_all_tables` require explicit intent: pass `limit` for bounded reads or `all: true` for a complete list. Do not invent arbitrary limits such as 30 or 50.',
-    '- Read tools are minimal by default. Pass explicit `fields`; use metadata inspection before guessing field/relation names. Field exclusion mode exists: `fields=-compiledCode`, and `fields=id,-compiledCode` still means all readable fields except `compiledCode`.',
-    '- Mutations return ids/status by default. Re-read with `find_one_record` or `query_table` and explicit `fields` when the saved row matters.',
-    '- Dynamic repository reads use `filter`, not `where`: `@REPOS.table.find({ filter: {...} })`, `@REPOS.secure.table.find({ filter: {...} })`, `#table.find({ filter: {...} })`, and `exists(filter)`.',
-    '- Dynamic repositories have two trust paths. Use secure `@REPOS.main` or `@REPOS.secure.<table>` for user-facing data. `@REPOS.<table>` is trusted/internal and can see hidden fields; never return raw trusted rows to users.',
+    '- `query_table` needs `limit` or `all:true`; do not invent arbitrary limits. `get_all_routes`/`get_all_tables` omit limit with `search`.',
+    '- Read tools are minimal by default. Pass explicit `fields`; inspect metadata before guessing. Field exclusion mode: `fields=-compiledCode`; `fields=id,-compiledCode` means all readable fields except `compiledCode`.',
+    '- Mutations return ids/status. Re-read with explicit `fields` only when saved shape matters.',
+    '- Mutation tools are plural-only: pass native JSON arrays, using one-item arrays for single writes.',
+    '- For schema creation, do not declare `id`, `_id`, `createdAt`, or `updatedAt`; Enfyra manages them. `create_tables` strips them and reports `skippedAutoColumns`; `create_columns` rejects them.',
+    '- Relation-based indexes/uniques must reference relation `propertyName` values that exist on the same table. Put the owning relations in the same `create_tables` item for one-pass creation, or add relation-based uniques later with `update_tables` after relations exist.',
+    '- Fields in `uniques`, including composite groups like `["event","attendee"]`, must not also appear in `indexes`; uniques already index them. `create_tables` preflights the whole batch.',
+    '- Dynamic repo reads use `filter`, not `where`: `@REPOS.main.find({filter})` for route main table, or `#table.find({filter})` / `@REPOS.table.find({filter})` for explicit tables.',
+    '- In scripts, `find({deep})` does not auto-add projections: if you need `row.owner`, include `owner` in top-level `fields` and set `deep.owner.fields`.',
+    '- `@REPOS.secure.<table>` is not portable and MCP rejects it. For explicit-table handlers use `#table`/`@REPOS.table` with exact `fields`, relation filters, auth checks, and shaped output; never return raw trusted rows.',
     '- Secure repository choice is not a substitute for authorization. Handlers and hooks still need route access, owner/tenant filters, and explicit checks before returning or mutating records.',
     '- Filters, sort helpers, counts, and aggregates over unpublished fields/private relations are sensitive data surfaces; do not expose them in user-facing endpoints.',
     '- Use `enfyra_user` as the user table. Model record links as real relations using relation `propertyName` values, not physical FK fields like `userId`, `conversationId`, `senderId`, or `memberId` in generated DB code.',
-    '- Relation design must stay minimal. Create the owning relation needed for writes/filters first; add `inversePropertyName` only when a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal will use that reverse field. For schema work, explicitly review existing relations and mention which inverses are intentionally present or intentionally omitted.',
+    '- Before schema/app generation, call `get_schema_design_context`; use live types and plural schema tools, not SQL guesses.',
+    '- Relation design stays minimal: create owning relations first; add `inversePropertyName` only for a concrete response/UI/deep/aggregate/traversal need. Parent deep child collections are such a need.',
     '- Do not call internal/no-route system tables such as `enfyra_column` or `enfyra_session` through generic CRUD. Use table/column/relation tools and route-backed tables discovered from metadata.',
-    '- Custom API paths use `api_endpoint_workflow` when a handler is needed and the model should follow returned nextSteps. Use lower-level `create_route` without `mainTableId` only when intentionally creating a route shell; `create_table` is only for new persisted data.',
+    '- Custom API paths use `api_endpoint_workflow` when a handler is needed and the model should follow returned nextSteps. Use lower-level `create_route` without `mainTableId` only when intentionally creating a route shell; `create_tables` is only for new persisted data.',
     '- For canonical table reads and RLS, preserve client-controlled query shape: do not override `@QUERY.fields`, `@QUERY.deep`, `@QUERY.sort`, `@QUERY.limit`, `@QUERY.page`, `@QUERY.meta`, `@QUERY.aggregate`, or `debugMode`. Merge only security filters into `@QUERY.filter`.',
-    '- If a REST read returns a column or relation marked `isPublished=false`, including through dotted relation fields such as `fields=owner.secret` or equivalent `deep` projections, treat it as an Enfyra core support issue. Confirm the minimal repro with `test_rest_endpoint`, tell the user to send a Cloud/support ticket with the table, field path, and response shape, and do not present route-local pre-hooks or frontend hiding as the real fix.',
+    '- Enfyra filters are not SQL. Do not use `_like`; use `_contains`, `_starts_with`, or `_ends_with` for text matching, and call `discover_query_capabilities` when unsure.',
+    '- Relation filters use relation propertyName values, not physical FK-shaped names: use `{ incident: { id: { _eq: id } } }`, not `{ incidentId: { _eq: id } }`.',
+    '- `query_table` accepts native object `filter`, `deep`, and `aggregate`; always pass `limit` or `all:true`. Deep keys are relation names; MCP auto-adds missing top-level deep fields. Deep options: `fields`, `filter`, `sort`, `limit`, `page`, `deep`; never `_fields`.',
+    '- For counts, prefer `count_records` or `meta=filterCount/totalCount`. Do not guess `_sum`/`_count`; call `discover_query_capabilities` before `aggregate`.',
+    '- If REST exposes `isPublished=false` fields via fields/deep, use `debug_field_exposure`; treat confirmed leaks as core issues, not UI/hook fixes.',
     '- Script source is `sourceCode`; `compiledCode` is generated and may differ textually because macros expand. Do not warn about source/compiled mismatch unless validation or runtime behavior proves the compiled artifact is stale.',
-    '- For intentional user/domain errors in scripts use `@THROW400`-style helpers or `$ctx.$throw[...]`, not `throw new Error(...)`.',
+    '- For user/domain errors use `@THROW`, not `throw new Error(...)`. Numeric helpers are raw HTTP messages; details must be an object/array. Semantic helpers: `notFound(resource, identifier)`, `duplicate(resource, field, value)`.',
     '- Destructive operations are preview-first. Do not pass `confirm=true` until the user explicitly approves.',
-    '- Treat permission and security as the first design step for any route, handler, flow, extension, or data surface: decide public/private methods, authenticated route access, owner/tenant scope, and field exposure before writing feature logic.',
-    '- Enfyra admin UI `usePermissions()` and backend RoleGuard both use route permissions: root admin passes; direct `allowedRoutePermissions` and role `routePermissions` grant route+method access. Use `audit_route_access` and `ensure_route_access` to inspect or grant these permissions.',
+    '- Treat permission and security as the first design step for any route, handler, flow, extension, or data surface.',
+    '- Admin UI `usePermissions()` and backend RoleGuard use route permissions; use `audit_route_access`/`ensure_route_access`.',
     '- Route permissions only let authenticated users reach the route after RoleGuard; handlers, hooks, or RLS must still enforce record ownership and tenant/project scope.',
     '- Operator posture: act from these contracts plus live metadata. Do not turn expected implementation details into speculative warnings; ask only for new product/design decisions or genuine ambiguity.',
     '',
@@ -67,12 +78,14 @@ export function buildMcpServerInstructions(apiBaseUrl) {
     '- Socket.IO browser clients connect to the gateway namespace, e.g. `io("/chat", { path: "/socket.io", withCredentials: true })`, while the app proxies `/socket.io/**` to Enfyra `/ws/socket.io/**`.',
     '',
     '### Dynamic Script Surface',
-    '- Prefer macros when available: `@BODY`, `@QUERY`, `@PARAMS`, `@USER`, `@REQ`, `@RES`, `@REPOS`, `@CACHE`, `@HELPERS`, `@FETCH`, `@STORAGE`, `@UPLOADED_FILE`, `@SOCKET`, `@TRIGGER`, `@DATA`, `@ERROR`, `@STATUS`, `@ENV`, `@PKGS`, `@LOGS`, `@SHARE`, `@API`, `@THROW*`, `@FLOW*`, and `#table_name`. Call `discover_script_contexts` for exact per-surface availability.',
+    '- Prefer macros such as `@BODY`, `@QUERY`, `@USER`, `@REQ`, `@RES`, `@REPOS`, `@CACHE`, `@FETCH`, `@UPLOADED_FILE`, `@SOCKET`, `@ENV`, `@PKGS`, `@API`, `@THROW*`, `@FLOW*`, and `#table_name`. Call `discover_script_contexts` for exact per-surface availability.',
+    '- For custom endpoints without a route main table, prefer `#table_name`; select safe fields, enforce auth before mutation/return, and return a compact shaped payload.',
+    '- For script relation reads, keep `fields` and `deep` in sync: parent `fields` selects relation properties; `deep.<relation>.fields` selects related record fields.',
     '- `@SOCKET.roomSize(room)` is available in the server socket helper. Bound websocket contexts also have `reply`, `join`, `leave`, `disconnect`, `emitToCurrentRoom`, and `broadcastToRoom`; HTTP/flow contexts only have global emit helpers plus `roomSize`.',
     '',
     '### Direct HTTP Mapping',
     '- Route-backed table CRUD is REST: `GET /<table>?...`, `POST /<table>`, `PATCH /<table>/<id>`, `DELETE /<table>/<id>`. There is no `GET /<table>/<id>`; use a filtered list with `limit=1` or `find_one_record`.',
-    '- REST route lifecycle is controlled by `enfyra_route.isEnabled`: disabled routes are not registered at runtime and return 404. Use `enable_route`/`disable_route` instead of raw route PATCH. REST public access is controlled by route `publicMethods`; otherwise direct HTTP needs Bearer JWT plus route permissions. GraphQL table data requires Bearer auth and table GraphQL enablement; anonymous root/schema probes may still return a 200 without exposing table data.',
+    '- REST lifecycle uses `enfyra_route.isEnabled`; use `enable_route`/`disable_route`. Public access uses `publicMethods`; otherwise use Bearer auth plus route permissions. GraphQL table data requires Bearer auth.',
     '- Admin app page/menu paths such as `/cloud/projects/:id` are UI routes, not Enfyra API endpoints unless an enabled `enfyra_route.path` with the same path exists. Use `test_rest_endpoint` only for paths that are actual API routes under `ENFYRA_API_URL`; verify page extensions through the app URL/browser or by reading the extension/menu metadata.',
     '',
     'When the user asks for details, fetch only the relevant live context or example category instead of relying on broad memorized rules.',

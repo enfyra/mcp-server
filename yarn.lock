@@ -15,8 +15,8 @@ __metadata:
     typescript: "npm:^6.0.3"
     zod: "npm:^3.24.0"
   bin:
-    enfyra-mcp-server: src/index.mjs
-    mcp-server: src/index.mjs
+    enfyra-mcp-server: dist/index.js
+    mcp-server: dist/index.js
   languageName: unknown
   linkType: soft
 

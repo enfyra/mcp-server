@@ -1,7 +1,8 @@
 import { z } from 'zod';
+import { createHash } from 'node:crypto';
 
 import { fetchAPI } from './fetch.js';
-import { validateScriptSourceIfPresent } from './mutation-guards.js';
+import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
 import {
   assertDynamicCodeKnowledgeAck,
   assertDynamicCodeKnowledgeAckIf,
@@ -46,6 +47,7 @@ type WorkflowNextStep = {
   reason?: string;
   stepId?: string;
   requiresKnowledgeAck?: string;
+  requiredAckParams?: string[];
 };
 
 const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
@@ -594,6 +596,7 @@ function naturalPartialReload(reason) {
 }
 
 async function validateDynamicScript(apiUrl, sourceCode, scriptLanguage = 'javascript') {
+  validatePortableScriptSource(sourceCode);
   const result = await fetchAPI(apiUrl, '/admin/script/validate', {
     method: 'POST',
     body: JSON.stringify({ sourceCode, scriptLanguage }),
@@ -719,6 +722,81 @@ async function updateExtensionCode(apiUrl, {
     type: existing.type || null,
     result,
     validation,
+  };
+}
+
+function sha256Text(value) {
+  return createHash('sha256').update(String(value ?? '')).digest('hex');
+}
+
+async function patchExtensionCode(apiUrl, {
+  id,
+  name,
+  search,
+  replace,
+  expectedSha256,
+  apply,
+  description,
+  isEnabled,
+  version,
+  globalRulesAckKey,
+  extensionKnowledgeAckKey,
+}) {
+  assertGlobalRulesAck(globalRulesAckKey);
+  assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
+  if (!id && !name) throw new Error('Provide id or name to patch an existing extension.');
+  if (!search) throw new Error('search must be a non-empty exact code fragment.');
+  const existing = id
+    ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,menu.id,code')
+    : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,menu.id,code');
+  if (!existing) throw new Error(`Extension not found: ${id || name}`);
+  const extensionId = getId(existing);
+  const currentCode = String(existing.code ?? '');
+  const currentSha256 = sha256Text(currentCode);
+  if (expectedSha256 && expectedSha256 !== currentSha256) {
+    throw new Error(`Extension code hash mismatch. Expected ${expectedSha256}, got ${currentSha256}. Re-read the extension before patching.`);
+  }
+  const occurrences = currentCode.split(search).length - 1;
+  if (occurrences !== 1) {
+    throw new Error(`Expected search fragment to occur exactly once; found ${occurrences}. Use a more specific fragment or update_extension_code for a full replacement.`);
+  }
+  const nextCode = currentCode.replace(search, replace);
+  const nextSha256 = sha256Text(nextCode);
+  const preview = {
+    action: apply ? 'extension_code_patch_applied' : 'extension_code_patch_previewed',
+    id: extensionId,
+    name: existing.name || name || null,
+    type: existing.type || null,
+    currentSha256,
+    nextSha256,
+    currentLength: currentCode.length,
+    nextLength: nextCode.length,
+    occurrences,
+    apply: Boolean(apply),
+  };
+  if (!apply) {
+    return {
+      ...preview,
+      nextStep: {
+        tool: 'patch_extension_code',
+        input: { id: extensionId, expectedSha256: currentSha256, search, replace, apply: true },
+      },
+    };
+  }
+  const result = await updateExtensionCode(apiUrl, {
+    id: extensionId,
+    name: undefined,
+    code: nextCode,
+    description,
+    isEnabled,
+    version,
+    globalRulesAckKey,
+    extensionKnowledgeAckKey,
+  });
+  return {
+    ...preview,
+    result,
+    validation: result.validation,
   };
 }
 
@@ -1062,6 +1140,31 @@ function chooseFlowStepTool(intent) {
   return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'script');
 }
 
+function planFlowSteps(steps) {
+  const items = Array.isArray(steps) ? steps : [];
+  return items.map((step, index) => {
+    const intent = typeof step === 'string' ? step : step?.intent;
+    const key = typeof step === 'object' && step?.key ? String(step.key) : `step_${index + 1}`;
+    const recommendation: any = chooseFlowStepTool(intent);
+    return {
+      order: index + 1,
+      key,
+      intent,
+      tool: recommendation.tool,
+      type: recommendation.type,
+      suggestedInput: {
+        key,
+        name: typeof step === 'object' && step?.name ? step.name : key.replace(/_/g, ' '),
+        order: index + 1,
+        ...(recommendation.config ? { config: recommendation.config } : {}),
+        ...(recommendation.sourceCode ? { sourceCode: recommendation.sourceCode } : {}),
+        ...(recommendation.condition ? { condition: recommendation.condition } : {}),
+      },
+      reason: recommendation.when,
+    };
+  });
+}
+
 function normalizeEndpointAccess(anonymousAccess, makePublic) {
   if (makePublic !== undefined) return makePublic ? 'public' : 'private';
   return anonymousAccess || 'private';
@@ -1199,6 +1302,12 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
   const firstRunnable = steps.find((item) => item.status === 'pending') || null;
   const blocked = steps.find((item) => item.status === 'blocked') || null;
 
+  const pendingAckParams = firstRunnable
+    ? [
+      'globalRulesAckKey',
+      ...(firstRunnable.id === 'save_handler' ? ['knowledgeAckKey'] : []),
+    ]
+    : [];
   const nextSteps: WorkflowNextStep[] = blocked
     ? [{ tool: 'api_endpoint_workflow', input: { path: normalizedPath, method: methodName, overwrite: true }, reason: blocked.reason }]
     : firstRunnable
@@ -1206,7 +1315,10 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
         tool: 'api_endpoint_workflow',
         input: { path: normalizedPath, method: methodName, apply: true },
         stepId: firstRunnable.id,
-        requiresKnowledgeAck: firstRunnable.id === 'save_handler' ? 'dynamicCodeAckKey from get_enfyra_required_knowledge' : undefined,
+        requiredAckParams: pendingAckParams,
+        requiresKnowledgeAck: pendingAckParams.length
+          ? `Pass ${pendingAckParams.join(' and ')} from get_enfyra_required_knowledge when applying this step.`
+          : undefined,
       }]
       : [];
 
@@ -1640,6 +1752,29 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
   );
 
   server.tool(
+    'patch_extension_code',
+    [
+      'Focused operation: patch an existing Enfyra admin extension code by exact search/replace.',
+      'Use this for small UI fixes instead of rewriting the whole Vue SFC. It hash-checks the current code, validates with /enfyra_extension/preview, and saves only when apply=true.',
+      'Default apply=false returns a preview and nextStep input.',
+    ].join(' '),
+    {
+      id: z.union([z.string(), z.number()]).optional().describe('Existing extension id. Provide id or name.'),
+      name: z.string().optional().describe('Existing extension unique name. Provide id or name.'),
+      search: z.string().describe('Exact code fragment that must occur once.'),
+      replace: z.string().describe('Replacement code fragment.'),
+      expectedSha256: z.string().optional().describe('Optional SHA-256 of current extension code from a prior inspect/read. Rejects stale patches.'),
+      apply: z.boolean().optional().default(false).describe('Preview by default. Set true to validate and save.'),
+      description: z.string().optional().describe('Optional replacement extension description. Omit to preserve.'),
+      isEnabled: z.boolean().optional().describe('Optional enabled state. Omit to preserve.'),
+      version: z.string().optional().describe('Optional extension version. Omit to preserve.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+      extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
+    },
+    async (input) => jsonText(await patchExtensionCode(ENFYRA_API_URL, input)),
+  );
+
+  server.tool(
     'get_extension_theme_contract',
     'Return the concise Enfyra admin extension UI/theme/security contract. Call before writing or reviewing extension UI.',
     {},
@@ -1682,8 +1817,8 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       description: z.string().optional().describe('Extension description.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
       version: z.string().optional().default('1.0.0').describe('Extension version.'),
-      apply: z.boolean().optional().default(false).describe('false returns plan only; true applies exactly the next pending step.'),
-      applyAll: z.boolean().optional().default(false).describe('true applies all safe pending steps in order. Prefer apply=true for production changes.'),
+      apply: z.boolean().optional().default(false).describe('false returns plan only; true applies exactly the next pending step. When true, always pass globalRulesAckKey; also pass knowledgeAckKey when saving handler sourceCode.'),
+      applyAll: z.boolean().optional().default(false).describe('true applies all safe pending steps in order. Prefer apply=true for production changes. When true, always pass globalRulesAckKey and pass knowledgeAckKey if handler sourceCode may be saved.'),
       stepId: z.string().optional().describe('Optional pending step id to apply. Omit to apply the next pending step.'),
       globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when apply/applyAll mutates metadata. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
       extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required when apply/applyAll saves extension code. Use extensionAckKey from get_enfyra_required_knowledge.'),
@@ -1870,7 +2005,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER. Do not send compiledCode.'),
+      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER and #table_name. Do not send compiledCode. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       anonymousAccess: z.enum(['public', 'private']).optional().default('private').describe('public adds the method to publicMethods; private removes this method from publicMethods.'),
       public: z.boolean().optional().describe('Compatibility alias for anonymousAccess. true means public, false means private.'),
@@ -1899,12 +2034,13 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       'Prefer api_endpoint_workflow when route access, role/user permissions, overwrite decisions, or multi-step planning matter.',
       'Use this one-shot helper only when the endpoint contract is already clear and no authenticated route-permission step is needed in the same operation, such as a simple public webhook or private admin-only utility that will be granted separately.',
       'It creates the route without mainTableId, ensures the method is available, validates sourceCode, creates or overwrites the route handler, optionally makes the method public, reloads routes, and can smoke-test the endpoint.',
+      'For sourceCode, call discover_script_contexts first. Use #table_name or @REPOS.table_name for explicit table repos with exact fields/auth checks; @REPOS.secure.<table> is rejected as non-portable.',
       'Use table/schema tools separately when the user needs persisted data. This tool is for custom behavior endpoints.',
     ].join(' '),
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER. Do not send compiledCode.'),
+      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER and #table_name. Do not send compiledCode. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       public: z.boolean().optional().default(false).describe('When true, the method is added to publicMethods for anonymous access.'),
       description: z.string().optional().describe('Route description.'),
@@ -2358,6 +2494,35 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
           `Call ${recommendation.tool} with a stable key and order.`,
           'Use ensure_script_flow_step only when the atomic tools cannot express the behavior.',
           'After saving script or condition steps, use test_flow_step before relying on the flow.',
+        ],
+      });
+    },
+  );
+
+  server.tool(
+    'plan_flow_steps',
+    'Dry-run helper: choose the ordered Enfyra flow step tools for a whole flow plan before mutating flow metadata.',
+    {
+      steps: z.array(z.union([
+        z.string(),
+        z.object({
+          key: z.string().optional().describe('Stable step key. Generated when omitted.'),
+          name: z.string().optional().describe('Human label. Defaults from key.'),
+          intent: z.string().describe('Plain-language description of this step.'),
+        }),
+      ])).min(1).max(30).describe('Ordered step intents. Use this before ensure_*_flow_step calls when a flow has multiple steps.'),
+    },
+    async ({ steps }) => {
+      const plan = planFlowSteps(steps);
+      return jsonText({
+        action: 'flow_steps_planned',
+        stepCount: plan.length,
+        plan,
+        nextSteps: [
+          'Create or update the flow with ensure_manual_flow or ensure_scheduled_flow first.',
+          'Call each planned ensure_*_flow_step in order, adding flowName or flowId plus table/query/config details.',
+          'Use ensure_script_flow_step only for steps where the plan chose script because fixed step types are insufficient.',
+          'Use test_flow_step for script/condition/high-risk steps before triggering the full flow.',
         ],
       });
     },

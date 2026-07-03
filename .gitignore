@@ -1,6 +1,7 @@
 node_modules/
 dist/
-.yarn/install-state.gz
+.yarn/
+.pnp.*
 *.log
 .DS_Store
 CLAUDE.md

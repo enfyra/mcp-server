@@ -49,15 +49,24 @@ function asNonEmptyStringTuple(values: string[], label: string): [string, ...str
   return values as [string, ...string[]];
 }
 
+function bulkObjectArrayParam(z, label: string) {
+  return z.array(z.record(z.any())).describe(`${label} as a native JSON array of objects. Pass one object in the array for a single mutation.`);
+}
+
+function jsonObjectParam(z, label: string) {
+  return z.record(z.any()).describe(`${label} as a native JSON object. Do not JSON.stringify this value.`);
+}
+
 // Import modules
 import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
 import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
 import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instructions.js';
 import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
 import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './lib/tool-routing.js';
-import { registerTableTools } from './lib/table-tools.js';
+import { getSupportedColumnTypesFromMetadata, registerTableTools } from './lib/table-tools.js';
 import { registerPlatformOperationTools, validateExtensionCode } from './lib/platform-operation-tools.js';
-import { parseRecordData, prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
+import { registerRuntimeZoneTools } from './lib/runtime-zone-tools.js';
+import { parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
 import {
   assertDynamicCodeKnowledgeAck,
   assertDynamicCodeKnowledgeAckIf,
@@ -71,6 +80,7 @@ import {
 import { validateMainTableRoutePath } from './lib/route-guards.js';
 import { installColumnarToolFormatter, jsonContent } from './lib/response-format.js';
 import { compactSourceFields, writeSourceArtifact } from './lib/source-artifacts.js';
+import { installToolsetFilter, normalizeMcpToolset, summarizeToolsetForInstructions } from './lib/toolset-filter.js';
 import {
   findRoutePermission,
   mergeMethodNames,
@@ -85,6 +95,7 @@ import {
 
 // Initialize auth module
 initAuth(ENFYRA_API_URL, ENFYRA_API_TOKEN);
+const MCP_TOOLSET = normalizeMcpToolset(process.env.ENFYRA_MCP_TOOLSET);
 
 const CAPABILITY_AREAS = [
   {
@@ -110,7 +121,7 @@ const CAPABILITY_AREAS = [
   {
     area: 'GraphQL',
     tables: ['enfyra_graphql'],
-    workflow: 'Enable per table through enfyra_graphql or update_table graphqlEnabled. GraphQL table data requires Bearer auth; anonymous root or schema probes may return 200 without exposing table data.',
+    workflow: 'Enable per table through enfyra_graphql or update_tables graphqlEnabled. GraphQL table data requires Bearer auth; anonymous root or schema probes may return 200 without exposing table data.',
   },
   {
     area: 'Files and storage',
@@ -514,7 +525,35 @@ function summarizePermissionProfile(user) {
 
 function parseJsonArg(value, fallback = undefined) {
   if (value === undefined || value === null || value === '') return fallback;
+  if (typeof value !== 'string') return value;
   return JSON.parse(value);
+}
+
+function stringifyJsonArg(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function applyDeepFieldSelections(fields, deep) {
+  const selectedFields = [...fields];
+  const parsedDeep = parseJsonArg(deep, null);
+  if (!parsedDeep || typeof parsedDeep !== 'object' || Array.isArray(parsedDeep)) {
+    return { fields: selectedFields, autoAdded: [] };
+  }
+  if (selectedFields.some((field) => String(field).startsWith('-'))) {
+    return { fields: selectedFields, autoAdded: [] };
+  }
+  const autoAdded = [];
+  for (const relationName of Object.keys(parsedDeep)) {
+    const alreadySelected = selectedFields.some((field) => {
+      const text = String(field);
+      return text === relationName || text.startsWith(`${relationName}.`);
+    });
+    if (alreadySelected) continue;
+    selectedFields.push(relationName);
+    autoAdded.push(relationName);
+  }
+  return { fields: selectedFields, autoAdded };
 }
 
 async function reloadRoutesResult() {
@@ -651,10 +690,65 @@ async function prepareGenericMutation(tableName, data) {
   });
 }
 
+async function prepareGenericBatchMutation(tableName, records) {
+  const { tables } = await getMetadataTables();
+  return prepareRecordBatchMutation({
+    fetchAPI,
+    apiUrl: ENFYRA_API_URL,
+    tables,
+    tableName,
+    records,
+  });
+}
+
 function assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, extensionKnowledgeAckKey }) {
   const payload = parseRecordData(data);
   assertDynamicCodeKnowledgeAckIf(SCRIPT_BACKED_TABLE_SET.has(tableName) && typeof payload.sourceCode === 'string', knowledgeAckKey);
   assertExtensionKnowledgeAckIf(tableName === 'enfyra_extension' && typeof payload.code === 'string', extensionKnowledgeAckKey);
+}
+
+function assertKnowledgeForGenericBatchMutation(tableName, records, { knowledgeAckKey, extensionKnowledgeAckKey }) {
+  const payloads = parseRecordBatchData(records);
+  for (const payload of payloads) {
+    assertDynamicCodeKnowledgeAckIf(SCRIPT_BACKED_TABLE_SET.has(tableName) && typeof payload.sourceCode === 'string', knowledgeAckKey);
+    assertExtensionKnowledgeAckIf(tableName === 'enfyra_extension' && typeof payload.code === 'string', extensionKnowledgeAckKey);
+  }
+}
+
+function parseBulkItemsArg(name, value) {
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${name} must be a JSON array. Pass one object in the array for a single mutation.`);
+  }
+  if (parsed.length === 0) {
+    throw new Error(`${name} must include at least one item.`);
+  }
+  parsed.forEach((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`${name}[${index}] must be a JSON object.`);
+    }
+  });
+  return parsed;
+}
+
+function assertMaxBulkItems(name, items, maxItems) {
+  if (items.length > maxItems) {
+    throw new Error(`${name} received ${items.length} items, above maxItems=${maxItems}. Split the batch deliberately.`);
+  }
+}
+
+function assertNoDuplicateBulkIds(name, items) {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const item of items) {
+    const id = String(item.id ?? '');
+    if (!id) continue;
+    if (seen.has(id)) duplicates.add(id);
+    seen.add(id);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(`${name} contains duplicate id(s): ${[...duplicates].join(', ')}. Split or merge duplicate writes so the sequential batch has one clear final mutation per record.`);
+  }
 }
 
 async function validateExtensionCodeForGenericMutation(tableName, payload, fallbackName) {
@@ -832,10 +926,13 @@ const server = new McpServer(
     version: '1.0.0',
   },
   {
-    instructions: buildMcpServerInstructions(ENFYRA_API_URL),
+    instructions: buildMcpServerInstructions(ENFYRA_API_URL, {
+      toolsetSummary: summarizeToolsetForInstructions(MCP_TOOLSET),
+    }),
   },
 );
 installColumnarToolFormatter(server);
+installToolsetFilter(server, MCP_TOOLSET);
 
 // ============================================================================
 // METADATA TOOLS
@@ -916,7 +1013,7 @@ server.tool(
   {
     intent: z.string().optional().describe('Plain-language task goal, e.g. "add a menu chip when support tickets arrive".'),
     surface: z.enum(WORKFLOW_SURFACES).optional().describe('Known surface when the caller can classify the task. Omit to infer from intent.'),
-    risk: z.enum(['read', 'write', 'destructive', 'debug', 'unknown']).optional().default('unknown').describe('Highest expected operation risk.'),
+    risk: z.string().optional().default('unknown').describe('Highest expected operation risk. Preferred values: read, write, destructive, debug, unknown. Natural terms such as low, medium, or high are accepted and normalized.'),
     detail: z.enum(['summary', 'plan', 'full']).optional().default('summary').describe('summary lists candidate workflows; plan adds tool sequence and avoidTools; full also includes matching keywords.'),
     limit: z.number().int().positive().max(10).optional().default(5).describe('Maximum workflows to return.'),
   },
@@ -975,18 +1072,20 @@ server.tool(
         publicAccess: 'publicMethods controls anonymous REST access per route/method; otherwise Bearer JWT + routePermissions apply.',
         routeTables: sample(routeTableList),
         noRouteTables: sample(noRouteTableList),
-        canonicalCrudTools: 'query_table/create_record/update_record/delete_record use dynamic REST routes and only work for route-backed tables.',
+        canonicalCrudTools: 'query_table reads route-backed tables. create_records/update_records/delete_records are the only generic write tools; pass native arrays even for one item. They preflight arrays and run sequentially.',
         customRouteWorkflow: 'For a new endpoint use create_route without mainTableId, then create_handler/create_pre_hook/create_post_hook. Do not create a table just to get a path.',
         routeSamples: sample(routes, 25),
         detailHint: 'Use get_all_routes({ search, limit }) or inspect_route({ path }) for route details. Use inspect_table({ tableName }) for table detail.',
       },
       schemaManagement: {
-        createTable: 'POST /enfyra_table supports isSingleRecord at create time and supports columns and relations arrays in the same cascade call. MCP create_table exposes isSingleRecord, columns, and relations directly. It does not accept alias at create time; table name drives the default route/schema behavior.',
+        createTable: 'POST /enfyra_table supports isSingleRecord at create time. MCP create_tables accepts a native array, creates tables/columns sequentially, then creates requested relations after all tables in the batch exist. It does not accept alias at create time; table name drives the default route/schema behavior.',
         updateTable: 'PATCH /enfyra_table/:id is the canonical path for table property changes and column/relation schema changes.',
-        columns: 'enfyra_column has no REST route; use create_table/create_column/update_column/delete_column.',
+        columns: 'enfyra_column has no REST route; use create_tables/create_columns/update_columns/delete_columns. Use liveColumnTypes below; do not invent SQL dialect names.',
+        liveColumnTypes: getSupportedColumnTypesFromMetadata(metadata),
+        columnTypeGuidance: 'Use varchar for short strings, text/richtext for long prose, float for price/amount/rating/decimal-like values unless decimal is listed, simple-json for structured objects/arrays only when listed, and relations instead of *_id columns for links.',
         relations: routeTables.has('enfyra_relation')
-          ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relation/delete_relation or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
-          : 'Use create_relation/delete_relation or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
+          ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relations/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
+          : 'Use create_relations/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
         relationCascadeFkContract: 'Do not ask for or send physical FK/junction column names in relation create/update payloads. Enfyra derives fk/junction columns from relation propertyName/table metadata and hides FK columns from app schema/forms. Use targetTable, type, propertyName, inversePropertyName or mappedBy, isNullable, onDelete. Add inversePropertyName only when a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal will use the reverse field.',
         tableDefinitionRelations: (tableDefinition?.relations || []).map((rel) => rel.propertyName),
         relationDefinitionRelations: (relationTable?.relations || []).map((rel) => rel.propertyName),
@@ -1002,8 +1101,8 @@ server.tool(
         enablement: 'A table appears in GraphQL when enfyra_graphql has an enabled row for that table. REST route availableMethods does not enable GraphQL.',
         auth: 'GraphQL table data requires Authorization: Bearer <accessToken>; REST publicMethods do not make GraphQL table data anonymous. Anonymous root/schema probes may still return 200.',
         management: routeTables.has('enfyra_graphql')
-          ? 'Use update_table graphqlEnabled or create/update records on enfyra_graphql, then reload_graphql if needed.'
-          : 'Use update_table graphqlEnabled, then reload_graphql if needed.',
+          ? 'Use update_tables graphqlEnabled or create_records/update_records on enfyra_graphql, then reload_graphql if needed.'
+          : 'Use update_tables graphqlEnabled, then reload_graphql if needed.',
         gqlDefinitionColumns: (gqlDefinition?.columns || []).map((column) => column.name),
       },
       tableSamples: sample(tableNames, 40),
@@ -1153,6 +1252,7 @@ server.tool(
       security: 'Filters, sorts, counts, and aggregate values can leak information even when a field is not selected. In generated public/user-facing APIs, do not filter, sort, count, or aggregate unpublished fields or private relations unless the endpoint intentionally exposes that fact.',
       deep: {
         shape: '{ [relationName]: { fields?, filter?, sort?, limit?, page?, deep? } }',
+        mcpFieldProjection: 'query_table auto-adds missing top-level deep relation names to fields unless fields are in exclude mode, so the nested relation can appear in the response.',
         rules: [
           'Unknown relation keys are invalid.',
           'Unknown deep entry keys are invalid.',
@@ -1168,7 +1268,7 @@ server.tool(
           ? 'Use this table metadata primary column when available.'
           : 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
         relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
-        relationCascadeFkContract: 'When creating relations through create_table/create_relation/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms. Add inversePropertyName only for a concrete reverse traversal such as parent deep child lists, response fields, UI sections, or aggregate sort/count.',
+        relationCascadeFkContract: 'When creating relations through create_tables/create_relations/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms. Add inversePropertyName only for a concrete reverse traversal such as parent deep child lists, response fields, UI sections, or aggregate sort/count.',
         graphql: 'GraphQL query args also accept filter/sort/page/limit. Table data requires Bearer auth and table enablement via enfyra_graphql; anonymous root/schema probes may still return 200.',
       },
       table: tableName
@@ -1260,7 +1360,7 @@ server.tool(
           quota: 'REDIS_USER_CACHE_LIMIT_MB defaults to 30 MB. If exceeded, Enfyra evicts least-recently-used user-cache keys only; system Redis keys are not counted or evicted.',
           keyRule: 'Do not include NODE_NAME, user_cache:, or Redis namespace prefixes in scripts. Prefer TTL-based set(key, value, ttlMs); setNoExpire may still be evicted by the user-cache soft allocation.',
         },
-        throws: '@THROW400 through @THROW503 and @THROW map to $ctx.$throw helpers.',
+        throws: '@THROW maps to $ctx.$throw. Numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message). Numeric helper details must be an object/array, e.g. @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut. Use @THROW.http(status, message, details?) for dynamic status codes. Use @THROW.notFound(resource, id?) and @THROW.duplicate(resource, field, value) only when you intentionally want Enfyra-formatted semantic messages.',
         helpers: {
           core: '$ctx.$helpers includes $bcrypt.hash/compare, autoSlug(text), $fetch, $sleep(ms) capped by the runtime, and $crypto. HTTP and GraphQL contexts also expose $jwt through $ctx.$helpers.',
           fetch: '@FETCH maps to $ctx.$helpers.$fetch for outbound HTTP calls from server scripts. Keep secrets in encrypted fields instead of embedding them in sourceCode.',
@@ -1280,7 +1380,7 @@ server.tool(
         },
         handler: {
           runs: 'Main route logic, or canonical CRUD if no handler overrides.',
-          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REQ', '@RES when response streaming is available', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main secure route main table repo', '@REPOS.secure.<table> secure explicit table repo', '@REPOS.<table> trusted internal table repo', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@PKGS', '@SOCKET global emit helpers/roomSize', '@TRIGGER'],
+          data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REQ', '@RES when response streaming is available', '@UPLOADED_FILE for multipart request file metadata', '@REPOS.main secure route main table repo', '#table_name / @REPOS.<table> explicit table repo with trusted projection discipline', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@PKGS', '@SOCKET global emit helpers/roomSize', '@TRIGGER'],
           queryContract: 'When a handler wraps a canonical table read, pass through client fields/deep/sort/page/limit/meta/aggregate/debugMode unless the route is a clearly custom summary or workflow endpoint.',
           returnBehavior: 'Return value becomes response body unless post-hook changes it.',
         },
@@ -1317,17 +1417,19 @@ server.tool(
       },
       helpers: {
         repos: {
-          scopes: '$repos.main is the secure repository for the route main table and preserves normal route query behavior. $repos.secure.<table> is the secure repository for explicit table access in public/user-facing custom handlers, hooks, websocket scripts, flows that return data, and third-party app integrations. $repos.<table> is a trusted internal repository for server-owned maintenance/admin logic that intentionally needs hidden fields; never return raw trusted-repo records to users.',
-          security: 'Secure repos enforce the normal field visibility/projection path, including unpublished columns and relations. Trusted repos bypass that exposure boundary; if trusted access is necessary, project or sanitize the result before returning it. Authorization is still required in either path: enforce route access plus owner/tenant filters or membership checks.',
+          scopes: '$repos.main is the secure repository for the route main table and preserves normal route query behavior. For explicit table access in custom handlers, prefer #table_name or @REPOS.<table> and treat it as a trusted/internal repository: select exact fields, enforce authorization, and return a shaped payload. Do not use @REPOS.secure.<table>; MCP save guards reject it because it is not callable on all current runtimes.',
+          security: 'Trusted repos can bypass normal exposure boundaries, including unpublished columns and private relations. If trusted access is necessary, always request explicit fields, enforce route access plus owner/tenant/member checks, and project/sanitize the result before returning it.',
           sensitiveQuerySurface: 'Filters, sort helpers, counts, and aggregate values on unpublished fields or private relations can leak information even when the value is not selected. Do not expose aggregate, _max, _min, _count, or predicate-oracle behavior over hidden fields in generated user-facing endpoints.',
           mutationReturnShape: '$repos.<table>.create({ data }) and $repos.<table>.update({ id, data }) return a collection-shaped result: { data: [...], count? }. data is always an array for create/update, even for one created/updated record. If a script needs the single record object, it must read result.data[0] or result.data?.[0] ?? null.',
           preferredExample: 'const result = await @REPOS.main.create({ data: @BODY }); const record = result.data?.[0] ?? null; return record;',
           wrongSingleRecordAccess: 'Do not use result.data.id, do not return result.data when one object is expected, and do not assume create/update returns the bare row object.',
           countPattern: 'To count records in custom code, do not fetch full rows. Use const result = await @REPOS.main.find({ fields: "id", limit: 1, meta: filter ? "filterCount" : "totalCount", ...(filter ? { filter } : {}) }); then read result.meta.filterCount or result.meta.totalCount.',
+          relationProjectionPattern: 'For repository find({ deep }) in scripts, include relation property names in top-level fields or the parent row will not expose row.<relation>. Example: await #orders.find({ fields: ["id", "customer"], deep: { customer: { fields: ["id", "email"] } }, limit: 1 }). query_table auto-adds this for MCP reads; dynamic repos do not.',
+          relationFilterPattern: 'Filter relations by relation propertyName, not physical FK names. Use { incident: { id: { _eq: incident.id } } }, not { incidentId: { _eq: incident.id } }.',
         },
         socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast and roomSize, but cannot reply/join/leave/disconnect/emitToCurrentRoom/broadcastToRoom because there is no bound socket. emitToRoom requires an explicit gateway path: emitToRoom(path, room, event, data). roomSize(room) counts sockets in that room across registered gateways.',
         packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
-        files: 'Upload helpers are on $storage; raw create_record on enfyra_file is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the enfyra_file record without uploading bytes. Use buffer only for small generated files.',
+        files: 'Upload helpers are on $storage; raw create_records on enfyra_file is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the enfyra_file record without uploading bytes. Use buffer only for small generated files.',
       },
       adminTesting: {
         flowStep: 'Use test_flow_step or run_admin_test(kind=flow_step).',
@@ -1351,8 +1453,8 @@ server.tool(
     'Use when the user asks which HTTP endpoint or full URL applies: combine enfyraApiUrl with paths from server instructions (GET/POST /{table}, PATCH/DELETE /{table}/{id}, no GET /{table}/{id}).',
     'Auth: publicMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
     'If path might differ from table name, use get_all_routes before asserting a URL.',
-    'Same mapping as MCP tool → HTTP: query_table=GET /table?..., create_record=POST /table, update_record=PATCH /table/id, delete_record=DELETE /table/id.',
-    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via enfyra_graphql/update_table graphqlEnabled and send Bearer auth for table data queries. Anonymous root/schema probes may still return 200.',
+    'Same mapping as MCP tool → HTTP: query_table=GET /table?..., create_records=sequential POST /table, update_records=sequential PATCH /table/id, delete_records=sequential DELETE /table/id.',
+    'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via enfyra_graphql/update_tables graphqlEnabled and send Bearer auth for table data queries. Anonymous root/schema probes may still return 200.',
   ].join(' '),
   {},
   async () => {
@@ -1380,17 +1482,17 @@ server.tool(
   },
 );
 
-server.tool('query_table', 'Query any route-backed table. Response is minimal unless fields is explicit. Every call must pass either limit or all=true.', {
+server.tool('query_table', 'Query any route-backed table. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators.', {
   tableName: z.string().describe('Table name to query'),
-  filter: z.string().optional().describe('Filter object as JSON string. Examples: \'{"status": {"_eq": "active"}}\''),
+  filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object. Example: {"status": {"_eq": "active"}}.'),
   sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
   page: z.number().optional().describe('Page number (default: 1)'),
   limit: z.number().int().min(0).optional().describe('Items per page. Required unless all=true. Do not invent arbitrary limits for "all"; use all=true instead. Use count_records for counts.'),
   all: z.boolean().optional().default(false).describe('Return all matching rows by sending REST limit=0. Use this when the user asks for all rows or a complete list.'),
   fields: z.array(z.string()).optional().describe('Fields to select. If omitted, MCP selects only the table primary key to avoid oversized responses.'),
   meta: z.string().optional().describe('Optional REST meta request, e.g. "totalCount", "filterCount", or aggregate modes supported by the route. Use count_records for simple counts.'),
-  deep: z.string().optional().describe('Optional deep relation fetch object as JSON string. Keys must be relation propertyName values.'),
-  aggregate: z.string().optional().describe('Optional aggregate object as JSON string, keyed by real fields/relations. Results are returned in response.meta.aggregate when supported. Do not request aggregates over hidden fields/private relations in user-facing APIs.'),
+  deep: jsonObjectParam(z, 'Deep relation fetch object').optional().describe('Optional deep relation fetch object. Keys must be relation propertyName values.'),
+  aggregate: jsonObjectParam(z, 'Aggregate object').optional().describe('Optional aggregate object keyed by real fields/relations, only after discover_query_capabilities confirms the supported operator shape for this table/route. Results are returned in response.meta.aggregate when supported. Do not guess _sum/_count; use count_records or meta=filterCount/totalCount for counts. Do not request aggregates over hidden fields/private relations in user-facing APIs.'),
 }, async ({ tableName, filter, sort, page, limit, all, fields, meta, deep, aggregate }) => {
   if (!all && limit === undefined) {
     throw new Error('query_table requires either limit or all=true. Do not rely on implicit default page sizes.');
@@ -1399,18 +1501,23 @@ server.tool('query_table', 'Query any route-backed table. Response is minimal un
     throw new Error('query_table accepts either all=true or limit, not both.');
   }
   validateTableName(tableName);
+  const filterParam = stringifyJsonArg(filter);
+  const deepParam = stringifyJsonArg(deep);
+  const aggregateParam = stringifyJsonArg(aggregate);
   validateFilter(filter);
   parseJsonArg(deep, undefined);
   parseJsonArg(aggregate, undefined);
 
   const queryParams = new URLSearchParams();
-  const selectedFields = fields && fields.length > 0 ? fields : [await getPrimaryFieldName(tableName)];
-  if (filter) queryParams.set('filter', filter);
+  const requestedFields = fields && fields.length > 0 ? fields : [await getPrimaryFieldName(tableName)];
+  const deepFieldSelection = applyDeepFieldSelections(requestedFields, deep);
+  const selectedFields = deepFieldSelection.fields;
+  if (filterParam) queryParams.set('filter', filterParam);
   if (sort) queryParams.set('sort', sort);
   if (page) queryParams.set('page', String(page));
   if (meta) queryParams.set('meta', meta);
-  if (deep) queryParams.set('deep', deep);
-  if (aggregate) queryParams.set('aggregate', aggregate);
+  if (deepParam) queryParams.set('deep', deepParam);
+  if (aggregateParam) queryParams.set('aggregate', aggregateParam);
   const effectiveLimit = all ? 0 : limit;
   queryParams.set('limit', String(effectiveLimit));
   queryParams.set('fields', selectedFields.join(','));
@@ -1421,7 +1528,9 @@ server.tool('query_table', 'Query any route-backed table. Response is minimal un
     statusCode: result?.statusCode,
     success: result?.success,
     tableName,
+    requestedFields,
     fields: selectedFields,
+    autoAddedDeepFields: deepFieldSelection.autoAdded,
     limit: effectiveLimit,
     all: !!all,
     queryOptions: {
@@ -1447,20 +1556,21 @@ server.tool(
     'With filter it requests fields=id&limit=1&meta=filterCount and returns meta.filterCount.',
     'Use this instead of fetching rows when the user only needs a count.',
   ].join(' '),
-  {
-    tableName: z.string().describe('Table name to count. Must have a REST route.'),
-    filter: z.string().optional().describe('Optional Query DSL filter as JSON string. Example: \'{"status":{"_eq":"active"}}\''),
-  },
-  async ({ tableName, filter }) => {
-    validateTableName(tableName);
-    validateFilter(filter);
-
-    const metaField = filter ? 'filterCount' : 'totalCount';
+	  {
+	    tableName: z.string().describe('Table name to count. Must have a REST route.'),
+	    filter: jsonObjectParam(z, 'Filter object').optional().describe('Optional Query DSL filter object. Example: {"status":{"_eq":"active"}}.'),
+	  },
+	  async ({ tableName, filter }) => {
+	    validateTableName(tableName);
+	    validateFilter(filter);
+	    const filterParam = stringifyJsonArg(filter);
+	
+	    const metaField = filterParam ? 'filterCount' : 'totalCount';
     const queryParams = new URLSearchParams();
     queryParams.set('fields', 'id');
     queryParams.set('limit', '1');
     queryParams.set('meta', metaField);
-    if (filter) queryParams.set('filter', filter);
+	    if (filterParam) queryParams.set('filter', filterParam);
 
     const result = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${queryParams.toString()}`);
     const meta = result?.meta || {};
@@ -1470,7 +1580,7 @@ server.tool(
       tableName,
       count,
       countField: metaField,
-      filterApplied: !!filter,
+	      filterApplied: !!filterParam,
       meta,
       request: {
         path: `/${tableName}`,
@@ -1486,9 +1596,9 @@ server.tool(
   'find_one_record',
   'Find a single record by ID or filter. By ID uses GET with filter (Enfyra has no GET /table/:id route).',
   {
-    tableName: z.string().describe('Table name'),
-    id: z.string().optional().describe('Record ID'),
-    filter: z.string().optional().describe('Filter as JSON string to find by'),
+	    tableName: z.string().describe('Table name'),
+	    id: z.string().optional().describe('Record ID'),
+	    filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object to find by.'),
     fields: z.array(z.string()).optional().describe('Fields to select. If omitted, returns only the primary key.'),
   },
   async ({ tableName, id, filter, fields }) => {
@@ -1516,10 +1626,11 @@ server.tool(
         detailHint: fields && fields.length > 0 ? undefined : 'Only the primary key was returned. Pass fields for details.',
       }, null, 2) }] };
     }
-    if (!filter) throw new Error('Provide id or filter');
-    validateFilter(filter);
-    const queryParams = new URLSearchParams({
-      filter,
+	    if (!filter) throw new Error('Provide id or filter');
+	    validateFilter(filter);
+	    const filterParam = stringifyJsonArg(filter);
+	    const queryParams = new URLSearchParams({
+	      filter: filterParam || '',
       limit: '1',
       fields: selectedFields.join(','),
     });
@@ -1540,48 +1651,104 @@ server.tool(
 // CRUD TOOLS
 // ============================================================================
 
-server.tool('create_record', 'Create a new record in any route-backed table. The tool validates body keys against live metadata, validates sourceCode before saving script-backed records, and validates enfyra_extension.code before saving extension records.', {
+server.tool('create_records', 'Create one or more route-backed records. Always pass records as a native JSON array; for one record, pass a one-item array. MCP preflights every item against live metadata first, then sends one POST per record sequentially; this is not a backend bulk endpoint or transaction.', {
   tableName: z.string().describe('Table name to insert into'),
-  data: z.string().describe('Record data as JSON string'),
-  queryParams: z.string().optional().describe('Optional query params as JSON object string, e.g. {"expired_at":"2026-09-20"}. Use for route contracts that intentionally keep workflow fields out of the validated body.'),
+  records: bulkObjectArrayParam(z, 'Records').describe('Records as a native JSON array. Each item must be a JSON object using metadata-backed column names and relation propertyName values.'),
+  queryParams: z.string().optional().describe('Optional query params as JSON object string applied to every POST, for route contracts that intentionally keep workflow fields out of the validated body.'),
+  maxRecords: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one MCP batch. Default/max is 100. For larger imports, split intentionally.'),
   globalRulesAckKey: globalRulesAckParam(z),
-  knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required only when data contains sourceCode. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
-  extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required only when tableName is enfyra_extension and data contains code. Use extensionAckKey from get_enfyra_required_knowledge.'),
-}, async ({ tableName, data, queryParams, globalRulesAckKey, knowledgeAckKey, extensionKnowledgeAckKey }) => {
+  knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required only when any item contains sourceCode. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
+  extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required only when tableName is enfyra_extension and any item contains code. Use extensionAckKey from get_enfyra_required_knowledge.'),
+}, async ({ tableName, records, queryParams, maxRecords, globalRulesAckKey, knowledgeAckKey, extensionKnowledgeAckKey }) => {
   assertGlobalRulesAck(globalRulesAckKey);
   validateTableName(tableName);
-  assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, extensionKnowledgeAckKey });
-  const prepared = await prepareGenericMutation(tableName, data);
-  const extensionValidation = await validateExtensionCodeForGenericMutation(tableName, prepared.payload, prepared.payload?.name);
+  const parsedRecords = parseRecordBatchData(records);
+  if (parsedRecords.length > maxRecords) {
+    throw new Error(`create_records received ${parsedRecords.length} records, above maxRecords=${maxRecords}. Split the batch deliberately.`);
+  }
+  assertKnowledgeForGenericBatchMutation(tableName, parsedRecords, { knowledgeAckKey, extensionKnowledgeAckKey });
+  const prepared = await prepareGenericBatchMutation(tableName, parsedRecords);
+  const extensionValidations = [];
+  for (const item of prepared.records) {
+    extensionValidations.push(await validateExtensionCodeForGenericMutation(tableName, item.payload, item.payload?.name || item.index));
+  }
   const query = parseQueryParamsArg(queryParams);
-  const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}`, query), { method: 'POST', body: JSON.stringify(prepared.payload) });
+  const created = [];
+  for (const item of prepared.records) {
+    const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}`, query), { method: 'POST', body: JSON.stringify(item.payload) });
+    created.push({
+      index: item.index,
+      ...summarizeMutationResult(result, 'created', tableName),
+    });
+  }
   return { content: [{ type: 'text', text: JSON.stringify({
-    ...summarizeMutationResult(result, 'created', tableName),
-    scriptValidation: prepared.scriptValidation,
-    extensionValidation,
+    action: 'created_records',
+    tableName,
+    requested: parsedRecords.length,
+    createdCount: created.length,
+    sequential: true,
+    transactional: false,
+    preflight: {
+      liveMetadataFieldsValidated: true,
+      scriptValidatedBeforeAnyPost: prepared.records.some((item) => item.scriptValidation?.validated === true),
+      extensionValidatedBeforeAnyPost: extensionValidations.some(Boolean),
+    },
+    created,
+    detailHint: `Use query_table({ tableName: "${tableName}", fields: [...], limit: ${Math.min(created.length, 20)} }) to inspect created records when needed.`,
   }, null, 2) }] };
 });
 
-server.tool('update_record', 'Update an existing record by ID using PATCH. The tool validates body keys against live metadata, validates sourceCode before saving script-backed records, and validates enfyra_extension.code before saving extension records. Prefer update_extension_code for normal extension edits.', {
+server.tool('update_records', 'Update one or more records in one MCP call. Pass items as a native JSON array; for one update, pass one item. MCP preflights every item against live metadata and extension/script validators first, rejects duplicate ids, then PATCHes sequentially to avoid races and server overload.', {
   tableName: z.string().describe('Table name'),
-  id: z.string().describe('Record ID to update'),
-  data: z.string().describe('Fields to update as JSON string'),
-  queryParams: z.string().optional().describe('Optional query params as JSON object string for route contracts that intentionally keep workflow fields out of the validated body.'),
+  items: bulkObjectArrayParam(z, 'Update items').describe('Native JSON array of update items: [{ "id": "...", "data": { ... }, "queryParams": { ... }? }]. data must use metadata-backed column names and relation propertyName values.'),
+  maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one MCP batch. Default/max is 100.'),
   globalRulesAckKey: globalRulesAckParam(z),
-  knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required only when data contains sourceCode. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
-  extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required only when tableName is enfyra_extension and data contains code. Use extensionAckKey from get_enfyra_required_knowledge.'),
-}, async ({ tableName, id, data, queryParams, globalRulesAckKey, knowledgeAckKey, extensionKnowledgeAckKey }) => {
+  knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required only when any item.data contains sourceCode. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
+  extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required only when tableName is enfyra_extension and any item.data contains code. Use extensionAckKey from get_enfyra_required_knowledge.'),
+}, async ({ tableName, items, maxItems, globalRulesAckKey, knowledgeAckKey, extensionKnowledgeAckKey }) => {
   assertGlobalRulesAck(globalRulesAckKey);
   validateTableName(tableName);
-  assertKnowledgeForGenericMutation(tableName, data, { knowledgeAckKey, extensionKnowledgeAckKey });
-  const prepared = await prepareGenericMutation(tableName, data);
-  const extensionValidation = await validateExtensionCodeForGenericMutation(tableName, prepared.payload, id);
-  const query = parseQueryParamsArg(queryParams);
-  const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${id}`, query), { method: 'PATCH', body: JSON.stringify(prepared.payload) });
+  const parsedItems = parseBulkItemsArg('items', items);
+  assertMaxBulkItems('update_records', parsedItems, maxItems);
+  assertNoDuplicateBulkIds('update_records', parsedItems);
+
+  const preparedItems = [];
+  const extensionValidations = [];
+  for (const [index, item] of parsedItems.entries()) {
+    if (!item.id) throw new Error(`items[${index}].id is required.`);
+    if (!item.data || typeof item.data !== 'object' || Array.isArray(item.data)) {
+      throw new Error(`items[${index}].data must be a JSON object.`);
+    }
+    assertKnowledgeForGenericMutation(tableName, JSON.stringify(item.data), { knowledgeAckKey, extensionKnowledgeAckKey });
+    const prepared = await prepareGenericMutation(tableName, JSON.stringify(item.data));
+    preparedItems.push({ index, id: item.id, queryParams: item.queryParams, prepared });
+    extensionValidations.push(await validateExtensionCodeForGenericMutation(tableName, prepared.payload, item.id));
+  }
+
+  const updated = [];
+  for (const item of preparedItems) {
+    const query = parseQueryParamsArg(JSON.stringify(item.queryParams || {}));
+    const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${encodeURIComponent(String(item.id))}`, query), { method: 'PATCH', body: JSON.stringify(item.prepared.payload) });
+    updated.push({
+      index: item.index,
+      id: item.id,
+      ...summarizeMutationResult(result, 'updated', tableName),
+    });
+  }
+
   return { content: [{ type: 'text', text: JSON.stringify({
-    ...summarizeMutationResult(result, 'updated', tableName),
-    scriptValidation: prepared.scriptValidation,
-    extensionValidation,
+    action: 'updated_records',
+    tableName,
+    requested: parsedItems.length,
+    updatedCount: updated.length,
+    sequential: true,
+    duplicateIdsRejected: true,
+    preflight: {
+      liveMetadataFieldsValidated: true,
+      scriptValidatedBeforeAnyPatch: preparedItems.some((item) => item.prepared.scriptValidation?.validated === true),
+      extensionValidatedBeforeAnyPatch: extensionValidations.some(Boolean),
+    },
+    updated,
   }, null, 2) }] };
 });
 
@@ -1635,7 +1802,7 @@ server.tool(
   async ({ tableName, id, oldText, newText, occurrence, expectedSourceSha256, scriptLanguage, apply, globalRulesAckKey, knowledgeAckKey }) => {
     const { record, sourceField, sourceCode } = await fetchScriptRecord(tableName, id);
     if (sourceField !== 'sourceCode') {
-      throw new Error(`patch_script_source only saves sourceCode records. Record uses "${sourceField}"; use update_record intentionally for this legacy field.`);
+      throw new Error(`patch_script_source only saves sourceCode records. Record uses "${sourceField}"; use update_records intentionally for this legacy field.`);
     }
     const beforeHash = sha256(sourceCode);
     if (expectedSourceSha256 && expectedSourceSha256 !== beforeHash) {
@@ -1732,44 +1899,98 @@ server.tool(
   },
 );
 
-server.tool('delete_record', 'Delete a record by ID', {
+function isNotFoundDeleteError(error: unknown) {
+  const message = String((error as any)?.message || error || '').toLowerCase();
+  return message.includes('api error (404)')
+    || message.includes('not found')
+    || message.includes('not exists')
+    || message.includes('does not exist');
+}
+
+server.tool('delete_records', 'Delete one or more route-backed records in one MCP call. Pass items as a native JSON array; for one delete, pass one item. The tool previews every target when confirm=false, rejects duplicate ids, and deletes sequentially when confirm=true. By default, confirm=true skips records that were already removed by cascade or a previous cleanup step.', {
   tableName: z.string().describe('Table name'),
-  id: z.string().describe('Record ID to delete'),
-  queryParams: z.string().optional().describe('Optional query params as JSON object string for route-specific confirmation contracts.'),
-  confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
+  items: bulkObjectArrayParam(z, 'Delete items').describe('Native JSON array of delete items: [{ "id": "...", "queryParams": { ... }? }].'),
+  maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one MCP batch. Default/max is 100.'),
+  confirm: z.boolean().optional().default(false).describe('Required true to apply destructive deletes. Omit/false returns previews only.'),
+  skipNotFound: z.boolean().optional().default(true).describe('When confirm=true, continue if a target is already gone, for example because a previous delete cascaded child records. Default true.'),
   globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
-}, async ({ tableName, id, queryParams, confirm, globalRulesAckKey }) => {
+}, async ({ tableName, items, maxItems, confirm, skipNotFound, globalRulesAckKey }) => {
   validateTableName(tableName);
+  const parsedItems = parseBulkItemsArg('items', items);
+  assertMaxBulkItems('delete_records', parsedItems, maxItems);
+  assertNoDuplicateBulkIds('delete_records', parsedItems);
+  for (const [index, item] of parsedItems.entries()) {
+    if (!item.id) throw new Error(`items[${index}].id is required.`);
+  }
+
   const primaryKey = await getPrimaryFieldName(tableName);
   if (!confirm) {
-    const query = new URLSearchParams({
-      filter: JSON.stringify({ [primaryKey]: { _eq: id } }),
-      limit: '1',
-      fields: primaryKey,
-    });
-    const preview = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${query.toString()}`).catch((error) => ({ error: String(error?.message || error) }));
+    const previews = [];
+    for (const [index, item] of parsedItems.entries()) {
+      const query = new URLSearchParams({
+        filter: JSON.stringify({ [primaryKey]: { _eq: item.id } }),
+        limit: '1',
+        fields: primaryKey,
+      });
+      const preview = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${query.toString()}`).catch((error) => ({ error: String(error?.message || error) }));
+      previews.push({
+        index,
+        id: item.id,
+        preview: preview?.data?.[0] || null,
+        previewError: preview?.error,
+      });
+    }
     return { content: [{ type: 'text', text: JSON.stringify({
-      action: 'delete_record_preview',
+      action: 'delete_records_preview',
       tableName,
-      id,
       primaryKey,
-      preview: preview?.data?.[0] || null,
-      previewError: preview?.error,
+      requested: parsedItems.length,
+      duplicateIdsRejected: true,
       destructive: true,
-      next: 'Call delete_record again with confirm=true to delete this route-backed record.',
+      previews,
+      next: 'Call delete_records again with the same items and confirm=true to delete these route-backed records sequentially.',
     }, null, 2) }] };
   }
-  assertGlobalRulesAck(globalRulesAckKey);
-  const query = parseQueryParamsArg(queryParams);
-  const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${id}`, query), { method: 'DELETE' });
-  return { content: [{ type: 'text', text: JSON.stringify({
-    action: 'deleted',
-    tableName,
-    id,
-    statusCode: result?.statusCode,
-    success: result?.success,
-  }, null, 2) }] };
-});
+
+	  assertGlobalRulesAck(globalRulesAckKey);
+	  const deleted = [];
+	  const skippedNotFound = [];
+	  for (const [index, item] of parsedItems.entries()) {
+	    const query = parseQueryParamsArg(JSON.stringify(item.queryParams || {}));
+	    try {
+	      const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${encodeURIComponent(String(item.id))}`, query), { method: 'DELETE' });
+	      deleted.push({
+	        index,
+	        id: item.id,
+	        statusCode: result?.statusCode,
+	        success: result?.success,
+	      });
+	    } catch (error) {
+	      if (skipNotFound && isNotFoundDeleteError(error)) {
+	        skippedNotFound.push({
+	          index,
+	          id: item.id,
+	          skipped: true,
+	          reason: 'not_found',
+	        });
+	        continue;
+	      }
+	      throw error;
+	    }
+	  }
+	  return { content: [{ type: 'text', text: JSON.stringify({
+	    action: 'deleted_records',
+	    tableName,
+	    requested: parsedItems.length,
+	    deletedCount: deleted.length,
+	    skippedNotFoundCount: skippedNotFound.length,
+	    sequential: true,
+	    duplicateIdsRejected: true,
+	    skipNotFound,
+	    deleted,
+	    skippedNotFound,
+	  }, null, 2) }] };
+	});
 
 server.tool(
   'list_methods',
@@ -1794,7 +2015,7 @@ server.tool(
 
 server.tool(
   'create_method',
-  'Create a enfyra_method record with app badge colors. Prefer this over generic create_record for enfyra_method.',
+  'Create a enfyra_method record with app badge colors. Prefer this over generic create_records for enfyra_method.',
   {
     method: z.string().describe('Uppercase method name, e.g. GET, POST, PUT, CUSTOM_METHOD. Must start with A-Z and contain only A-Z, 0-9, or underscore.'),
     buttonColor: z.string().describe('Badge background color as full hex, e.g. #dbeafe.'),
@@ -1830,7 +2051,7 @@ server.tool(
 
 server.tool(
   'update_method',
-  'Update a enfyra_method record color pair, and optionally rename non-system methods. Prefer this over generic update_record for enfyra_method.',
+  'Update a enfyra_method record color pair, and optionally rename non-system methods. Prefer this over generic update_records for enfyra_method.',
   {
     id: z.string().optional().describe('Method record id. If omitted, method is used to find the record.'),
     method: z.string().optional().describe('Existing method name to find, or new name when id is provided.'),
@@ -2474,13 +2695,13 @@ server.tool(
   },
 );
 
-server.tool('get_all_routes', 'List route definitions with minimal fields. Every call must pass either limit or all=true. Call inspect_route for handlers/hooks/permissions detail.', {
+server.tool('get_all_routes', 'List route definitions with minimal fields. Complete route lists must pass either limit or all=true. If search is provided without limit, the tool returns a bounded lookup window of 10 matches. Call inspect_route for handlers/hooks/permissions detail.', {
   includeDisabled: z.boolean().optional().default(false).describe('Include disabled routes'),
   search: z.string().optional().describe('Optional path or table substring filter. Use this before creating a route to check duplicates.'),
-  limit: z.number().int().positive().optional().describe('Maximum routes returned after search. Required unless all=true. Do not invent arbitrary limits for "all"; use all=true instead.'),
+  limit: z.number().int().positive().optional().describe('Maximum routes returned after search. Required unless all=true or search is provided. Do not invent arbitrary limits for "all"; use all=true instead.'),
   all: z.boolean().optional().default(false).describe('Return all matched routes. Use this when the user asks for all routes or a complete route list.'),
 }, async ({ includeDisabled, search, limit, all }) => {
-  if (!all && limit === undefined) {
+  if (!all && limit === undefined && !search?.trim()) {
     throw new Error('get_all_routes requires either limit or all=true. Do not rely on implicit default page sizes.');
   }
   if (all && limit !== undefined) {
@@ -2501,7 +2722,7 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Every
         mainTable: route.mainTable,
       }).toLowerCase().includes(q))
     : allRoutes;
-  const routeLimit = all ? matchedRoutes.length : limit;
+  const routeLimit = all ? matchedRoutes.length : (limit ?? 10);
   const payload = {
     statusCode: result?.statusCode,
     success: result?.success,
@@ -2509,6 +2730,7 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Every
     matchedRouteCount: matchedRoutes.length,
     returnedRouteCount: Math.min(matchedRoutes.length, routeLimit),
     all: !!all,
+    implicitSearchLimit: Boolean(!all && limit === undefined && search?.trim()),
     complete: all || routeLimit >= matchedRoutes.length,
     hardCap: all ? null : routeLimit,
     search: search || null,
@@ -2523,10 +2745,10 @@ server.tool('get_all_routes', 'List route definitions with minimal fields. Every
 server.tool(
   'create_route',
   [
-    '**Use this when the user wants a new REST API route or path** — not `create_table`. Custom routes must omit `mainTableId`.',
+    '**Use this when the user wants a new REST API route or path** — not `create_tables`. Custom routes must omit `mainTableId`.',
     '`mainTableId` is only a marker for canonical table routes such as `/orders`; do not set it for `/orders/stats`, `/reports/summary`, `/auth/login`, or any custom path.',
     'Do NOT create a new enfyra_table only to expose an endpoint; create a route without `mainTableId`, then have the handler/hook query explicit repos such as `$ctx.$repos.orders`.',
-    'availableMethods = which REST verbs the route responds to. publicMethods = which REST verbs are public (no auth). GraphQL is enabled separately through enfyra_graphql/update_table graphqlEnabled.',
+    'availableMethods = which REST verbs the route responds to. publicMethods = which REST verbs are public (no auth). GraphQL is enabled separately through enfyra_graphql/update_tables graphqlEnabled.',
     'After creation the tool auto-reloads routes. Then create handlers for specific methods via create_handler on this route id.',
     'Flow: create_route → create_handler (per method) → optionally create_pre_hook / create_post_hook → test via HTTP or admin test APIs (see server instructions).',
   ].join(' '),
@@ -2593,6 +2815,7 @@ server.tool(
     'Attach to the route the user cares about (`get_all_routes`): typically a path from `create_route`, not a spurious table created only for handlers.',
     'Use sourceCode, not logic/name. Enfyra compiles sourceCode into compiledCode; do not send compiledCode.',
     'Handler code runs inside a sandbox with $ctx. Use macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503, @SOCKET, @PKGS, @LOGS, @SHARE.',
+    'Call discover_script_contexts first. For explicit table repos use #table_name or @REPOS.table_name with exact fields and auth checks; do not use @REPOS.secure.<table> because MCP rejects that non-portable accessor before save.',
     'Or use $ctx directly: $ctx.$body, $ctx.$repos.main.find(), $ctx.$helpers.$bcrypt.hash(), etc.',
     'require("pkg") works for installed Server packages. console.log() writes to $share.$logs.',
   ].join(' '),
@@ -2602,7 +2825,7 @@ server.tool(
       .describe('Single enfyra_method.name to create. Prefer this for one handler.'),
     methods: z.array(z.string()).optional()
       .describe('Batch create multiple handlers. Use only when the same sourceCode applies to every method.'),
-    sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic.'),
+    sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
     scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
     timeout: z.number().optional().describe('Timeout in ms (default: system DEFAULT_HANDLER_TIMEOUT, usually 30000)'),
     globalRulesAckKey: globalRulesAckParam(z),
@@ -2656,9 +2879,10 @@ server.tool(
 server.tool(
   'create_pre_hook',
   [
-    'Create a pre-hook that runs BEFORE the handler. Use to validate, transform, or inject data.',
+    'Create a pre-hook that runs BEFORE the handler. Use to validate, transform, inject data, or enforce owner/tenant row filters (RLS).',
     'Use `routeId` from `create_route` or `get_all_routes` — do not create a new table just to get a route id.',
     'Macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503.',
+    'For canonical table reads, merge security filters into @QUERY.filter and preserve @QUERY.fields/deep/sort/limit/page/meta/aggregate.',
     'If the hook returns a value, that value becomes the response (handler is skipped).',
   ].join(' '),
   {
@@ -2947,6 +3171,7 @@ server.tool(
 // Register table tools
 registerTableTools(server, ENFYRA_API_URL);
 registerPlatformOperationTools(server, ENFYRA_API_URL);
+registerRuntimeZoneTools(server, ENFYRA_API_URL);
 
 // ============================================================================
 // CACHE & SYSTEM TOOLS

@@ -27,6 +27,14 @@ type AvoidToolRule = {
   reason: string;
 };
 
+type WorkflowPathStep = {
+  order: number;
+  tool: string;
+  purpose: string;
+  when?: string;
+  stopWhen?: string;
+};
+
 type ToolWorkflow = {
   key: WorkflowSurface;
   title: string;
@@ -74,7 +82,7 @@ export const TOOL_WORKFLOWS = [
         reason: 'The workflow validates source, reads live route/handler/access state, applies one safe step at a time, and returns nextSteps.',
       },
       {
-        tool: 'create_table',
+        tool: 'create_tables',
         when: 'the user asked for custom behavior at an API path',
         useInstead: 'api_endpoint_workflow',
         reason: 'Tables create persisted data models; custom route handlers own behavior endpoints.',
@@ -98,14 +106,14 @@ export const TOOL_WORKFLOWS = [
       'Reviewing extension UI theme/layout/component usage.',
     ],
     keywords: ['extension', 'menu', 'account panel', 'notification', 'chip', 'badge', 'sidebar', 'shell', 'page ui', 'widget'],
-    firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'inspect_feature'],
-    inspectTools: ['inspect_feature', 'trace_metadata_usage', 'get_script_source'],
+    firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'search_admin_extensions'],
+    inspectTools: ['search_admin_extensions(mode=search)', 'search_admin_extensions(mode=inspect)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'get_theme_class_reference'],
-    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
-    verifyTools: ['validate_extension_code', 'inspect_feature'],
+    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
+    verifyTools: ['validate_extension_code', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     avoidTools: [
       {
-        tool: 'create_record/update_record on enfyra_extension',
+        tool: 'create_records/update_records on enfyra_extension',
         when: 'creating or changing extension code',
         useInstead: 'update_extension_code for an existing extension id/name, or extension_workflow/ensure_*_extension for create/wire flows',
         reason: 'Extension operation tools validate local guards plus /enfyra_extension/preview and save only after validation succeeds.',
@@ -117,7 +125,7 @@ export const TOOL_WORKFLOWS = [
         reason: 'Shell notifications should not fetch messages, tickets, orders, or jobs lists solely for a badge.',
       },
       {
-        tool: 'update_record/PATCH enfyra_menu for order or parent changes',
+        tool: 'update_records/PATCH enfyra_menu for order or parent changes',
         when: 'drag-and-drop or programmatic menu ordering changes sibling order or parent',
         useInstead: 'reorder_menus',
         reason: 'The Enfyra 2.2.6 /admin/menu/reorder route validates menu hierarchy constraints and emits menu cache invalidation.',
@@ -127,7 +135,7 @@ export const TOOL_WORKFLOWS = [
     exampleCategories: ['extensions'],
     nextStepTemplate: [
       'Call get_extension_theme_contract before writing or reviewing UI.',
-      'Inspect the existing menu/extension/global shell registration.',
+      'Use search_admin_extensions to locate the existing menu/extension/global shell registration, then inspect one candidate before editing.',
       'Use extension_workflow with apply=false when page/menu wiring or shell notification behavior needs multiple steps.',
       'Use reorder_menus for menu order/parent changes instead of patching individual enfyra_menu records.',
       'Choose count only when the source already owns an exact count; choose dot/chip for new-attention signals.',
@@ -143,14 +151,14 @@ export const TOOL_WORKFLOWS = [
       'Changing GraphQL/table schema flags alongside metadata.',
     ],
     keywords: ['schema', 'table', 'column', 'relation', 'field', 'index', 'validation', 'inverse'],
-    firstTools: ['get_enfyra_required_knowledge', 'inspect_table', 'get_all_tables'],
-    inspectTools: ['inspect_table', 'get_table_metadata', 'get_all_tables'],
-    knowledgeTools: ['get_enfyra_required_knowledge', 'get_enfyra_examples'],
-    writeTools: ['create_table', 'update_table', 'delete_table', 'create_column', 'update_column', 'delete_column', 'create_relation', 'delete_relation', 'ensure_column_rule'],
+    firstTools: ['get_enfyra_required_knowledge', 'get_schema_design_context', 'inspect_table', 'get_all_tables'],
+    inspectTools: ['get_schema_design_context', 'inspect_table', 'get_table_metadata', 'get_all_tables'],
+    knowledgeTools: ['get_enfyra_required_knowledge', 'get_schema_design_context', 'get_enfyra_examples'],
+    writeTools: ['create_tables', 'update_tables', 'delete_tables', 'create_columns', 'update_columns', 'delete_columns', 'create_relations', 'delete_relations', 'ensure_column_rule'],
     verifyTools: ['inspect_table', 'get_table_metadata'],
     avoidTools: [
       {
-        tool: 'create_record/update_record on enfyra_column or enfyra_relation',
+        tool: 'create_records/update_records on enfyra_column or enfyra_relation',
         when: 'changing schema metadata',
         useInstead: 'table/column/relation schema tools',
         reason: 'Schema tools resolve table ids, preserve relation contracts, and reject physical FK names.',
@@ -165,6 +173,7 @@ export const TOOL_WORKFLOWS = [
     requiredAck: ['globalRulesAckKey'],
     exampleCategories: ['schema-relations'],
     nextStepTemplate: [
+      'Call get_schema_design_context and read liveColumnTypes plus metadata input attributes before choosing column/table/relation shapes.',
       'Inspect the existing table and relations.',
       'Decide owner relation and whether an inverse is actually needed.',
       'Apply schema tool changes with globalRulesAckKey.',
@@ -183,8 +192,8 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['inspect_table', 'discover_query_capabilities'],
     inspectTools: ['inspect_table', 'get_table_metadata', 'discover_query_capabilities'],
     knowledgeTools: ['get_enfyra_required_knowledge for writes'],
-    writeTools: ['create_record', 'update_record', 'delete_record'],
-    verifyTools: ['find_one_record', 'query_table', 'count_records'],
+    writeTools: ['create_records', 'update_records', 'delete_records'],
+    verifyTools: ['find_one_record', 'query_table', 'count_records', 'debug_field_exposure'],
     avoidTools: [
       {
         tool: 'query_table without limit or all=true',
@@ -193,10 +202,22 @@ export const TOOL_WORKFLOWS = [
         reason: 'List/query tools require explicit paging intent.',
       },
       {
+        tool: 'single-record CRUD tools',
+        when: 'creating, updating, or deleting one row',
+        useInstead: 'plural tools with a one-item array',
+        reason: 'MCP write tools are bulk envelopes; they accept native arrays, preflight arrays, and run sequentially even for one item.',
+      },
+      {
         tool: 'generic CRUD on internal/no-route system tables',
         when: 'changing schema, sessions, columns, or other no-route internals',
         useInstead: 'specific schema/platform tools',
         reason: 'Generic CRUD is for route-backed tables only.',
+      },
+      {
+        tool: 'route-local pre-hook or frontend hiding',
+        when: 'REST fields/deep appears to return an isPublished=false field',
+        useInstead: 'debug_field_exposure',
+        reason: 'Unpublished field exposure is a core contract issue; first produce a compact repro and escalation shape.',
       },
     ],
     requiredAck: ['globalRulesAckKey for writes', 'dynamicCodeAckKey for script-backed sourceCode writes', 'extensionAckKey for extension code writes'],
@@ -204,7 +225,8 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Inspect table metadata and choose fields explicitly.',
       'Use bounded pagination or all=true deliberately.',
-      'For writes, read required knowledge and use metadata-backed field names only.',
+      'For suspected hidden/private field leaks through fields/deep, run debug_field_exposure and escalate core exposure instead of patching UI/hooks.',
+      'For writes, read required knowledge and use plural mutation tools with native array inputs, even for one item.',
       'Re-read with explicit fields after mutation when saved shape matters.',
     ],
   },
@@ -217,14 +239,14 @@ export const TOOL_WORKFLOWS = [
       'Debugging macro, repository, or validation behavior.',
     ],
     keywords: ['sourcecode', 'script', 'hook', 'pre hook', 'post hook', 'compiledcode', 'macro', 'repos', 'bootstrap'],
-    firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'trace_metadata_usage'],
-    inspectTools: ['trace_metadata_usage', 'get_script_source', 'discover_script_contexts'],
+    firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'search_runtime_zone'],
+    inspectTools: ['search_runtime_zone(mode=search, zone=api_runtime|flow_runtime|websocket_runtime|graphql_runtime)', 'search_runtime_zone(mode=inspect)', 'trace_metadata_usage', 'get_script_source', 'discover_script_contexts'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts'],
     writeTools: ['patch_script_source', 'update_script_source', 'create_handler', 'create_pre_hook', 'create_post_hook', 'api_endpoint_workflow'],
     verifyTools: ['validate_dynamic_script', 'run_admin_test', 'test_rest_endpoint', 'test_flow_step'],
     avoidTools: [
       {
-        tool: 'update_record with compiledCode',
+        tool: 'update_records with compiledCode',
         when: 'editing dynamic scripts',
         useInstead: 'patch_script_source or update_script_source with sourceCode',
         reason: 'compiledCode is generated and may differ because macros expand.',
@@ -294,21 +316,28 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'inspect_table', 'inspect_route'],
     inspectTools: ['inspect_table', 'inspect_route', 'discover_query_capabilities'],
     knowledgeTools: ['get_enfyra_required_knowledge'],
-    writeTools: ['ensure_guard', 'ensure_field_permission', 'ensure_column_rule'],
+    writeTools: ['ensure_guard', 'ensure_field_permission', 'ensure_column_rule', 'create_pre_hook'],
     verifyTools: ['test_rest_endpoint', 'query_table', 'run_admin_test'],
     avoidTools: [
       {
-        tool: 'raw create_record on guard/rule tables',
+        tool: 'raw create_records on guard/rule tables',
         when: 'a dedicated ensure_* operation exists',
         useInstead: 'ensure_guard, ensure_field_permission, or ensure_column_rule',
         reason: 'Ensure tools resolve ids and preserve the current rule contract.',
+      },
+      {
+        tool: 'ensure_field_permission',
+        when: 'the requirement is owner/tenant row scoping or RLS query filtering',
+        useInstead: 'create_pre_hook',
+        reason: 'Field permissions protect field visibility; row ownership/RLS is enforced by pre-hooks that merge owner/tenant filters into @QUERY.filter.',
       },
     ],
     requiredAck: ['globalRulesAckKey'],
     exampleCategories: ['permissions-rls', 'schema-relations'],
     nextStepTemplate: [
       'Inspect the target table/route and decide the security boundary first.',
-      'Use the specific ensure_* operation for the rule surface.',
+      'Use create_pre_hook for owner/tenant row filters; use ensure_field_permission only for field visibility.',
+      'Use the specific ensure_* operation for guard, field, or column rule surfaces.',
       'Verify with the route/query behavior the rule is meant to protect.',
     ],
   },
@@ -321,10 +350,10 @@ export const TOOL_WORKFLOWS = [
       'Testing or triggering a flow.',
     ],
     keywords: ['flow', 'scheduled', 'manual flow', 'flow step', 'trigger flow', 'workflow'],
-    firstTools: ['get_enfyra_required_knowledge', 'choose_flow_step_tool', 'discover_script_contexts'],
+    firstTools: ['get_enfyra_required_knowledge', 'plan_flow_steps', 'choose_flow_step_tool', 'discover_script_contexts'],
     inspectTools: ['inspect_feature', 'query_table'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts'],
-    writeTools: ['ensure_manual_flow', 'ensure_scheduled_flow', 'ensure_query_flow_step', 'ensure_create_flow_step', 'ensure_update_flow_step', 'ensure_delete_flow_step', 'ensure_http_flow_step', 'ensure_sleep_flow_step', 'ensure_trigger_flow_step', 'ensure_log_flow_step', 'ensure_condition_flow_step', 'ensure_script_flow_step'],
+    writeTools: ['ensure_manual_flow', 'ensure_scheduled_flow', 'plan_flow_steps', 'ensure_query_flow_step', 'ensure_create_flow_step', 'ensure_update_flow_step', 'ensure_delete_flow_step', 'ensure_http_flow_step', 'ensure_sleep_flow_step', 'ensure_trigger_flow_step', 'ensure_log_flow_step', 'ensure_condition_flow_step', 'ensure_script_flow_step'],
     verifyTools: ['test_flow_step', 'run_admin_test', 'trigger_flow'],
     avoidTools: [
       {
@@ -337,7 +366,7 @@ export const TOOL_WORKFLOWS = [
     requiredAck: ['globalRulesAckKey', 'dynamicCodeAckKey for script or condition source'],
     exampleCategories: ['flows'],
     nextStepTemplate: [
-      'Use choose_flow_step_tool before mutating when step type is unclear.',
+      'Use plan_flow_steps for multi-step flows; use choose_flow_step_tool only for one unclear step.',
       'Prefer fixed-type flow step tools over script steps.',
       'Validate/test script or condition steps before relying on the flow.',
       'Trigger manually only after the saved steps are verified.',
@@ -385,8 +414,8 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['discover_enfyra_system', 'inspect_table'],
     inspectTools: ['discover_enfyra_system', 'inspect_table'],
     knowledgeTools: ['get_enfyra_required_knowledge for writes'],
-    writeTools: ['set_table_graphql', 'update_table'],
-    verifyTools: ['reload_graphql', 'discover_enfyra_system'],
+    writeTools: ['set_table_graphql', 'update_tables'],
+    verifyTools: ['discover_enfyra_system'],
     avoidTools: [
       {
         tool: 'public_route_methods',
@@ -418,7 +447,7 @@ export const TOOL_WORKFLOWS = [
     verifyTools: ['query_table'],
     avoidTools: [
       {
-        tool: 'raw create_record on enfyra_package',
+        tool: 'raw create_records on enfyra_package',
         when: 'installing packages',
         useInstead: 'install_package',
         reason: 'The package tool resolves package metadata and avoids duplicate package records.',
@@ -443,7 +472,7 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['inspect_table', 'inspect_route', 'get_enfyra_api_context'],
     inspectTools: ['inspect_table', 'inspect_route', 'get_enfyra_api_context'],
     knowledgeTools: ['get_enfyra_required_knowledge for manual reloads'],
-    writeTools: ['reload_metadata', 'reload_routes', 'reload_graphql', 'reload_all'],
+    writeTools: [],
     verifyTools: ['inspect_table', 'inspect_route', 'discover_enfyra_system'],
     avoidTools: [
       {
@@ -457,7 +486,7 @@ export const TOOL_WORKFLOWS = [
     exampleCategories: [],
     nextStepTemplate: [
       'Verify stale behavior with narrow inspect/test tools.',
-      'Choose the narrowest reload surface if stale evidence exists.',
+      'If stale evidence truly requires manual reload, switch to ENFYRA_MCP_TOOLSET=full and choose the narrowest reload surface.',
       'Re-verify the same narrow behavior after reload.',
     ],
   },
@@ -470,8 +499,8 @@ export const TOOL_WORKFLOWS = [
       'Running admin tests for supported runtime surfaces.',
     ],
     keywords: ['log', 'debug', 'error', 'trace', 'tail', 'diagnostic', 'test runner'],
-    firstTools: ['get_log_files', 'search_logs'],
-    inspectTools: ['get_log_files', 'get_log_content', 'tail_log', 'search_logs'],
+    firstTools: ['search_logs', 'tail_log'],
+    inspectTools: ['search_logs', 'tail_log'],
     knowledgeTools: [],
     writeTools: [],
     verifyTools: ['run_admin_test', 'test_flow_step', 'test_rest_endpoint'],
@@ -531,18 +560,158 @@ function compactWorkflow(workflow: ToolWorkflow) {
   };
 }
 
+function step(order: number, tool: string, purpose: string, extra: Partial<WorkflowPathStep> = {}): WorkflowPathStep {
+  return { order, tool, purpose, ...extra };
+}
+
+function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
+  switch (workflow.key) {
+    case 'api-endpoint':
+      return [
+        step(1, 'get_enfyra_required_knowledge', 'Read mutation/security contracts and collect acknowledgement keys.'),
+        step(2, 'discover_script_contexts', 'Load handler/hook macros and repository contracts before writing source.'),
+        step(3, 'api_endpoint_workflow', 'Plan the endpoint with apply=false; this is the front door for handler-backed routes.'),
+        step(4, 'api_endpoint_workflow', 'Apply the next planned step, or applyAll only when the returned plan is fully understood.', { stopWhen: 'The workflow reports no pending steps or returns a validation/access error.' }),
+        step(5, 'test_rest_endpoint', 'Smoke-test the final route contract.'),
+      ];
+    case 'extension':
+      return [
+        step(1, 'get_enfyra_required_knowledge', 'Read global and extension contracts; collect acknowledgement keys.'),
+        step(2, 'get_extension_theme_contract', 'Load the required eApp/Nuxt UI theme and component contract.'),
+        step(3, 'search_admin_extensions', 'Locate the menu/page/widget/global extension by visible text, path, button, icon, tab, or source term.'),
+        step(4, 'search_admin_extensions', 'Inspect the selected admin UI artifact with mode=inspect using nextInspect.input.'),
+        step(5, 'extension_workflow or patch_extension_code/update_extension_code', 'Use extension_workflow for create/wire flows, patch_extension_code for focused edits, or update_extension_code for full replacements.'),
+        step(6, 'validate_extension_code', 'Validate only when the chosen write tool did not already validate and save atomically.'),
+      ];
+    case 'schema':
+      return [
+        step(1, 'get_enfyra_required_knowledge', 'Read schema invariants and collect globalRulesAckKey.'),
+        step(2, 'get_schema_design_context', 'Step zero: read live column types, table/column/relation attributes, constraint shape, and creation order.'),
+        step(3, 'get_all_tables or inspect_table', 'Check existing tables before naming new tables or adding to an existing table.', { when: 'Use get_all_tables for new app schemas; inspect_table for a known existing table.' }),
+        step(4, 'create_tables / create_columns / create_relations / update_tables', 'Apply schema changes with native array inputs using only live types and relation propertyName values from the design context. Put relation-based unique/index groups in the same create_tables item as the owning relations, or add them later with update_tables after relations exist.'),
+        step(5, 'inspect_table', 'Re-read saved metadata before creating records, queries, handlers, or UI against the table.'),
+      ];
+    case 'record-data':
+      return [
+        step(1, 'inspect_table', 'Read live columns, relations, primary key, route path, and field visibility.'),
+        step(2, 'discover_query_capabilities', 'Load filter/deep/sort/aggregate shape when query shape is non-trivial.'),
+        step(3, 'debug_field_exposure', 'Build a compact repro when fields/deep may expose an unpublished field; escalate core exposure instead of adding local fixes.', { when: 'The task is about hidden/private/secret field exposure.' }),
+        step(4, 'query_table / find_one_record / count_records', 'Read records with explicit fields and bounded pagination.'),
+        step(5, 'create_records / update_records / delete_records', 'For writes, use only metadata-backed column names and relation propertyName values. Always pass a native array, even for one item.', { when: 'Only after required knowledge is read for writes.' }),
+        step(6, 'find_one_record or query_table', 'Verify the saved/read shape with explicit fields.'),
+      ];
+    case 'dynamic-script':
+      return [
+        step(1, 'get_enfyra_required_knowledge', 'Read dynamic-code contracts and collect acknowledgement keys.'),
+        step(2, 'discover_script_contexts', 'Load macros, repository trust paths, per-surface helpers, and the fields+deep projection contract for script repository reads.'),
+        step(3, 'search_runtime_zone', 'Locate the script-backed runtime artifact in api_runtime, flow_runtime, websocket_runtime, or graphql_runtime.'),
+        step(4, 'get_script_source', 'Read editable sourceCode and hash for the selected record.'),
+        step(5, 'patch_script_source or update_script_source', 'Patch or replace source with validation and hash checks.'),
+        step(6, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify through the runtime path that owns the script.'),
+      ];
+    case 'route-access':
+    case 'guards-permissions-rules':
+      return [
+        step(1, 'get_enfyra_required_knowledge', 'Read access/security contracts.'),
+        step(2, 'inspect_route or inspect_table', 'Inspect the exact route/table access surface.'),
+        step(3, 'audit_route_access', 'Compare current route permissions against expected roles/users/methods.'),
+        step(4, 'ensure_route_access / create_pre_hook / ensure_field_permission / ensure_guard / ensure_column_rule', 'Apply the specific access/rule operation. Use create_pre_hook for owner/tenant row filters.'),
+        step(5, 'audit_route_access or test_rest_endpoint', 'Verify the access behavior.'),
+      ];
+    case 'flow':
+      return [
+        step(1, 'get_enfyra_required_knowledge', 'Read flow/dynamic-code contracts.'),
+        step(2, 'plan_flow_steps', 'Plan the ordered fixed-type step tools for the whole flow before mutating step metadata.'),
+        step(3, 'discover_script_contexts', 'Load flow-step macros when script/condition logic is involved.'),
+        step(4, 'ensure_manual_flow / ensure_scheduled_flow / ensure_*_flow_step', 'Create or update the flow and steps through fixed-contract tools.'),
+        step(5, 'test_flow_step or trigger_flow', 'Verify a step or enqueue the flow intentionally.'),
+      ];
+    case 'websocket':
+      return [
+        step(1, 'get_enfyra_required_knowledge', 'Read websocket/dynamic-code contracts.'),
+        step(2, 'discover_script_contexts', 'Load socket helpers and room APIs.'),
+        step(3, 'search_runtime_zone', 'Locate existing websocket gateway/event with zone=websocket_runtime when editing.'),
+        step(4, 'ensure_websocket_gateway / ensure_websocket_event', 'Create or update gateway/event through validation-aware tools.'),
+        step(5, 'run_admin_test', 'Verify connection/event handler behavior with the admin test runner.'),
+      ];
+    case 'graphql':
+      return [
+        step(1, 'discover_enfyra_system', 'Read GraphQL endpoint/auth/table enablement context.'),
+        step(2, 'inspect_table', 'Inspect the table before enabling GraphQL or writing resolver source.'),
+        step(3, 'set_table_graphql or search_runtime_zone', 'Enable table GraphQL or locate resolver source with zone=graphql_runtime.'),
+        step(4, 'discover_enfyra_system', 'Verify GraphQL state and endpoint hints.'),
+      ];
+    case 'package':
+      return [
+        step(1, 'search_npm', 'Find package candidates from npm.'),
+        step(2, 'get_enfyra_required_knowledge', 'Read package/runtime mutation contracts.'),
+        step(3, 'install_package', 'Install the selected package through the package operation tool.'),
+        step(4, 'search_runtime_zone', 'Verify package runtime state with zone=package_runtime when needed.'),
+      ];
+    case 'cache':
+      return [
+        step(1, 'discover_runtime_context', 'Read runtime/cache context and current app target.'),
+        step(2, 'inspect_table / inspect_route / search_runtime_zone', 'Confirm the specific stale artifact before reloading.'),
+        step(3, 'full toolset reload tools', 'Only when stale evidence persists, switch to full toolset and reload the narrowest proven surface; reload_all is last resort.'),
+        step(4, 'inspect_table / inspect_route / discover_enfyra_system', 'Verify the stale state cleared.'),
+      ];
+    case 'logs-debug':
+      return [
+        step(1, 'search_logs', 'Search the narrow log pattern/time clue.'),
+        step(2, 'tail_log', 'Tail only the relevant log when live reproduction is needed.'),
+      ];
+    case 'auth-context':
+      return [
+        step(1, 'get_enfyra_api_context', 'Confirm the connected target cheaply.'),
+        step(2, 'get_current_user', 'Read current user/session context.'),
+        step(3, 'get_permission_profile', 'Check admin helper route permissions for non-root tokens.'),
+      ];
+    default:
+      return workflow.firstTools.map((tool, index) => step(index + 1, tool, 'Follow this workflow step.'));
+  }
+}
+
+function splitCompositeToolName(tool: string) {
+  return tool.split(/\s+or\s+| \/ /g).map((item) => item.trim()).filter(Boolean);
+}
+
+function advancedToolsFor(workflow: ToolWorkflow) {
+  const primaryTools = new Set(primaryPathFor(workflow).flatMap((item) => splitCompositeToolName(item.tool)));
+  return [...new Set([
+    ...workflow.inspectTools,
+    ...workflow.knowledgeTools,
+    ...workflow.writeTools,
+    ...workflow.verifyTools,
+  ])].filter((tool) => !primaryTools.has(tool));
+}
+
+function escapeHatchesFor(workflow: ToolWorkflow) {
+  const escape = new Set(['create_records', 'update_records', 'delete_records', 'create_route', 'create_handler', 'create_pre_hook', 'create_post_hook', 'reload_all', 'reload_metadata', 'reload_routes', 'reload_graphql', 'get_all_metadata', 'get_table_metadata']);
+  return [...new Set([...workflow.writeTools, ...workflow.verifyTools, ...workflow.inspectTools])]
+    .filter((tool) => escape.has(tool));
+}
+
+function verifyPathFor(workflow: ToolWorkflow) {
+  return workflow.verifyTools.map((tool, index) => step(index + 1, tool, 'Verify the workflow result through the closest runtime/read path.'));
+}
+
 function planWorkflow(workflow: ToolWorkflow) {
   return {
     ...compactWorkflow(workflow),
-    firstTools: workflow.firstTools,
-    inspectTools: workflow.inspectTools,
-    knowledgeTools: workflow.knowledgeTools,
-    writeTools: workflow.writeTools,
-    verifyTools: workflow.verifyTools,
+    primaryPath: primaryPathFor(workflow),
+    advancedTools: advancedToolsFor(workflow),
+    escapeHatches: escapeHatchesFor(workflow),
+    verifyPath: verifyPathFor(workflow),
     requiredAck: workflow.requiredAck,
     exampleCategories: workflow.exampleCategories,
-    nextSteps: workflow.nextStepTemplate,
     avoidTools: workflow.avoidTools,
+    legacyToolSets: {
+      firstTools: workflow.firstTools,
+      inspectTools: workflow.inspectTools,
+      knowledgeTools: workflow.knowledgeTools,
+      writeTools: workflow.writeTools,
+      verifyTools: workflow.verifyTools,
+    },
   };
 }
 
@@ -585,6 +754,15 @@ function normalizeDetail(detail: string): WorkflowDetail {
   return (ALL_DETAILS as readonly string[]).includes(detail) ? detail as WorkflowDetail : 'summary';
 }
 
+function normalizeRisk(risk: string) {
+  const value = normalize(risk) || 'unknown';
+  if (['read', 'write', 'destructive', 'debug', 'unknown'].includes(value)) return value;
+  if (['low', 'safe', 'readonly', 'read-only'].includes(value)) return 'read';
+  if (['medium', 'normal', 'moderate', 'mutation', 'mutating'].includes(value)) return 'write';
+  if (['high', 'danger', 'dangerous', 'delete', 'destructive-write'].includes(value)) return 'destructive';
+  return 'unknown';
+}
+
 export function discoverWorkflowRoutes({
   intent = '',
   surface,
@@ -594,7 +772,7 @@ export function discoverWorkflowRoutes({
 }: WorkflowRouteOptions = {}) {
   const normalizedSurface = surface ? normalize(surface) : undefined;
   const normalizedDetail = normalizeDetail(detail);
-  const normalizedRisk = normalize(risk) || 'unknown';
+  const normalizedRisk = normalizeRisk(risk);
   const formatter = normalizedDetail === 'full'
     ? fullWorkflow
     : normalizedDetail === 'plan'
@@ -619,9 +797,10 @@ export function discoverWorkflowRoutes({
     })),
     surfaces: normalizedDetail === 'summary' ? WORKFLOW_SURFACES : undefined,
     guidance: [
-      'Use this as progressive disclosure: pick the closest workflow, then call its firstTools instead of loading every Enfyra tool/example.',
+      'Use this as progressive disclosure: pick the closest workflow and follow primaryPath in order instead of choosing from the flat MCP tool list.',
       'For writes, call get_enfyra_required_knowledge and pass the returned acknowledgement keys into write tools.',
       'Treat avoidTools as negative routing boundaries; they prevent near-correct tool choices from crossing the wrong platform contract.',
+      'Use advancedTools only when the primaryPath says they fit; use escapeHatches only with explicit evidence that the front-door tool is insufficient.',
     ],
   };
 }

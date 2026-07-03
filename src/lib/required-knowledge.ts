@@ -1,8 +1,8 @@
-export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::UNIQUE-FIELDS-ARE-INDEXED::2bW-20260701B';
-export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::SECURE-REPO-CONTRACT::R9x-kelp-42Q::NO-RAW-TRUSTED';
+export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONES::SCHEMA-DESIGN-CONTEXT::RECORD-BATCH::20260704H';
+export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-THROW-CONTRACT::RAW-NUMERIC::SEMANTIC-NAMED::20260704A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-THEME-CONTRACT::VIOLET-IS-NOT-A-PLAN::7mQ';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-01.global-rules-v2';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-07-04.global-rules-v8-schema-preflight-query-contracts';
 
 export function globalRulesAckParam(z) {
   return z.string().describe('Required global-rules acknowledgement key from get_enfyra_required_knowledge. Call that tool, read the global Enfyra MCP rules, then pass globalRulesAckKey exactly.');
@@ -72,7 +72,26 @@ export function buildRequiredKnowledgePayload() {
         rules: [
           'Inspect live metadata/routes/features before schema, route, permission, extension, flow, or handler changes.',
           'Use narrow inspection tools for the table, route, feature, or script being changed instead of broad discovery after the target is known.',
+          'When the thing to find lives in DB-backed runtime state rather than repo files, use search_admin_extensions for admin UI or search_runtime_zone for other runtime zones before raw query_table or broad trace tools.',
           'Read sourceCode, not compiledCode, for editable dynamic scripts.',
+        ],
+      },
+      {
+        id: 'runtime-zone-locators',
+        rules: [
+          'Use search_admin_extensions for menu + extension UI: page extensions, widget extensions, global shell extensions, menu chips, account panel entries, visible buttons, labels, icons, tabs, and blocks.',
+          'Use search_runtime_zone as the zone search/inspect tool for non-admin-UI DB-backed artifacts.',
+          'Search first, then inspect with nextInspect.input before editing.',
+          'Use search_runtime_zone with zone=api_runtime for routes, handlers, pre-hooks, post-hooks, guards, guard rules, and route permissions.',
+          'Use search_runtime_zone with zone=flow_runtime for flows and flow steps.',
+          'Use search_runtime_zone with zone=websocket_runtime for websocket gateways and events.',
+          'Use search_runtime_zone with zone=graphql_runtime for GraphQL exposure and resolver source.',
+          'Use search_runtime_zone with zone=schema_data for tables, columns, relations, field permissions, and column rules.',
+          'Use search_runtime_zone with zone=package_runtime for installed app/server packages.',
+          'Use search_runtime_zone with zone=storage_file for storage configs, folders, files, public asset state, and file permissions.',
+          'Use search_runtime_zone with zone=auth_security for roles, route permissions, field permissions, guards, OAuth configs, and access surfaces.',
+          'After search_runtime_zone mode=search, call search_runtime_zone mode=inspect with the returned nextInspect.input before editing source or metadata.',
+          'Use zone-specific write tools after inspection; do not mutate DB-backed runtime artifacts with generic CRUD when a business operation tool exists.',
         ],
       },
       {
@@ -87,10 +106,28 @@ export function buildRequiredKnowledgePayload() {
       {
         id: 'schema-constraints',
         rules: [
-          'For table schema, a field that appears in any uniques group must not appear in indexes.',
-          'A unique constraint already creates the indexed unique lookup for its fields.',
+          'Before creating a multi-table app, call get_schema_design_context first. Use its liveColumnTypes, createTableInput, columnDefinitionInput, relationDefinitionInput, and recommendedSequence instead of guessing metadata attributes.',
+          'Then call get_enfyra_examples with category=schema-relations only for reasoning patterns, not for domain-specific table names.',
+          'Use plural mutation tools for writes: create_tables/update_tables/delete_tables, create_columns/update_columns/delete_columns, create_relations/delete_relations, and create_records/update_records/delete_records. Pass native JSON arrays; use one item in the array for a single mutation.',
+          'Create entity tables with scalar columns first, then add relations once target tables exist. create_tables defers relation creation until all tables in the same batch exist.',
+          'Do not declare id, _id, createdAt, or updatedAt columns; Enfyra manages them automatically.',
+          'For one-pass relation-based unique/index constraints, declare the owning relations in the same create_tables item as the constraints. If relations already exist or will be created separately, add those constraints afterward with update_tables.',
+          'Use live Enfyra column types, not SQL dialect names. Common safe choices: varchar for short text, text/richtext for long prose, float for price/amount/rating/decimal-like values, int/bigint for counts, boolean, date/datetime/timestamp, enum, simple-json for structured objects/arrays when listed by live metadata, and code for source fields.',
+          'Do not use json/jsonb/longtext/decimal unless the live enfyra_column.type enum lists them. The MCP schema tools normalize common aliases where possible and return schemaNormalization.',
+          'Use Enfyra relations instead of scalar FK/id columns for normalized links. Do not create fields such as userId, course_id, categoryIds, authorId, or JSON arrays of related ids unless the user explicitly asks for denormalized snapshots.',
+          'If the app must deep-read a parent with child collections, create the child owning relation with inversePropertyName from the start; otherwise parent.deepChild queries will fail until an inverse relation is added.',
+          'When inserting/updating records with relations, use relation propertyName values in the body, not hidden physical FK columns. Inspect the table to learn propertyName values.',
+          'For record writes, always use create_records/update_records/delete_records with native array inputs; these tools validate every item against live metadata before posting/patching/deleting sequentially.',
+          'For reads, query_table accepts native object filter/deep/aggregate values. Deep keys are relation names; query_table auto-adds missing top-level deep relation keys to fields so nested records can appear. Inside deep, use fields/filter/sort/limit/page/deep; never use _fields.',
+          'Filters use Enfyra operators, not SQL operators. Use _contains, _starts_with, or _ends_with for text matching; do not use _like.',
+          'This auto-add behavior is MCP query_table only. Inside dynamic server scripts, repository find({ deep }) requires the relation property to also be present in top-level fields, otherwise row.<relation> may be undefined.',
+          'For table schema, a field that appears in any uniques group, including composite unique groups such as ["event","attendee"], must not appear in indexes.',
+          'A unique constraint already creates the indexed unique lookup for its fields, so do not add separate indexes for those same fields.',
           'Use uniques for data integrity and indexes only for non-unique query-performance fields that are not already unique.',
-          'Before create_table or update_table with indexes/uniques, inspect the current table and remove indexes that reference unique fields.',
+          'create_tables preflights all items before posting tables and rejects unique/index overlap for the whole batch; update_tables applies the same guard before patching constraints.',
+          'Before update_tables with indexes/uniques, inspect the current table and remove indexes that reference unique fields.',
+          'query_table always requires limit or all=true. Use meta=filterCount/totalCount or count_records for counts. Do not guess aggregate operators such as _sum/_count; call discover_query_capabilities first when an aggregate object is needed.',
+          'Run schema mutation calls through the plural tools; they serialize work internally. Do not parallelize schema mutation tool calls.',
         ],
       },
       {
@@ -116,8 +153,9 @@ export function buildRequiredKnowledgePayload() {
         id: 'secure-vs-trusted-repositories',
         rules: [
           '@REPOS.main is the secure repository for the current route main table and preserves normal route query behavior.',
-          '@REPOS.secure.<table> is the secure explicit-table repository. Use it for public/user-facing custom handlers, hooks, websocket scripts, flows that return data, and third-party app integrations.',
-          '@REPOS.<table> is the trusted internal repository. It may read/write hidden fields and is only for server-owned maintenance/admin logic that intentionally needs that access.',
+          '@REPOS.secure.<table> is not portable across current Enfyra runtimes and MCP save tools reject it before saving sourceCode.',
+          'For explicit-table custom handlers, use #table_name or @REPOS.<table> with exact fields, relation filters, explicit authorization checks, and shaped/sanitized output.',
+          '@REPOS.<table> is the trusted internal repository. It may read/write hidden fields, so never return raw rows or broad projections.',
           'Never return raw trusted-repository records to users. Project or sanitize output before returning it.',
         ],
       },
@@ -144,7 +182,14 @@ export function buildRequiredKnowledgePayload() {
           'Use sourceCode and scriptLanguage; never send compiledCode.',
           'Prefer macros such as @BODY, @QUERY, @PARAMS, @USER, @REQ, @RES, @REPOS, @HELPERS, @STORAGE, @SOCKET, and @THROW* when available.',
           'Repository reads use filter, not where.',
+          'Inside dynamic scripts, prefer #table_name.find with limit:1 and explicit fields for one-record lookups. If a primary-key id filter fails in a runtime, fetch a small bounded candidate set by a unique business field or use the canonical route/main-table context; do not keep retrying @REPOS.<table>.find id filter shapes.',
+          'Relation filters use relation propertyName values, not physical FK-shaped names. Use { incident: { id: { _eq: id } } }, not { incidentId: { _eq: id } }.',
+          'Do not use @REPOS.secure.<table> or @REPOS.secure["table"] in generated sourceCode; use @REPOS.main when the route has a main table or #table_name/@REPOS.table_name with explicit fields and auth checks.',
+          'When using repository find({ deep }) in handlers/hooks/flows, include each deep relation name in top-level fields, then choose nested fields under deep.<relation>.fields.',
           'Create/update repository calls return collection-shaped data arrays; read result.data?.[0] for a single row.',
+          'For intentional HTTP errors, numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message).',
+          'When numeric helpers include details, pass an object or array such as @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut.',
+          'Use @THROW.http(status, message, details?) for dynamic status codes. Use @THROW.notFound(resource, id?) and @THROW.duplicate(resource, field, value) only when you intentionally want Enfyra-formatted semantic messages.',
         ],
       },
     ],

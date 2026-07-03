@@ -484,15 +484,18 @@ const googleCallbackUrl = apiBase + "/auth/google/callback"
 // https://demo.enfyra.io/api/auth/google/callback
 
 // 4. After the user provides Google client id/secret, save Enfyra config:
-create_record({
+create_records({
   tableName: "enfyra_oauth_config",
-  body: JSON.stringify({
-    provider: "google",
-    clientId: "<google-client-id>",
-    clientSecret: "<google-client-secret>",
-    redirectUri: googleCallbackUrl,
-    isEnabled: true
-  })
+  globalRulesAckKey: "<globalRulesAckKey>",
+  records: [
+    {
+      provider: "google",
+      clientId: "<google-client-id>",
+      clientSecret: "<google-client-secret>",
+      redirectUri: googleCallbackUrl,
+      isEnabled: true
+    }
+  ]
 })`,
         notes: [
           'Ask for the app/admin URL such as https://demo.enfyra.io; derive the API base by appending /api.',
@@ -525,15 +528,20 @@ window.location.href = oauthUrl.toString()`,
 })
 
 // If a row exists, update it instead of creating a duplicate.
-update_record({
+update_records({
   tableName: "enfyra_oauth_config",
-  id: "<existing-config-id>",
-  body: JSON.stringify({
-    clientId: "<google-client-id>",
-    clientSecret: "<google-client-secret>",
-    redirectUri: "https://demo.enfyra.io/api/auth/google/callback",
-    isEnabled: true
-  })
+  globalRulesAckKey: "<globalRulesAckKey>",
+  items: [
+    {
+      id: "<existing-config-id>",
+      data: {
+        clientId: "<google-client-id>",
+        clientSecret: "<google-client-secret>",
+        redirectUri: "https://demo.enfyra.io/api/auth/google/callback",
+        isEnabled: true
+      }
+    }
+  ]
 })`,
         notes: [
           'Inspect first so setup is idempotent.',
@@ -548,198 +556,144 @@ update_record({
     useWhen: 'Use when creating or changing persisted data models.',
     examples: [
       {
-        name: 'Create a chat conversation table',
-        code: `create_table({
-  name: "chat_conversation",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  columns: JSON.stringify([
-    { name: "kind", type: "varchar", isNullable: false, defaultValue: "dm" },
-    { name: "title", type: "varchar", isNullable: true },
-    { name: "description", type: "text", isNullable: true }
-  ])
-})`,
-        notes: [
-          'Chat is the illustrative domain here. For another domain, keep the same modeling question: what is the parent entity, what is stored on the parent, and what belongs on child rows?',
-          'create_table creates the default route for /chat_conversation.',
-          'Keep the latest message as a relation named lastMessage after chat_message exists; do not duplicate last message text/date columns.',
-          'Do not create tables just to get custom paths; use create_route for that.',
-        ],
-      },
-      {
-        name: 'Create relations directly to enfyra_user',
-        code: `create_table({
-  name: "chat_message",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  columns: JSON.stringify([
-    { name: "text", type: "text", isNullable: false },
-    { name: "persistStatus", type: "varchar", defaultValue: "persisted" }
-  ]),
-  relations: JSON.stringify([
+        name: 'Bulk schema creation with one-item-or-many arrays',
+        code: `// 0. First call get_schema_design_context and get_enfyra_required_knowledge.
+// 1. create_tables is always native-array-shaped. One table = one item.
+create_tables({
+  globalRulesAckKey: "<globalRulesAckKey>",
+  items: [
     {
-      propertyName: "conversation",
-      type: "many-to-one",
-      targetTable: { id: "<chat_conversation_id>" },
-      isNullable: false,
-      onDelete: "CASCADE"
+      name: "app_lookup",
+      columns: [
+        { name: "name", type: "varchar", isNullable: false },
+        { name: "slug", type: "varchar", isNullable: false },
+        { name: "description", type: "text", isNullable: true }
+      ],
+      uniques: [["slug"]]
     },
     {
-      propertyName: "sender",
-      type: "many-to-one",
-      targetTable: { id: "<enfyra_user_id>" },
-      isNullable: false,
-      onDelete: "CASCADE"
+      name: "app_primary_record",
+      columns: [
+        { name: "title", type: "varchar", isNullable: false },
+        { name: "summary", type: "text", isNullable: true },
+        { name: "amount", type: "float", isNullable: false, defaultValue: "0" },
+        { name: "status", type: "varchar", isNullable: false, defaultValue: "draft" },
+        { name: "metadata", type: "simple-json", isNullable: true }
+      ],
+      relations: [
+        { propertyName: "lookup", type: "many-to-one", targetTable: "app_lookup", isNullable: true, onDelete: "SET NULL" },
+        { propertyName: "owner", type: "many-to-one", targetTable: "enfyra_user", isNullable: false, onDelete: "CASCADE" }
+      ],
+      indexes: [["status", "createdAt"], ["lookup", "status"]]
+    },
+    {
+      name: "app_participation",
+      columns: [
+        { name: "status", type: "varchar", isNullable: false, defaultValue: "active" },
+        { name: "score", type: "float", isNullable: false, defaultValue: "0" }
+      ],
+      relations: [
+        { propertyName: "record", type: "many-to-one", targetTable: "app_primary_record", isNullable: false, onDelete: "CASCADE" },
+        { propertyName: "actor", type: "many-to-one", targetTable: "enfyra_user", isNullable: false, onDelete: "CASCADE" }
+      ],
+      uniques: [["record", "actor"]],
+      indexes: [["status", "createdAt"]]
     }
-  ]),
-  indexes: JSON.stringify([
-    ["conversation", "createdAt"]
-  ])
-})`,
-        notes: [
-          'The relation names conversation and sender are examples of domain language; choose relation property names that match the entity model users reason about.',
-          'Use enfyra_user as the user table.',
-          'Use table ids for targetTable when already known; MCP can also resolve exact table names such as "enfyra_user" before schema mutation.',
-          'Do not add inverse relations on enfyra_user unless a concrete user-to-record response, UI, or deep query will use it.',
-          'Do not add inverse relations just because a parent table exists. If messages are read by querying chat_message with conversation/member filters, conversation.messages and user.messages are not needed.',
-          'createdAt, updatedAt, and custom date/datetime/timestamp fields already get auto-generated single-field indexes; add only compound indexes needed by hot filters.',
-          'Do not provide physical FK column names; Enfyra derives them.',
-        ],
-      },
-      {
-        name: 'Add an inverse only for a planned parent child-list query',
-        code: `create_relation({
-  sourceTableId: "chat_message",
-  targetTableId: "chat_conversation",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  propertyName: "conversation",
-  inversePropertyName: "messages",
-  type: "many-to-one",
-  isNullable: false,
-  onDelete: "CASCADE"
-})`,
-        notes: [
-          'Use inversePropertyName only when the parent table will actually expose, deep-load, count, or sort by that child collection.',
-          'For example, conversation.messages is justified if a conversation detail response loads the latest message page with deep.messages limit/sort, or if a list sorts by _max(messages.createdAt).',
-          'Translate this to the current domain by asking whether the parent screen needs a child collection or aggregate; if not, keep the relation one-directional.',
-          'If the app only filters chat_message by conversation.id, omit inversePropertyName and keep the schema one-directional.',
-          'Before creating an inverse, inspect existing relations and state why the reverse traversal is needed.',
-        ],
-      },
-      {
-        name: 'Add chat_conversation.lastMessage after chat_message exists',
-        code: `update_table({
-  tableId: "<chat_conversation_id>",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  relations: JSON.stringify([
+  ]
+})
+
+// 2. create_records is also native-array-shaped. One row = one item.
+create_records({
+  tableName: "app_primary_record",
+  globalRulesAckKey: "<globalRulesAckKey>",
+  records: [
     {
-      propertyName: "createdBy",
-      type: "many-to-one",
-      targetTable: { id: "<enfyra_user_id>" },
+      title: "<display title>",
+      amount: 29.99,
+      status: "active",
+      lookup: "<app_lookup_id>",
+      owner: "<enfyra_user_id>"
+    }
+  ]
+})`,
+        notes: [
+          'All mutation tools are plural envelopes. Pass native arrays, with one item in the array for a single mutation.',
+          'create_tables creates tables/columns first, then creates requested relations after all batch tables exist, so target table ordering is handled by the tool.',
+          'Do not declare id, _id, createdAt, or updatedAt columns; Enfyra manages them automatically.',
+          'When a unique/index group uses relation propertyName values, declare those relations in the same table item or add the constraint later with update_tables after the relations exist.',
+          'Use live column types from get_schema_design_context. Prefer float for decimal-like money/ratings unless live metadata explicitly supports decimal.',
+          'Do not create lookupId, owner_id, actorId, or recordIds scalar fields for normalized relationships. Use relations and write relation propertyName values.',
+          'A unique pair such as record+actor already creates the indexed unique lookup; keep those fields out of indexes.',
+        ],
+      },
+      {
+        name: 'Bulk add columns and relations after initial schema',
+        code: `create_columns({
+  globalRulesAckKey: "<globalRulesAckKey>",
+  items: [
+    {
+      tableId: "<enfyra_user_table_id>",
+      name: "emailVerifiedAt",
+      type: "datetime",
       isNullable: true,
-      onDelete: "CASCADE"
+      isPublished: true
     },
     {
+      tableId: "<integration_secret_table_id>",
+      name: "value",
+      type: "text",
+      isNullable: false,
+      isPublished: false,
+      isEncrypted: true
+    }
+  ]
+})
+
+create_relations({
+  globalRulesAckKey: "<globalRulesAckKey>",
+  items: [
+    {
+      sourceTableId: "chat_conversation",
+      targetTableId: "chat_message",
       propertyName: "lastMessage",
       type: "many-to-one",
-      targetTable: { id: "<chat_message_id>" },
       isNullable: true,
       onDelete: "SET NULL"
     }
-  ])
+  ]
 })`,
         notes: [
-          'Use relation fields such as lastMessage.id,lastMessage.text,lastMessage.createdAt when loading conversation lists.',
-          'When deleting the current last message, a post-hook should set lastMessage to the newest remaining message or null.',
-        ],
-      },
-      {
-        name: 'Unread/read table with unique and indexes',
-        code: `create_table({
-  name: "chat_message_read",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  columns: JSON.stringify([
-    { name: "isRead", type: "boolean", defaultValue: false },
-    { name: "readAt", type: "datetime", isNullable: true }
-  ]),
-  relations: JSON.stringify([
-    { propertyName: "message", type: "many-to-one", targetTable: { id: "<chat_message_id>" }, onDelete: "CASCADE" },
-    { propertyName: "conversation", type: "many-to-one", targetTable: { id: "<chat_conversation_id>" }, onDelete: "CASCADE" },
-    { propertyName: "member", type: "many-to-one", targetTable: { id: "<enfyra_user_id>" }, onDelete: "CASCADE" }
-  ]),
-  uniques: JSON.stringify([["message", "member"]]),
-  indexes: JSON.stringify([
-    ["conversation", "isRead"]
-  ])
-})`,
-        notes: [
-          'Unread is per user and per message; do not put global read state on conversation.',
-          'message and member appear in the unique constraint, so they must not be added to indexes; unique fields are already indexed by the unique constraint.',
-          'readAt is a datetime field and gets its own auto index; explicit indexes should cover only non-unique hot lookup fields.',
-          'For chat-list UX, default to a boolean unread dot instead of exact counts.',
-        ],
-      },
-      {
-        name: 'Add server-owned user verification fields',
-        code: `create_column({
-  tableId: "<enfyra_user_table_id>",
-  name: "emailVerifiedAt",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  type: "datetime",
-  isNullable: true,
-  isPublished: true,
-  description: "When the user's email address was verified."
-})
-
-create_column({
-  tableId: "<enfyra_user_table_id>",
-  name: "emailVerificationStatus",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  type: "varchar",
-  isNullable: false,
-  defaultValue: "pending",
-  isPublished: true,
-  description: "Email verification state controlled by server hooks."
-})
-
-create_column({
-  tableId: "<integration_secret_table_id>",
-  name: "value",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  type: "text",
-  isNullable: false,
-  isPublished: false,
-  isEncrypted: true,
-  description: "Encrypted secret value."
-})`,
-        notes: [
-          'Run schema-changing calls sequentially. Do not parallelize create_column calls.',
-          'create_column fetches enfyra_table and patches only real persisted columns with id/_id; generated metadata projections such as createdAt, updatedAt, or relation FK display fields are skipped.',
+          'create_columns/create_relations run items sequentially through the schema queue.',
+          'Use relation property names only. Never provide fkCol, sourceColumn, targetColumn, or junction column names.',
+          'Use inversePropertyName only when a concrete parent detail/deep/count/sort use case needs the reverse traversal.',
           'Use isEncrypted=true for encryption at rest. Add isUpdatable=false separately only when the field should be immutable.',
-          'Use hooks or field permissions to prevent clients from updating server-owned fields.',
         ],
       },
       {
-        name: 'Patch table schema from metadata only',
-        code: `// Safe schema patch process used by create_column/update_column/delete_column:
-// 1. Read GET /metadata and find the target table.
-// 2. Keep only persisted column rows with id/_id.
-// 3. Add, change, or remove the intended column.
-// 4. PATCH /enfyra_table/:id with the full preserved columns array.
-// 5. If the backend returns requiredConfirmHash, resend with ?schemaConfirmHash=<hash>.
-// 6. Re-read metadata and verify unrelated column ids still exist.
+        name: 'Bulk update and destructive preview',
+        code: `update_tables({
+  globalRulesAckKey: "<globalRulesAckKey>",
+  items: [
+    { tableId: "<table_id>", graphqlEnabled: true },
+    { tableId: "<settings_table_id>", isSingleRecord: true }
+  ]
+})
 
-create_column({
-  tableId: "<table_id>",
-  name: "api_secret",
-  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  type: "text",
-  isPublished: false,
-  isEncrypted: true
+// Destructive tools preview first.
+delete_columns({
+  items: [{ tableId: "<table_id>", columnId: "<column_id>" }]
+})
+
+// Apply only after explicit user approval.
+delete_columns({
+  globalRulesAckKey: "<globalRulesAckKey>",
+  confirm: true,
+  items: [{ tableId: "<table_id>", columnId: "<column_id>" }]
 })`,
         notes: [
-          'Do not rebuild schema cascade payloads from enfyra_table?fields=columns.*; nested fields can be truncated or relation-derived.',
-          'Generated projections such as createdAt, updatedAt, and relation FK display fields without id/_id are not valid enfyra_column rows.',
-          'Never delete or omit unrelated persisted columns when adding one field.',
-          'Run schema-changing calls sequentially; migration locks are backend-owned.',
+          'update_tables/update_columns/update_records reject ambiguous duplicate ids where applicable and run sequentially.',
+          'delete_tables/delete_columns/delete_relations/delete_records return previews unless confirm=true.',
+          'Schema tools serialize internally; do not parallelize schema mutation tool calls.',
         ],
       },
     ],
@@ -753,7 +707,7 @@ create_column({
         code: `query_table({
   tableName: "enfyra_user",
   fields: ["id", "email"],
-  filter: "{\\"email\\":{\\"_contains\\":\\"@example.com\\"}}",
+  filter: { email: { _contains: "@example.com" } },
   limit: 10
 })`,
         notes: [
@@ -801,10 +755,10 @@ GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
   fields: ["id"],
   limit: 1,
   meta: "filterCount",
-  filter: JSON.stringify({
+  filter: {
     member: { id: { _eq: "<currentUserId>" } },
     isRead: { _eq: false }
-  })
+  }
 })`,
         notes: [
           'Use meta=totalCount with no filter and meta=filterCount with a filter.',
@@ -843,7 +797,7 @@ GET /enfyra/post?filter={"<primaryKeyFromMetadata>":{"_eq":123}}&limit=1`,
 query_table({
   tableName: "post",
   fields: ["id", "-author.avatar"],
-  deep: JSON.stringify({
+  deep: {
     comments: {
       fields: "-compiledCode,-author.avatar",
       limit: 10,
@@ -851,7 +805,7 @@ query_table({
         author: { fields: "-avatar" }
       }
     }
-  })
+  }
 })`,
         notes: [
           'Use fields=-compiledCode when reading script-backed records; sourceCode is the editable contract and compiledCode is generated by the server.',
@@ -865,7 +819,7 @@ query_table({
         code: `query_table({
   tableName: "order",
   fields: ["id", "total"],
-  deep: JSON.stringify({
+  deep: {
     items: {
       fields: "id,quantity,product",
       sort: "-createdAt",
@@ -874,7 +828,7 @@ query_table({
         product: { fields: "id,name,price" }
       }
     }
-  })
+  }
 })`,
         notes: [
           'Use deep when relation loading needs query options such as filter, sort, limit, page, or nested deep.',
@@ -885,6 +839,7 @@ query_table({
           'Use query_table deep for normal MCP reads; use test_rest_endpoint only when you need a custom raw URL or route behavior test.',
           'deep keys must be relation property names.',
           'Allowed deep options are fields, filter, sort, limit, page, and deep.',
+          'Use fields, never _fields, inside deep relation options.',
           'Do not invent deep keys like members unless members is a relation on that table.',
         ],
       },
@@ -929,13 +884,17 @@ query_table({
 GET /enfyra/integrations?filter={"api_token":{"_eq":"plaintext-token"}}
 
 // Good: store a separate non-secret lookup hash if lookup is needed.
-create_column({
-  tableId: "<integrations_table_id>",
-  name: "api_token_lookup_sha256",
+create_columns({
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  type: "varchar",
-  isNullable: false,
-  isPublished: false
+  items: [
+    {
+      tableId: "<integrations_table_id>",
+      name: "api_token_lookup_sha256",
+      type: "varchar",
+      isNullable: false,
+      isPublished: false
+    }
+  ]
 })
 
 // In the create/update handler or pre-hook, hash plaintext before it is encrypted.
@@ -1005,8 +964,82 @@ const result = await #enfyra_user.create({
 return result.data?.[0] ?? null`,
         notes: [
           'create/update return { data: [...] }, not a bare row.',
-          'Use @THROW helpers for HTTP errors.',
+          'Use numeric @THROW helpers for raw HTTP messages. If you pass details, pass an object/array such as @THROW404("Request not found", { requestId }). Use @THROW.notFound(resource, id?) or @THROW.duplicate(resource, field, value) only when you want Enfyra-formatted semantic messages.',
           'Prefer macros over raw $ctx when a macro exists.',
+        ],
+      },
+      {
+        name: 'Workflow handler with relation read and side effects',
+        code: `const requestId = @BODY.requestId
+if (!requestId) @THROW400("requestId is required")
+
+const found = await #app_requests.find({
+  filter: { id: { _eq: requestId } },
+  fields: ["id", "title", "status", "requester"],
+  deep: {
+    requester: { fields: ["id", "email"] }
+  },
+  limit: 1
+})
+
+const request = found.data?.[0]
+if (!request) @THROW404("Request not found")
+if (request.status !== "pending") @THROW409("Request is not pending")
+
+await #app_requests.update({
+  id: request.id,
+  data: { status: "approved" }
+})
+
+await #app_audit_log.create({
+  data: {
+    action: "request_approved",
+    request: request.id,
+    actor: @USER?.id || undefined
+  }
+})
+
+await #app_notifications.create({
+  data: {
+    kind: "request_approved",
+    recipient: request.requester?.id || request.requester,
+    request: request.id,
+    isRead: false
+  }
+})
+
+return { ok: true, id: request.id, status: "approved" }`,
+        notes: [
+          'This is a shape example, not a table template: replace app_requests/app_audit_log/app_notifications and relation names with live metadata.',
+          'In dynamic scripts, top-level fields controls which parent properties appear. When using deep requester, also include requester in top-level fields.',
+          'Inside deep.requester.fields, choose fields from the related requester row.',
+          'Use #table.find/#table.update/#table.create macro repositories in generated scripts after calling discover_script_contexts.',
+          'Create/update return { data: [...] }; use result.data?.[0] when the script needs the saved object.',
+        ],
+      },
+      {
+        name: 'Find one record by id in a handler',
+        code: `const reportId = @BODY.reportId
+if (!reportId) @THROW400("reportId is required")
+
+const found = await #app_reports.find({
+  filter: { id: { _eq: reportId } },
+  fields: ["id", "status", "owner"],
+  limit: 1
+})
+
+const report = found.data?.[0]
+if (!report) @THROW404("Report not found", { reportId })
+
+return {
+  id: report.id,
+  status: report.status
+}`,
+        notes: [
+          'Use #table_name macros with explicit fields and limit:1 for one-record dynamic-script lookups.',
+          'Use id filters when they work in the live runtime, but do not keep retrying @REPOS.<table>.find id filter shapes if a runtime reports undefined SQL bindings.',
+          'If primary-key filtering fails in a runtime, pivot to a unique business field, the route main-table context, or a bounded query that you can verify, then update the contract/example for that runtime.',
+          'Never return raw trusted repository rows; shape the response explicitly.',
         ],
       },
       {
@@ -1029,19 +1062,23 @@ const scope = {
       },
       {
         name: 'Encrypted field table definition',
-        code: `create_table({
-  name: "integrations",
+        code: `create_tables({
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  columns: JSON.stringify([
-    { name: "name", type: "varchar", isNullable: false },
+  items: [
     {
-      name: "api_token",
-      type: "varchar",
-      isNullable: false,
-      isPublished: false,
-      isEncrypted: true
+      name: "integrations",
+      columns: [
+        { name: "name", type: "varchar", isNullable: false },
+        {
+          name: "api_token",
+          type: "varchar",
+          isNullable: false,
+          isPublished: false,
+          isEncrypted: true
+        }
+      ]
     }
-  ])
+  ]
 })`,
         notes: [
           'Use isEncrypted=true for values that must be encrypted at rest.',
@@ -1353,7 +1390,7 @@ const socket = io("/chat", {
         code: `const conversationId = @BODY.conversationId
 if (!conversationId) @THROW400("conversationId is required")
 
-const membership = await @REPOS.secure.chat_conversation_member.find({
+const membership = await #chat_conversation_member.find({
   filter: {
     conversation: { id: { _eq: conversationId } },
     member: { id: { _eq: @USER.id } }
@@ -1369,7 +1406,7 @@ if (!membership.data[0]) @THROW403("Not a conversation member")
           'Join conversation rooms, not member-id rooms.',
           'conversationId is a request/room identifier; DB filters still use the relation property conversation.',
           'Check membership server-side; do not trust the client.',
-          'Use @REPOS.secure.<table> for explicit table access in user-facing websocket scripts.',
+          'Use #table_name for explicit table access in generated scripts; select exact fields and sanitize any returned data.',
         ],
       },
       {
@@ -1377,7 +1414,7 @@ if (!membership.data[0]) @THROW403("Not a conversation member")
         code: `const { conversationId, text, clientId } = @BODY
 if (!conversationId || !text) @THROW400("conversationId and text are required")
 
-const membership = await @REPOS.secure.chat_conversation_member.find({
+const membership = await #chat_conversation_member.find({
   filter: {
     conversation: { id: { _eq: conversationId } },
     member: { id: { _eq: @USER.id } }
@@ -1386,7 +1423,7 @@ const membership = await @REPOS.secure.chat_conversation_member.find({
 })
 if (!membership.data[0]) @THROW403("Not a conversation member")
 
-const created = await @REPOS.secure.chat_message.create({
+const created = await #chat_message.create({
   data: {
     conversation: { id: conversationId },
     sender: { id: @USER.id },
@@ -1397,7 +1434,7 @@ const created = await @REPOS.secure.chat_message.create({
 
 const message = created.data?.[0] ?? null
 if (message?.id) {
-  await @REPOS.secure.chat_conversation.update({
+  await #chat_conversation.update({
     id: conversationId,
     data: { lastMessage: { id: message.id }, updatedAt: message.createdAt || new Date().toISOString() }
   })
@@ -1412,7 +1449,7 @@ return { ok: true, message }`,
           'Do not ask the client for senderId. The sender relation is derived from @USER.id.',
           'conversationId is accepted only as the room/business identifier; persistence uses relation properties conversation and sender, not physical FK fields.',
           'Event scripts should explicitly emit replies/broadcasts.',
-          'Use @REPOS.secure.<table> for explicit table access in user-facing websocket scripts; trusted @REPOS.<table> is only for internal/admin logic that will sanitize output.',
+          'Use #table_name for explicit table access in generated scripts; select exact fields, enforce membership checks, and return shaped payloads.',
         ],
       },
     ],
@@ -1597,7 +1634,7 @@ ensure_page_extension({
           'Use enfyra_menu.label, not title.',
           'Sensitive admin menus should include a permission condition at creation time.',
           'For page extensions, create the menu first with ensure_menu and pass its id to ensure_page_extension.',
-          'When editing an existing extension by id or name, use update_extension_code so local guards plus /enfyra_extension/preview and the save happen in one atomic call. Do not spend a second LLM step on validate_extension_code followed by update_record unless the user requested validation-only output.',
+          'When editing an existing extension by id or name, use update_extension_code so local guards plus /enfyra_extension/preview and the save happen in one atomic call. Do not spend a second LLM step on validate_extension_code followed by update_records unless the user requested validation-only output.',
           'Call get_extension_theme_contract before writing or reviewing page/widget/global extension UI; that tool is the authority for theme, color, layout, modal, drawer, and shell registry details.',
           'Call get_enfyra_required_knowledge before saving extension code, pass globalRulesAckKey as globalRulesAckKey, and pass extensionAckKey as extensionKnowledgeAckKey.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',

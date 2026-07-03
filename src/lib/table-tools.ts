@@ -9,6 +9,10 @@ import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.
 type AnyRecord = Record<string, any>;
 type ConstraintGroup = string[];
 
+function bulkObjectArrayParam(z, label: string) {
+  return z.array(z.record(z.any())).describe(`${label} as a native JSON array of objects. Pass one object in the array for a single mutation.`);
+}
+
 type ColumnPatch = AnyRecord & {
   id?: unknown;
   _id?: unknown;
@@ -48,9 +52,9 @@ type CascadeVerifyOptions = {
   propertyName?: string;
 };
 
-let schemaQueue = Promise.resolve();
+let schemaQueue: Promise<unknown> = Promise.resolve();
 
-function withSchemaQueue(operation) {
+function withSchemaQueue<T>(operation: () => Promise<T> | T): Promise<T> {
   const run = schemaQueue.then(operation, operation);
   schemaQueue = run.catch(() => {});
   return run;
@@ -67,6 +71,51 @@ const FORBIDDEN_RELATION_KEYS = [
   'junctionTableName',
   'junctionSourceColumn',
   'junctionTargetColumn',
+];
+
+const FALLBACK_COLUMN_TYPES = [
+  'int',
+  'varchar',
+  'text',
+  'boolean',
+  'uuid',
+  'ObjectId',
+  'bigint',
+  'date',
+  'datetime',
+  'timestamp',
+  'enum',
+  'simple-json',
+  'code',
+  'array-select',
+  'richtext',
+  'float',
+];
+
+const RELATION_TYPE_ALIASES: Record<string, string> = {
+  many_to_one: 'many-to-one',
+  manyToOne: 'many-to-one',
+  manytoone: 'many-to-one',
+  one_to_many: 'one-to-many',
+  oneToMany: 'one-to-many',
+  onetomany: 'one-to-many',
+  one_to_one: 'one-to-one',
+  oneToOne: 'one-to-one',
+  onetoone: 'one-to-one',
+  many_to_many: 'many-to-many',
+  manyToMany: 'many-to-many',
+  manytomany: 'many-to-many',
+};
+
+const VALID_RELATION_TYPES = new Set(['many-to-one', 'one-to-many', 'one-to-one', 'many-to-many']);
+
+const AUTO_MANAGED_COLUMN_NAMES = new Set(['id', '_id', 'createdAt', 'updatedAt']);
+
+const COLUMN_TYPE_ALIAS_HINTS = [
+  'Use varchar for short strings; text or richtext for long prose.',
+  'Use float for prices, money, percentages, ratings, and decimal-like numbers unless the live instance explicitly lists decimal.',
+  'Use simple-json for structured objects/arrays when the live instance lists it; do not use json/jsonb as column types.',
+  'Use relations for links to other records; do not create userId/course_id/categoryIds columns for normalized relationships.',
 ];
 
 export function normalizeTablesFromMetadata(metadata) {
@@ -157,6 +206,31 @@ function parseJsonArrayParam(name, value) {
   return parsed;
 }
 
+function parseBulkItemsParam(name, value) {
+  if (value === undefined || value === null || value === '') {
+    throw new Error(`${name} must be a native JSON array. Pass one object in the array for a single mutation.`);
+  }
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${name} must be a JSON array. Pass one object in the array for a single mutation.`);
+  }
+  if (parsed.length === 0) {
+    throw new Error(`${name} must include at least one item.`);
+  }
+  parsed.forEach((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new Error(`${name}[${index}] must be an object.`);
+    }
+  });
+  return parsed;
+}
+
+function assertBulkLimit(name, items, maxItems) {
+  if (items.length > maxItems) {
+    throw new Error(`${name} received ${items.length} items, above maxItems=${maxItems}. Split the batch deliberately.`);
+  }
+}
+
 function normalizeConstraintGroups(name, groups) {
   return groups.map((group, index) => {
     const value = Array.isArray(group) ? group : group?.value;
@@ -180,6 +254,105 @@ function normalizeConstraintGroupsValue(name, value): ConstraintGroup[] {
   return normalizeConstraintGroups(name, parsed);
 }
 
+function stripAutoManagedColumns(columns: AnyRecord[]) {
+  const skippedAutoColumns: Array<{ name: string; reason: string }> = [];
+  const filtered = columns.filter((column) => {
+    const name = String(column?.name ?? '');
+    if (!AUTO_MANAGED_COLUMN_NAMES.has(name)) return true;
+    skippedAutoColumns.push({
+      name,
+      reason: 'Enfyra manages id/createdAt/updatedAt automatically during table creation.',
+    });
+    return false;
+  });
+  return { columns: filtered, skippedAutoColumns };
+}
+
+function assertColumnNameCanBeCreated(name: unknown, context: string) {
+  const columnName = String(name ?? '');
+  if (AUTO_MANAGED_COLUMN_NAMES.has(columnName)) {
+    throw new Error(`${context} "${columnName}" is auto-managed by Enfyra. Do not create id, _id, createdAt, or updatedAt columns manually.`);
+  }
+}
+
+function assertNoDuplicateFieldNames(fieldNames: string[], context: string) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const name of fieldNames.filter(Boolean)) {
+    if (seen.has(name)) duplicates.add(name);
+    seen.add(name);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(`${context} has duplicate field name(s): ${[...duplicates].join(', ')}. Column names and relation propertyName values share one namespace.`);
+  }
+}
+
+function preflightCreateTableDefinitions(items: AnyRecord[]) {
+  items.forEach((item, index) => {
+    const columns = Array.isArray(item.columns) ? item.columns : parseJsonArrayParam(`items[${index}].columns`, item.columns || '[]');
+    const relations = Array.isArray(item.relations) ? item.relations : parseJsonArrayParam(`items[${index}].relations`, item.relations || '[]');
+    const { columns: userColumns } = stripAutoManagedColumns(columns);
+    const columnNames = userColumns.map((column) => String(column?.name ?? '')).filter(Boolean);
+    const relationNames = relations.map((relation) => String(relation?.propertyName ?? '')).filter(Boolean);
+    assertNoDuplicateFieldNames([...columnNames, ...relationNames], `create_tables items[${index}] (${item.name || '<unnamed>'})`);
+
+    const logicalFields = new Set([...AUTO_MANAGED_COLUMN_NAMES, ...columnNames, ...relationNames]);
+    const indexes = normalizeConstraintGroupsValue(`items[${index}].indexes`, item.indexes ?? []);
+    const uniques = normalizeConstraintGroupsValue(`items[${index}].uniques`, item.uniques ?? []);
+    assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
+    const unknownConstraintFields = [...indexes, ...uniques]
+      .flat()
+      .filter((field) => !logicalFields.has(field));
+    if (unknownConstraintFields.length > 0) {
+      throw new Error(
+        `create_tables items[${index}] (${item.name || '<unnamed>'}) has indexes/uniques referencing undeclared field(s): ${[...new Set(unknownConstraintFields)].join(', ')}. ` +
+        'Declare each field as a column or relation propertyName in the same table item. For relation-based unique pairs added after create, first create the relations, then call update_tables with the unique group.',
+      );
+    }
+  });
+}
+
+function splitRelationConstraintGroups(groups: ConstraintGroup[], relationNames: Set<string>) {
+  const immediate: ConstraintGroup[] = [];
+  const deferred: ConstraintGroup[] = [];
+  for (const group of groups) {
+    if (group.some((field) => relationNames.has(field))) deferred.push(group);
+    else immediate.push(group);
+  }
+  return { immediate, deferred };
+}
+
+function mergeConstraintGroups(existing: ConstraintGroup[], additions: ConstraintGroup[]) {
+  const seen = new Set(existing.map((group) => JSON.stringify(group)));
+  const merged = [...existing];
+  for (const group of additions) {
+    const key = JSON.stringify(group);
+    if (!seen.has(key)) {
+      seen.add(key);
+      merged.push(group);
+    }
+  }
+  return merged;
+}
+
+function resolveRelationConstraintGroups(table: AnyRecord, groups: ConstraintGroup[], groupName: string) {
+  const relationByProperty = new Map<string, AnyRecord>((table.relations || [])
+    .filter((relation) => relation?.propertyName)
+    .map((relation) => [relation.propertyName, relation]));
+  return groups.map((group) => group.map((field) => {
+    const relation = relationByProperty.get(field);
+    if (!relation) return field;
+    const physicalColumn = relation.foreignKeyColumn || relation.fkColumn || relation.fkCol;
+    if (!physicalColumn) {
+      throw new Error(
+        `${groupName} uses relation propertyName "${field}", but the created relation did not expose a physical FK column for indexing. ` +
+        'This usually means the relation is not a direct many-to-one/one-to-one relation. Keep relation indexes/uniques only on direct owning relations.',
+      );
+    }
+    return physicalColumn;
+  }));
+}
+
 export function assertIndexesDoNotReferenceUniqueFields(indexes: ConstraintGroup[], uniques: ConstraintGroup[]) {
   const uniqueFields = new Set(uniques.flat());
   const conflicts = indexes
@@ -193,7 +366,7 @@ export function assertIndexesDoNotReferenceUniqueFields(indexes: ConstraintGroup
       .map((conflict) => `${JSON.stringify(conflict.index)} uses unique field(s) ${JSON.stringify(conflict.uniqueFields)}`)
       .join('; ');
     throw new Error(
-      `Invalid schema constraints: indexes must not include fields that are already unique. Conflict(s): ${groups}. Unique constraints already create indexed lookups; remove unique fields from indexes and keep those fields only in uniques.`,
+      `Invalid schema constraints: indexes must not include fields that appear in uniques, including composite unique groups. Conflict(s): ${groups}. Unique constraints already create indexed lookups for their fields; remove those fields from indexes and keep them only in uniques.`,
     );
   }
 }
@@ -219,6 +392,12 @@ export function normalizeRelationForTablePatch(relation: AnyRecord): RelationPat
     ...rest
   } = relation;
   const normalized: RelationPatch = { ...rest };
+  if (rest.type !== undefined) {
+    normalized.type = normalizeRelationType(rest.type);
+  }
+  if (normalized.type === 'one-to-many' && mappedBy !== undefined && mappedBy !== null && mappedBy !== '') {
+    delete normalized.inversePropertyName;
+  }
   const resolvedTargetTable =
     targetTableId ??
     (targetTable && typeof targetTable === 'object'
@@ -235,10 +414,21 @@ export function normalizeRelationForTablePatch(relation: AnyRecord): RelationPat
   return normalized;
 }
 
+export function normalizeRelationType(type: unknown) {
+  const raw = String(type ?? '').trim();
+  const normalized = RELATION_TYPE_ALIASES[raw] ?? raw;
+  if (!VALID_RELATION_TYPES.has(normalized)) {
+    throw new Error(
+      `Invalid relation type "${raw || '<missing>'}". Use one of many-to-one, one-to-many, one-to-one, or many-to-many. Common aliases such as many_to_one are normalized by the tool.`,
+    );
+  }
+  return normalized;
+}
+
 function assertNoForbiddenRelationKeys(args: AnyRecord) {
   for (const key of FORBIDDEN_RELATION_KEYS) {
     if (Object.prototype.hasOwnProperty.call(args, key)) {
-      throw new Error(`create_relation must not include physical column field "${key}". Use sourceTableId/targetTableId and relation propertyName only; Enfyra derives FK and junction columns.`);
+      throw new Error(`create_relations must not include physical column field "${key}". Use sourceTableId/targetTableId and relation propertyName only; Enfyra derives FK and junction columns.`);
     }
   }
 }
@@ -277,6 +467,121 @@ function getId(record: any) {
 function normalizeColumnForTablePatch(column: AnyRecord): ColumnPatch {
   const { table, ...rest } = column;
   return rest;
+}
+
+function parseColumnTypeOptions(options: unknown): string[] {
+  if (Array.isArray(options)) return options.map(String);
+  if (typeof options !== 'string') return [];
+  const trimmed = options.trim();
+  if (!trimmed) return [];
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) return parsed.map(String);
+  } catch {
+    // Some Enfyra enum metadata is stored as {"a","b"} rather than JSON.
+  }
+  const braceMatch = trimmed.match(/^\{(.+)\}$/);
+  if (!braceMatch) return [];
+  return braceMatch[1]
+    .split(',')
+    .map((item) => item.trim().replace(/^"|"$/g, ''))
+    .filter(Boolean);
+}
+
+function normalizeColumnOptionsValue(options: unknown) {
+  if (options === undefined) return undefined;
+  return typeof options === 'string' ? JSON.parse(options) : options;
+}
+
+export function getSupportedColumnTypesFromMetadata(metadata: AnyRecord): string[] {
+  const columnTable = normalizeTablesFromMetadata(metadata).find((table) => table?.name === 'enfyra_column');
+  const typeColumn = columnTable?.columns?.find((column) => column?.name === 'type');
+  const options = parseColumnTypeOptions(typeColumn?.options);
+  return options.length ? options : FALLBACK_COLUMN_TYPES;
+}
+
+function chooseFirstSupported(supported: Set<string>, candidates: string[]) {
+  return candidates.find((candidate) => supported.has(candidate));
+}
+
+export function normalizeColumnTypeForLiveMetadata(type: unknown, supportedTypes: string[] = FALLBACK_COLUMN_TYPES) {
+  const raw = String(type ?? '').trim();
+  if (!raw) {
+    throw new Error(`Column type is required. Valid live types: ${supportedTypes.join(', ')}.`);
+  }
+  const supported = new Set(supportedTypes);
+  if (supported.has(raw)) return { type: raw, changed: false, originalType: raw };
+
+  const normalized = raw.toLowerCase();
+  const alias =
+    normalized === 'string' || normalized === 'char' || normalized === 'character varying'
+      ? chooseFirstSupported(supported, ['varchar', 'text'])
+      : normalized === 'integer'
+        ? chooseFirstSupported(supported, ['int', 'bigint', 'float'])
+        : normalized === 'bool'
+          ? chooseFirstSupported(supported, ['boolean'])
+          : ['decimal', 'numeric', 'number', 'double', 'money', 'currency'].includes(normalized)
+            ? chooseFirstSupported(supported, ['decimal', 'float'])
+            : ['longtext', 'mediumtext', 'large-text'].includes(normalized)
+              ? chooseFirstSupported(supported, ['text', 'richtext', 'varchar'])
+              : ['json', 'jsonb', 'object', 'array'].includes(normalized)
+                ? chooseFirstSupported(supported, ['simple-json', 'text'])
+                : ['date-time', 'timestamptz'].includes(normalized)
+                  ? chooseFirstSupported(supported, ['datetime', 'timestamp'])
+                  : null;
+
+  if (!alias) {
+    throw new Error(
+      `Unsupported column type "${raw}" for this live Enfyra instance. Valid live types: ${supportedTypes.join(', ')}. ` +
+      `Guidance: ${COLUMN_TYPE_ALIAS_HINTS.join(' ')}`,
+    );
+  }
+
+  return { type: alias, changed: true, originalType: raw };
+}
+
+export function normalizeColumnsForLiveMetadata(columns: AnyRecord[], supportedTypes: string[]) {
+  const normalizations: Array<{ column: string; from: string; to: string }> = [];
+  const normalizedColumns = columns.map((column) => {
+    const normalized = normalizeColumnTypeForLiveMetadata(column.type, supportedTypes);
+    if (!normalized.changed) return column;
+    normalizations.push({ column: String(column.name ?? '<unnamed>'), from: normalized.originalType, to: normalized.type });
+    return { ...column, type: normalized.type };
+  });
+  return { columns: normalizedColumns, normalizations };
+}
+
+function findMetadataTable(metadata: AnyRecord, tableName: string) {
+  return normalizeTablesFromMetadata(metadata).find((table) => table?.name === tableName) || null;
+}
+
+function metadataColumnNames(metadata: AnyRecord, tableName: string) {
+  return (findMetadataTable(metadata, tableName)?.columns || [])
+    .map((column) => column?.name)
+    .filter(Boolean);
+}
+
+function metadataColumnOptions(metadata: AnyRecord, tableName: string, columnName: string) {
+  const column = (findMetadataTable(metadata, tableName)?.columns || [])
+    .find((item) => item?.name === columnName);
+  return parseColumnTypeOptions(column?.options);
+}
+
+function summarizeCreatedTableSchema(table: AnyRecord | null, fallbackName: string) {
+  if (!table) return null;
+  const columns = (table.columns || [])
+    .map((column) => column?.name)
+    .filter(Boolean);
+  const relations = (table.relations || [])
+    .map((relation) => relation?.propertyName)
+    .filter(Boolean);
+  return {
+    tableName: table.name || fallbackName,
+    primaryKey: (table.columns || []).find((column) => column?.isPrimary)?.name || null,
+    fields: [...columns, ...relations].sort(),
+    columns,
+    relations,
+  };
 }
 
 function getPatchableColumns(columns: AnyRecord[] = []): ColumnPatch[] {
@@ -345,6 +650,7 @@ async function verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
 export function buildColumnDefinition({
   name,
   type,
+  supportedTypes,
   isNullable,
   isUnique,
   isPublished,
@@ -357,9 +663,10 @@ export function buildColumnDefinition({
   description,
   options,
 }: AnyRecord): ColumnPatch {
+  const normalizedType = normalizeColumnTypeForLiveMetadata(type, supportedTypes).type;
   const column: ColumnPatch = {
     name,
-    type,
+    type: normalizedType,
     isNullable: isNullable ?? true,
     isPrimary: isPrimary ?? false,
     isGenerated: isGenerated ?? false,
@@ -371,7 +678,7 @@ export function buildColumnDefinition({
   if (isUnique !== undefined) column.isUnique = isUnique;
   if (defaultValue !== undefined) column.defaultValue = defaultValue;
   if (description !== undefined) column.description = description;
-  if (options !== undefined) column.options = JSON.parse(options);
+  if (options !== undefined) column.options = normalizeColumnOptionsValue(options);
   return column;
 }
 
@@ -384,14 +691,20 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   async function appendColumnToTable(args) {
     assertGlobalRulesAck(args.globalRulesAckKey);
     return withSchemaQueue(async () => {
-    const tableData = await fetchTableWithDetails(ENFYRA_API_URL, args.tableId);
+    const [tableData, metadata] = await Promise.all([
+      fetchTableWithDetails(ENFYRA_API_URL, args.tableId),
+      fetchAPI(ENFYRA_API_URL, '/metadata'),
+    ]);
     if (!tableData) {
       throw new Error(`Table with ID ${args.tableId} not found.`);
     }
+    const supportedTypes = getSupportedColumnTypesFromMetadata(metadata);
+    const normalized = normalizeColumnTypeForLiveMetadata(args.type, supportedTypes);
+    assertColumnNameCanBeCreated(args.name, 'create_columns');
 
     const existingColumns = getPatchableColumns(tableData.columns);
     const beforeIds = existingColumns.map((column) => String(getId(column)));
-    const newCol = buildColumnDefinition(args);
+    const newCol = buildColumnDefinition({ ...args, supportedTypes });
     const result = await patchTableAutoConfirm(ENFYRA_API_URL, args.tableId, { columns: [...existingColumns, newCol] });
     await verifyColumnCascade(ENFYRA_API_URL, args.tableId, beforeIds, {
       action: 'create',
@@ -402,6 +715,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       action: 'column_created',
       tableId: args.tableId,
       columnName: args.name,
+      schemaNormalization: normalized.changed ? [{ column: args.name, from: normalized.originalType, to: normalized.type }] : [],
+      supportedColumnTypes: supportedTypes,
       result,
     });
     });
@@ -411,17 +726,23 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     assertGlobalRulesAck(args.globalRulesAckKey);
     return withSchemaQueue(async () => {
     assertNoForbiddenRelationKeys(args);
-    const { sourceTableId, targetTableId, type, propertyName, inversePropertyName, mappedBy, isNullable, onDelete, description } = args;
+	    const { sourceTableId, targetTableId, targetTable } = args;
+	    const relationPatch = normalizeRelationForTablePatch(args);
+	    const { type, propertyName, inversePropertyName, mappedBy, isNullable, onDelete, description } = relationPatch;
+    const targetRef = targetTableId ?? targetTable;
+    if (targetRef === undefined || targetRef === null || targetRef === '') {
+      throw new Error('create_relations requires targetTableId or targetTable. Pass an existing table id, name, or alias.');
+    }
     const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
     const resolvedSourceTableId = resolveTableIdentifierFromMetadata(metadata, sourceTableId, 'sourceTableId');
-    const resolvedTargetTableId = resolveTableIdentifierFromMetadata(metadata, targetTableId, 'targetTableId');
+    const resolvedTargetTableId = resolveTableIdentifierFromMetadata(metadata, targetRef, 'targetTableId');
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, resolvedSourceTableId);
     if (!tableData) {
       throw new Error(`Table ${sourceTableId} not found.`);
     }
     const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
     const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
-    const newRelation: RelationPatch = { targetTable: resolvedTargetTableId, type, propertyName };
+	    const newRelation: RelationPatch = { targetTable: resolvedTargetTableId, type, propertyName };
     if (inversePropertyName !== undefined) newRelation.inversePropertyName = inversePropertyName || null;
     if (mappedBy !== undefined) newRelation.mappedBy = mappedBy;
     if (isNullable !== undefined) newRelation.isNullable = isNullable;
@@ -462,7 +783,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           targetColumn: target,
           preservedColumnIds: beforeIds.filter((id) => id !== String(columnId)),
           destructive: true,
-          next: 'Call delete_column again with confirm=true to drop the physical column and metadata.',
+          next: 'Call delete_columns again with the same one-item array and confirm=true to drop the physical column and metadata.',
         }, null, 2) }],
       };
     }
@@ -508,7 +829,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           targetRelation: target,
           preservedRelationIds: beforeIds.filter((id) => id !== String(relationId)),
           destructive: true,
-          next: 'Call delete_relation again with confirm=true to drop relation metadata and any derived FK/junction structures.',
+          next: 'Call delete_relations again with the same one-item array and confirm=true to drop relation metadata and any derived FK/junction structures.',
         }, null, 2) }],
       };
     }
@@ -533,27 +854,28 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   }
 
   const columnCreateSchema = {
-    tableId: z.string().describe('Table definition ID (from get_all_tables or create_table).'),
-    name: z.string().describe('Column name (e.g., "title", "webhook_secret"). Lowercase with underscores.'),
-    type: z.string().describe('Column type: varchar, int, text, boolean, datetime, json, decimal, timestamp, uuid, bigint, float, longtext, richtext, simple-json, code, enum, array-select, date.'),
+    tableId: z.string().describe('Table definition ID (from get_all_tables or create_tables).'),
+    name: z.string().describe('Column name (e.g., "title", "webhook_secret"). Lowercase with underscores. Do not create id, _id, createdAt, or updatedAt; Enfyra manages them automatically.'),
+    type: z.string().describe('Column type from the live enfyra_column.type enum. Common valid types are int, varchar, text, boolean, uuid, ObjectId, bigint, date, datetime, timestamp, enum, simple-json, code, array-select, richtext, and float. The tool normalizes common aliases before sending: decimal/numeric/money/number -> float when decimal is not live-supported, longtext -> text, json/jsonb/object/array -> simple-json when live-supported, string -> varchar. Prefer relations instead of *_id columns.'),
     isNullable: z.boolean().optional().default(true).describe('Set to false if column cannot be null.'),
     isUnique: z.boolean().optional().default(false).describe('Set to true for unique constraint.'),
     isPublished: z.boolean().optional().describe('Set column visibility baseline. Use false for secrets and internal fields.'),
     isUpdatable: z.boolean().optional().describe('Set false for immutable fields that cannot be updated after creation. Independent from isEncrypted.'),
     isEncrypted: z.boolean().optional().describe('Set true to encrypt this column at the Enfyra database-query layer. This does not change isUpdatable. Encrypted fields cannot be filtered or sorted.'),
-    isPrimary: z.boolean().optional().describe('Set true only for primary key columns; normally only create_table auto id uses this.'),
+    isPrimary: z.boolean().optional().describe('Set true only for primary key columns; normally only create_tables auto id uses this.'),
     isGenerated: z.boolean().optional().describe('Set true only for generated columns such as auto id.'),
     isSystem: z.boolean().optional().describe('Set true only for system-managed columns. Avoid for normal app fields.'),
     defaultValue: z.string().optional().describe('Default value as JSON string or backend-supported literal.'),
     description: z.string().optional().describe('Column description.'),
-    options: z.string().optional().describe('Column options as JSON string (e.g., enum values).'),
+    options: z.union([z.array(z.string()), z.string()]).optional().describe('Column options as a native array such as ["draft","published"] or a JSON string for older clients.'),
     globalRulesAckKey: globalRulesAckParam(z),
   };
 
   const relationCreateSchema = {
     sourceTableId: z.string().describe('Source table id, exact table name, or alias. For many-to-one, this is the table that owns the relation property.'),
-    targetTableId: z.string().describe('Target table id, exact table name, or alias. MCP resolves names/aliases to ids before mutation.'),
-    type: z.enum(['many-to-one', 'one-to-many', 'one-to-one', 'many-to-many']).describe('Relation type.'),
+    targetTableId: z.string().optional().describe('Target table id, exact table name, or alias. MCP resolves names/aliases to ids before mutation. Optional when targetTable is provided.'),
+    targetTable: z.string().optional().describe('Alias for targetTableId when naturally using a target table name/alias such as enfyra_user. Optional when targetTableId is provided.'),
+      type: z.string().describe('Relation type. Use many-to-one, one-to-many, one-to-one, or many-to-many. Common aliases such as many_to_one are normalized by the tool.'),
     propertyName: z.string().describe('Property name on source table (e.g., "customer", "items").'),
     inversePropertyName: z.string().optional().describe('Property name on target table for bidirectional relation (e.g., "orders"). Omit unless a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal will use the reverse field. Do not add inverses merely because a parent table exists.'),
     mappedBy: z.string().optional().describe('Mapped-by property for inverse relation shapes when required by the backend. Do not use physical FK names.'),
@@ -584,19 +906,229 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
   };
 
+  function arrayValue(name, value) {
+    if (value === undefined || value === null || value === '') return [];
+    return Array.isArray(value) ? value : parseJsonArrayParam(name, value);
+  }
+
+	  async function createOneTable(args) {
+    const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
+    const userColumns = arrayValue('columns', args.columns);
+	    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+	    const supportedTypes = getSupportedColumnTypesFromMetadata(metadata);
+	    const { columns: userColumnsWithoutAuto, skippedAutoColumns } = stripAutoManagedColumns(userColumns);
+	    const { columns: normalizedUserColumns, normalizations } = normalizeColumnsForLiveMetadata(userColumnsWithoutAuto, supportedTypes);
+	    const deferredRelations = arrayValue('relations', args.relations).map(normalizeRelationForTablePatch);
+	    const relationNames = new Set(deferredRelations.map((relation) => relation.propertyName).filter(Boolean));
+	    assertNoDuplicateFieldNames(
+	      [
+	        ...normalizedUserColumns.map((column) => String(column.name || '')).filter(Boolean),
+	        ...deferredRelations.map((relation) => String(relation.propertyName || '')).filter(Boolean),
+	      ],
+	      `create_tables item "${args.name}"`,
+	    );
+	    const indexes = normalizeConstraintGroupsValue('indexes', args.indexes ?? []);
+	    const uniques = normalizeConstraintGroupsValue('uniques', args.uniques ?? []);
+	    assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
+	    const splitIndexes = splitRelationConstraintGroups(indexes, relationNames);
+	    const splitUniques = splitRelationConstraintGroups(uniques, relationNames);
+	    const body: AnyRecord = { name: args.name, description: args.description, columns: [idColumn, ...normalizedUserColumns], relations: [] };
+	    if (args.isSingleRecord !== undefined) body.isSingleRecord = args.isSingleRecord;
+	    if (args.indexes !== undefined) body.indexes = splitIndexes.immediate;
+	    if (args.uniques !== undefined) body.uniques = splitUniques.immediate;
+    const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_table', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    const createdTable = Array.isArray(result?.data) ? result.data[0] : result;
+    const createdTableId = createdTable?.id ?? createdTable?._id;
+    const liveMetadataAfterCreate = await fetchAPI(ENFYRA_API_URL, `/metadata/${encodeURIComponent(args.name)}`)
+      .catch((error: any) => ({ error: error?.message || String(error) }));
+    const liveTableAfterCreate = liveMetadataAfterCreate?.error
+      ? null
+      : liveMetadataAfterCreate?.data?.table || liveMetadataAfterCreate?.data || liveMetadataAfterCreate?.table || liveMetadataAfterCreate;
+    const liveSchema = summarizeCreatedTableSchema(liveTableAfterCreate, args.name);
+	    const routePath = `/${args.name}`;
+	    return {
+      action: 'table_created',
+      table: { id: createdTableId, name: args.name, routePath },
+      summary: {
+        columnCount: normalizedUserColumns.length + 1,
+        createdColumnCount: normalizedUserColumns.length,
+        deferredRelationCount: deferredRelations.length,
+	        indexGroupCount: indexes.length,
+	        uniqueGroupCount: uniques.length,
+	        deferredConstraintCount: splitIndexes.deferred.length + splitUniques.deferred.length,
+	      },
+      schemaNormalization: normalizations,
+      skippedAutoColumns,
+      schema: {
+        intended: {
+          tableName: args.name,
+          primaryKey: idColumn.name,
+          fields: [idColumn.name, ...normalizedUserColumns.map((column) => column.name), ...deferredRelations.map((relation) => relation.propertyName)].filter(Boolean).sort(),
+          columns: [idColumn.name, ...normalizedUserColumns.map((column) => column.name)].filter(Boolean),
+          relations: deferredRelations.map((relation) => relation.propertyName).filter(Boolean),
+        },
+        live: liveSchema,
+        liveMetadataAvailable: Boolean(liveSchema),
+        liveMetadataError: liveMetadataAfterCreate?.error || undefined,
+      },
+      supportedColumnTypes: supportedTypes,
+      rest: {
+        base: apiBase,
+        routePath,
+        operations: ['GET /<table>', 'POST /<table>', 'PATCH /<table>/:id', 'DELETE /<table>/:id'],
+        noGetById: true,
+      },
+	      deferredRelations,
+	      deferredConstraints: {
+	        indexes: splitIndexes.deferred,
+	        uniques: splitUniques.deferred,
+	      },
+	      result,
+	    };
+	  }
+
+	  async function applyDeferredConstraints(tableId, deferredConstraints) {
+	    const deferredIndexes = deferredConstraints?.indexes || [];
+	    const deferredUniques = deferredConstraints?.uniques || [];
+	    if (deferredIndexes.length === 0 && deferredUniques.length === 0) return null;
+	    const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+	    const mappedIndexes = resolveRelationConstraintGroups(tableData, deferredIndexes, 'indexes');
+	    const mappedUniques = resolveRelationConstraintGroups(tableData, deferredUniques, 'uniques');
+	    const existingIndexes = normalizeConstraintGroupsValue('indexes', tableData.indexes || []);
+	    const existingUniques = normalizeConstraintGroupsValue('uniques', tableData.uniques || []);
+	    const indexes = mergeConstraintGroups(existingIndexes, mappedIndexes);
+	    const uniques = mergeConstraintGroups(existingUniques, mappedUniques);
+	    assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
+	    const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { indexes, uniques });
+	    return {
+	      action: 'deferred_constraints_applied',
+	      tableId,
+	      tableName: tableData.name,
+	      requested: {
+	        indexes: deferredIndexes,
+	        uniques: deferredUniques,
+	      },
+	      applied: {
+	        indexes: mappedIndexes,
+	        uniques: mappedUniques,
+	      },
+	      result,
+	    };
+	  }
+
+	  async function updateOneTable(args) {
+    const body: AnyRecord = {};
+    if (args.name !== undefined) body.name = args.name;
+    if (args.alias !== undefined) body.alias = args.alias;
+    if (args.description !== undefined) body.description = args.description;
+    if (args.isSingleRecord !== undefined) body.isSingleRecord = args.isSingleRecord;
+    if (args.graphqlEnabled !== undefined) body.graphqlEnabled = args.graphqlEnabled;
+    if (args.indexes !== undefined) body.indexes = normalizeConstraintGroupsValue('indexes', args.indexes);
+    if (args.uniques !== undefined) body.uniques = normalizeConstraintGroupsValue('uniques', args.uniques);
+
+    if (args.indexes !== undefined || args.uniques !== undefined) {
+      let indexes = body.indexes;
+      let uniques = body.uniques;
+      if (indexes === undefined || uniques === undefined) {
+        const existing = await fetchTableWithDetails(ENFYRA_API_URL, args.tableId);
+        if (indexes === undefined) indexes = normalizeConstraintGroupsValue('indexes', existing.indexes);
+        if (uniques === undefined) uniques = normalizeConstraintGroupsValue('uniques', existing.uniques);
+      }
+      assertIndexesDoNotReferenceUniqueFields(indexes ?? [], uniques ?? []);
+    }
+
+    const result = await patchTableAutoConfirm(ENFYRA_API_URL, args.tableId, body);
+    return {
+      action: 'table_updated',
+      tableId: args.tableId,
+      result,
+    };
+  }
+
+  async function deleteOneTable({ tableId, tableName, confirm }) {
+    const resolvedTableId = tableId ?? resolveTableIdentifierFromMetadata(await fetchAPI(ENFYRA_API_URL, '/metadata'), tableName, 'delete_tables item tableName');
+    const tableData = await fetchTableWithDetails(ENFYRA_API_URL, resolvedTableId);
+    if (!confirm) {
+      return {
+        action: 'delete_table_preview',
+        tableId: resolvedTableId,
+        tableName: tableData.name,
+        columnCount: (tableData.columns || []).length,
+        relationCount: (tableData.relations || []).length,
+        destructive: true,
+      };
+    }
+    const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${resolvedTableId}`, {
+      method: 'DELETE',
+    });
+    return {
+      action: 'table_deleted',
+      tableId: resolvedTableId,
+      tableName: tableData.name,
+      result,
+    };
+  }
+
+  async function updateOneColumn({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options }) {
+    const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
+    if (!tableData) {
+      throw new Error(`Table with ID ${tableId} not found.`);
+    }
+
+    const existingColumns = getPatchableColumns(tableData.columns);
+    const beforeIds = existingColumns.map((column) => String(getId(column)));
+    if (!beforeIds.includes(String(columnId))) {
+      throw new Error(`Column ${columnId} was not found on table ${tableId}; refusing schema cascade patch.`);
+    }
+
+    const columns = existingColumns.map(col => {
+      const rest = normalizeColumnForTablePatch(col);
+      if (String(getId(col)) === String(columnId)) {
+        if (name !== undefined) rest.name = name;
+        if (type !== undefined) rest.type = type;
+        if (isNullable !== undefined) rest.isNullable = isNullable;
+        if (isPublished !== undefined) rest.isPublished = isPublished;
+        if (isUpdatable !== undefined) rest.isUpdatable = isUpdatable;
+        if (defaultValue !== undefined) rest.defaultValue = defaultValue;
+        if (description !== undefined) rest.description = description;
+        if (options !== undefined) rest.options = normalizeColumnOptionsValue(options);
+      }
+      return rest;
+    });
+
+    const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns });
+    await verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
+      action: 'update',
+      columnId,
+    });
+
+    return {
+      action: 'column_updated',
+      tableId,
+      columnId,
+      result,
+    };
+  }
+
   // ─── READ ───
 
   server.tool(
     'get_all_tables',
-    'List table definitions from metadata. Every call must pass either limit or all=true. Use search to narrow by table name or alias.',
+    'List table definitions from metadata. Complete lists must pass either limit or all=true. If search is provided without limit, the tool returns a bounded lookup window of 10 matches.',
     {
-      limit: z.number().int().positive().optional().describe('Maximum tables returned after search. Required unless all=true.'),
+      limit: z.number().int().positive().optional().describe('Maximum tables returned after search. Required unless all=true or search is provided.'),
       all: z.boolean().optional().describe('Return all matched tables. Use this when a complete table list is required.'),
       search: z.string().optional().describe('Optional table name, alias, or description substring filter.'),
     },
     async ({ limit, all, search }) => {
-      if (!all && limit === undefined) {
+      if (!all && limit === undefined && !search?.trim()) {
         throw new Error('get_all_tables requires either limit or all=true. Do not invent arbitrary limits for complete table lists; use all=true.');
+      }
+      if (all && limit !== undefined) {
+        throw new Error('get_all_tables accepts either all=true or limit, not both.');
       }
       const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
       const needle = search?.trim().toLowerCase();
@@ -616,13 +1148,16 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           return [table.name, table.alias, table.description]
             .some((value) => String(value || '').toLowerCase().includes(needle));
         });
-      const returnedTables = all ? tables : tables.slice(0, limit);
+      const effectiveLimit = all ? tables.length : (limit ?? 10);
+      const returnedTables = all ? tables : tables.slice(0, effectiveLimit);
       return jsonContent({
         action: 'get_all_tables',
         totalTableCount: normalizeTablesFromMetadata(metadata).length,
         matchedTableCount: tables.length,
         returnedTableCount: returnedTables.length,
-        all: Boolean(all),
+	        all: Boolean(all),
+	        implicitSearchLimit: Boolean(!all && limit === undefined && search?.trim()),
+	        hardCap: all ? null : effectiveLimit,
         search: search || null,
         tables: returnedTables,
         detailHint: 'Use inspect_table with a table id/name for columns, relations, indexes, routes, permissions, and GraphQL state.',
@@ -630,320 +1165,378 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     }
   );
 
-  // ─── CREATE TABLE ───
-
   server.tool(
-    'create_table',
+    'get_schema_design_context',
     [
-      'Create a new table definition with an auto-included `id` primary key column.',
-      '**Not** for adding a custom API path or handler only — for that use **`create_route`** without `mainTableId`. Use **`create_table`** when the user needs new stored data (new entity).',
-      'PREFERRED: pass `columns` and `relations` params as JSON arrays to create a table WITH columns and relations in one call (cascade). Only use create_column/create_relation separately when adding to an existing table later.',
-      'Indexes and uniques are first-class table metadata. Use `indexes` for query performance and `uniques` for data integrity. Each entry is a logical field group such as [["member","isRead","conversation"]] or [{"value":["message","member"]}]. Relation property names are allowed; Enfyra resolves them to physical FK columns.',
-      'A field that appears in any `uniques` group must not appear in `indexes`; unique constraints already create indexed unique lookups.',
-      'Relations are supported in this same create_table call when the target table already exists. Each relation uses { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete? }; targetTable may be a table id, {id}, or an exact table name that MCP resolves to an id before mutation. Omit inversePropertyName unless a concrete parent-to-child query or UI surface needs it.',
-      'Do NOT provide physical FK/junction columns. Never include fkCol, fkColumn, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn. Enfyra derives and hides those physical columns from relation propertyName/table metadata.',
-      'Schema operations (create/update/delete table, add column) must run one at a time — migration locks DB; parallel calls will fail.',
-      'Enfyra auto-creates a default REST route at path `/<table_name>` (same segment as `name`, not alias).',
-      'REST surface for that route (matches server route engine): 4 HTTP operations — GET `/<table>` (list/filter), POST `/<table>` (create), PATCH `/<table>/:id` (update), DELETE `/<table>/:id` (delete).',
-      'There is NO `GET /<table>/:id`. To fetch one row by id, use find_one_record or inspect metadata first and call GET `/<table>?filter={"<primaryKeyFromMetadata>":{"_eq":"<id>"}}&limit=1`.',
-      'Set `isSingleRecord: true` directly in create_table for settings/config tables that should keep only one record.',
-      `Full URLs: ${apiBase}/<table_name> (example table post: ${apiBase}/post).`,
-      'GraphQL is enabled separately per table through `enfyra_graphql` or `update_table` with `graphqlEnabled`; it is not controlled by route availableMethods.',
-      'Do not set alias during create_table. The create tool accepts name, description, isSingleRecord, columns, and relations only; use update_table later only if alias really needs to change.',
+      'Step-zero schema design guide for Enfyra table creation.',
+      'Call this before creating a new app schema or multiple tables.',
+      'It returns live column types, supported metadata attributes, relation types, constraint shape, and the exact creation sequence so the model does not guess SQL types or physical FK fields.',
     ].join(' '),
-    {
-      name: z.string().describe('Table name (e.g., "enfyra_user", "my_custom_table"). Must be unique, lowercase with underscores.'),
-      description: z.string().optional().describe('Description of what this table stores.'),
-      isSingleRecord: z.boolean().optional().describe('Set to true for single-record tables such as settings/config. This is passed directly to enfyra_table create.'),
-      columns: z.string().optional().describe('JSON array of column definitions to create with the table (cascade). Each column: { name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, defaultValue?, description?, options? }. Set isEncrypted=true for values encrypted at rest; set isUpdatable=false separately only when the field should be immutable. The `id` column is always auto-included. Example: [{"name":"title","type":"varchar"},{"name":"api_key","type":"varchar","isEncrypted":true,"isPublished":false}]'),
-      relations: z.string().optional().describe('JSON array of relation definitions to create with the table in the same cascade call. Each relation: { targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. targetTable can be an id, {"id": <id>}, or an exact table name that MCP resolves to an id before mutation. Do not include physical FK/junction columns such as fkCol, foreignKeyColumn, sourceColumn, targetColumn, junctionSourceColumn, or junctionTargetColumn; Enfyra derives them and hides FK columns from app schema. Omit inversePropertyName unless a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal needs the reverse field. Example only when parent posts are queried: [{"targetTable":2,"type":"many-to-one","propertyName":"author","inversePropertyName":"posts","isNullable":false,"onDelete":"CASCADE"}]'),
-      indexes: z.string().optional().describe('JSON array of logical non-unique index field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Relation property names are allowed. Do not include any field that appears in uniques; unique constraints already create indexed unique lookups. Example: [["status","createdAt"]]'),
-      uniques: z.string().optional().describe('JSON array of logical unique field groups. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Example: [["message","member"]]'),
-      globalRulesAckKey: globalRulesAckParam(z),
-    },
-    async ({ name, description, isSingleRecord, columns: columnsJson, relations: relationsJson, indexes: indexesJson, uniques: uniquesJson, globalRulesAckKey }) => withSchemaQueue(async () => {
-      assertGlobalRulesAck(globalRulesAckKey);
-      const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
-      const userColumns = parseJsonArrayParam('columns', columnsJson);
-      const parsedRelations = parseJsonArrayParam('relations', relationsJson).map(normalizeRelationForTablePatch);
-      const metadata = parsedRelations.length ? await fetchAPI(ENFYRA_API_URL, '/metadata') : null;
-      const userRelations = metadata
-        ? resolveRelationTargetsFromMetadata(metadata, parsedRelations)
-        : parsedRelations;
-      const indexes = parseConstraintGroupsParam('indexes', indexesJson);
-      const uniques = parseConstraintGroupsParam('uniques', uniquesJson);
-      assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
-      const body: AnyRecord = { name, description, columns: [idColumn, ...userColumns], relations: userRelations };
-      if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
-      if (indexesJson !== undefined) body.indexes = indexes;
-      if (uniquesJson !== undefined) body.uniques = uniques;
-      const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_table', {
-        method: 'POST',
-        body: JSON.stringify(body),
-      });
-      const createdTable = Array.isArray(result?.data) ? result.data[0] : result;
-      const createdTableId = createdTable?.id ?? createdTable?._id;
-      const base = ENFYRA_API_URL.replace(/\/$/, '');
-      const routePath = `/${name}`;
-      const restHint = [
-        `Auto route path: ${routePath} → full base for REST: ${base}${routePath}`,
-        `REST: GET+POST on ${routePath}; PATCH+DELETE on ${routePath}/:id only. No GET ${routePath}/:id.`,
-      ].join('\n');
-      const colHint = userColumns.length
-        ? `Table created with ${userColumns.length} column(s) + auto id.`
-        : `Table created. Use create_column to add columns (tableId: ${createdTableId}).`;
-      const relHint = userRelations.length
-        ? `Relation(s) created in same call: ${userRelations.length}.`
-        : `No relations were included in this create_table call.`;
-      const constraintHint = [
-        indexes.length ? `Index group(s): ${indexes.length}.` : null,
-        uniques.length ? `Unique group(s): ${uniques.length}.` : null,
-      ].filter(Boolean).join(' ');
+    {},
+    async () => {
+      const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+      const liveColumnTypes = getSupportedColumnTypesFromMetadata(metadata);
+      const relationTypes = metadataColumnOptions(metadata, 'enfyra_relation', 'type');
+      const onDeleteOptions = metadataColumnOptions(metadata, 'enfyra_relation', 'onDelete');
+      const tableAttributes = metadataColumnNames(metadata, 'enfyra_table');
+      const columnAttributes = metadataColumnNames(metadata, 'enfyra_column');
+      const relationAttributes = metadataColumnNames(metadata, 'enfyra_relation');
+      const tables = normalizeTablesFromMetadata(metadata);
+      const primaryColumns = tables
+        .map((table) => (table?.columns || []).find((column) => column?.isPrimary || column?.name === 'id' || column?.name === '_id'))
+        .filter(Boolean);
+      const primaryColumnNames = [...new Set(primaryColumns.map((column) => column.name).filter(Boolean))];
+      const primaryColumnTypes = [...new Set(primaryColumns.map((column) => column.type).filter(Boolean))];
+
       return jsonContent({
-        action: 'table_created',
-        table: { id: createdTableId, name, routePath },
-        summary: {
-          columnCount: userColumns.length + 1,
-          createdColumnCount: userColumns.length,
-          relationCount: userRelations.length,
-          indexGroupCount: indexes.length,
-          uniqueGroupCount: uniques.length,
+        action: 'schema_design_context',
+        stepZero: 'Read this response before create_tables/create_columns/create_relations. Use these live attributes and types, not SQL dialect guesses.',
+        liveColumnTypes,
+        primaryKeyContext: {
+          observedPrimaryColumnNames: primaryColumnNames,
+          observedPrimaryColumnTypes: primaryColumnTypes,
+          createTableDefault: 'This MCP create_tables currently auto-includes an int id primary key for the default SQL path. If live metadata uses _id/ObjectId, stop and verify backend support before bulk schema creation.',
         },
-        rest: {
-          base,
-          routePath,
-          operations: ['GET /<table>', 'POST /<table>', 'PATCH /<table>/:id', 'DELETE /<table>/:id'],
-          noGetById: true,
+        createTableInput: {
+          directFields: ['name', 'description', 'isSingleRecord'],
+          cascadeFields: ['columns', 'relations'],
+          constraintFields: ['indexes', 'uniques'],
+          notAcceptedAtCreate: ['alias', 'graphqlEnabled'],
+          autoManagedColumns: ['id', 'createdAt', 'updatedAt'],
+          idColumn: 'create_tables auto-includes an int id primary key; do not include your own id unless the user asks for custom primary-key behavior.',
+          reservedColumnRule: 'Do not declare id, _id, createdAt, or updatedAt in create_tables/create_columns. create_tables strips them before save and reports skippedAutoColumns; create_columns rejects them.',
         },
-        message: [colHint, relHint, constraintHint, restHint].filter(Boolean).join('\n'),
-        result,
+        columnDefinitionInput: {
+          allowedFields: ['name', 'type', 'isNullable', 'isUnique', 'isPublished', 'isUpdatable', 'isEncrypted', 'defaultValue', 'description', 'options'],
+          liveTypes: liveColumnTypes,
+          typeSelection: [
+            'varchar: short text, labels, slugs, status strings.',
+            'text/richtext: long prose.',
+            'float: prices, amounts, ratings, percentages, decimal-like numbers unless liveTypes contains decimal.',
+            'int/bigint: counts, ordering, integer quantities.',
+            'boolean: true/false flags.',
+            'date/datetime/timestamp: temporal fields.',
+            'enum: constrained option strings when options are provided.',
+            'simple-json: structured snapshots/arrays only when liveTypes contains simple-json.',
+            'code: source-code fields.',
+          ],
+          forbiddenGuesses: ['json', 'jsonb', 'longtext', 'decimal'].filter((type) => !liveColumnTypes.includes(type)),
+          aliasNormalization: 'Schema tools normalize common aliases where possible and return schemaNormalization, but models should choose from liveTypes directly.',
+          namespaceRule: 'Column names and relation propertyName values share one table namespace. Do not define a scalar column and a relation with the same name in one table.',
+        },
+        relationDefinitionInput: {
+          allowedFields: ['targetTableId', 'targetTable', 'type', 'propertyName', 'inversePropertyName', 'mappedBy', 'isNullable', 'onDelete', 'description'],
+          relationTypes: relationTypes.length ? relationTypes : ['many-to-one', 'one-to-many', 'one-to-one', 'many-to-many'],
+          onDeleteOptions: onDeleteOptions.length ? onDeleteOptions : ['CASCADE', 'SET NULL', 'RESTRICT'],
+          forbiddenPhysicalFields: FORBIDDEN_RELATION_KEYS,
+          rule: 'Use relations for links between records. Do not create scalar FK columns such as userId, owner_id, categoryIds, or courseId unless the user explicitly wants denormalized snapshot data.',
+          namespaceRule: 'Relation propertyName must be unique among both relation names and scalar column names on the same table. If a relation is named owner, do not also create ownerId/owner as a scalar field.',
+          inverseDesignRule: 'If a parent detail/read must deep-load a child collection (for example application.reviewAssignments or assignment.scorecards), create the owning child many-to-one relation with inversePropertyName immediately. Without the inverse, parent-to-child deep reads will fail with unknown relation.',
+        },
+        constraints: {
+          indexes: 'JSON array of non-unique logical field groups, e.g. [["status","createdAt"]]. Relation propertyName values are allowed.',
+          uniques: 'JSON array of unique logical field groups, e.g. [["record","actor"]].',
+          uniqueIndexRule: 'Any field that appears in any uniques group, including composite unique groups such as ["event","attendee"], must not appear in indexes because unique constraints already create indexed lookups for their fields.',
+          createTablesPreflight: 'create_tables rejects constraints that reference fields not declared as scalar columns, auto-managed columns, or relation propertyName values in that same table item before it creates anything.',
+          relationBasedUniques: 'For one-pass schema creation, put the owning relations in the same create_tables item as the relation-based unique group. If relations already exist, add relation-based uniques later with update_tables.',
+        },
+        recommendedSequence: [
+          '1. Name domain entities and decide which existing tables are reused, especially enfyra_user for users/owners/actors.',
+          '2. Create independent lookup/base tables first with scalar columns only.',
+          '3. Create dependent tables with scalar columns and relations whose target tables already exist.',
+          '4. Use create_relations after both tables exist when a relation could not be included during table creation.',
+          '5. Add relation-based unique groups in the same create_tables item when the relations are declared there, or via update_tables after relations exist.',
+          '6. Before deep parent detail queries, confirm every child collection relation exists as an inversePropertyName on the owning child relation.',
+          '7. Insert records using column names and relation propertyName values, never hidden FK columns.',
+          '8. Re-inspect each table with inspect_table before writing records or adding query examples.',
+        ],
+        liveMetadataAttributes: {
+          enfyra_table: tableAttributes,
+          enfyra_column: columnAttributes,
+          enfyra_relation: relationAttributes,
+        },
       });
-    })
+    },
   );
 
-  // ─── UPDATE TABLE ───
+  // ─── TABLE MUTATIONS ───
 
   server.tool(
-    'update_table',
+    'create_tables',
     [
-      'Update table properties: name (rename), alias, description, isSingleRecord, graphqlEnabled, indexes, and uniques.',
-      'Does NOT modify columns or relations — use create_column, update_column, delete_column, create_relation for those.',
-      'When passing `indexes` or `uniques`, pass the complete desired array of logical field groups; omitted fields are preserved. Relation property names are allowed and are resolved by Enfyra. Example indexes: [["member","isRead","conversation"],["conversation","member","isRead"]].',
-      'A field that appears in any `uniques` group must not appear in `indexes`; unique constraints already create indexed unique lookups.',
-      'Run schema changes sequentially — migration locks DB per operation.',
+      'Create one or more table definitions. Always pass items as a native JSON array; for one table, pass one item.',
+      'The tool creates tables sequentially, creates columns with each table, then creates all requested relations after every table in the batch exists. This avoids relation target races for weak agents.',
+      'Each item supports { name, description?, isSingleRecord?, columns?, relations?, indexes?, uniques? }. columns/relations/indexes/uniques may be arrays inside the item.',
+      'Do not include id, _id, createdAt, or updatedAt in columns; Enfyra manages them and create_tables strips them before save.',
+      'Every field named in indexes/uniques must be a scalar column, auto-managed column, or relation propertyName in the same table item; otherwise the tool rejects the whole batch before creating tables.',
+      'Use get_schema_design_context first for live column types and relation rules. Do not include physical FK fields.',
     ].join(' '),
     {
-      tableId: z.string().describe('Table definition ID.'),
-      name: z.string().optional().describe('New table name (rename). Lowercase with underscores.'),
-      alias: z.string().optional().describe('New table alias.'),
-      description: z.string().optional().describe('New description.'),
-      isSingleRecord: z.boolean().optional().describe('Set to true for single-record table (e.g., settings/config).'),
-      graphqlEnabled: z.boolean().optional().describe('Enable or disable GraphQL for this table by syncing enfyra_graphql.isEnabled. GraphQL table data still requires Bearer auth; anonymous root or schema probes may return 200.'),
-      indexes: z.string().optional().describe('Complete JSON array of logical non-unique index field groups to store on enfyra_table.indexes. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current indexes; pass [] to clear. Do not include any field that appears in uniques; unique constraints already create indexed unique lookups.'),
-      uniques: z.string().optional().describe('Complete JSON array of logical unique field groups to store on enfyra_table.uniques. Each group can be ["fieldA","fieldB"] or {"value":["fieldA","fieldB"]}. Omit to preserve current uniques; pass [] to clear.'),
+      items: bulkObjectArrayParam(z, 'Table definitions').optional().describe('Native JSON array of table definitions. Pass one object in the array for a single table.'),
+      tables: bulkObjectArrayParam(z, 'Table definitions').optional().describe('Alias for items when the caller naturally names the batch tables. Pass either items or tables, not both.'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100; operations still run sequentially.'),
       globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ tableId, name, alias, description, isSingleRecord, graphqlEnabled, indexes: indexesJson, uniques: uniquesJson, globalRulesAckKey }) => withSchemaQueue(async () => {
+    async ({ items, tables, maxItems, globalRulesAckKey }) => {
       assertGlobalRulesAck(globalRulesAckKey);
-      const body: AnyRecord = {};
-      if (name !== undefined) body.name = name;
-      if (alias !== undefined) body.alias = alias;
-      if (description !== undefined) body.description = description;
-      if (isSingleRecord !== undefined) body.isSingleRecord = isSingleRecord;
-      if (graphqlEnabled !== undefined) body.graphqlEnabled = graphqlEnabled;
-      if (indexesJson !== undefined) body.indexes = parseConstraintGroupsParam('indexes', indexesJson);
-      if (uniquesJson !== undefined) body.uniques = parseConstraintGroupsParam('uniques', uniquesJson);
+      if (items !== undefined && tables !== undefined) throw new Error('Pass either items or tables to create_tables, not both.');
+      const parsedItems = parseBulkItemsParam('items', items ?? tables);
+      assertBulkLimit('create_tables', parsedItems, maxItems);
+      preflightCreateTableDefinitions(parsedItems);
+	      const created: AnyRecord[] = [];
+	      const deferredRelations: AnyRecord[] = [];
+	      const deferredConstraints: AnyRecord[] = [];
 
-      if (indexesJson !== undefined || uniquesJson !== undefined) {
-        let indexes = body.indexes;
-        let uniques = body.uniques;
-        if (indexes === undefined || uniques === undefined) {
-          const existing = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
-          if (indexes === undefined) indexes = normalizeConstraintGroupsValue('indexes', existing.indexes);
-          if (uniques === undefined) uniques = normalizeConstraintGroupsValue('uniques', existing.uniques);
-        }
-        assertIndexesDoNotReferenceUniqueFields(indexes ?? [], uniques ?? []);
+	      for (const [index, item] of parsedItems.entries()) {
+	        const result = await withSchemaQueue(() => createOneTable(item));
+	        created.push({ index, ...result, deferredRelations: undefined });
+	        for (const relation of result.deferredRelations || []) {
+	          deferredRelations.push({ index, sourceTableId: result.table.id || result.table.name, ...relation });
+	        }
+	        if ((result.deferredConstraints?.indexes || []).length || (result.deferredConstraints?.uniques || []).length) {
+	          deferredConstraints.push({
+	            index,
+	            tableId: result.table.id || result.table.name,
+	            ...result.deferredConstraints,
+	          });
+	        }
+	      }
+
+      const createdRelations: AnyRecord[] = [];
+      deferredRelations.sort((left, right) => {
+        const leftPriority = normalizeRelationType(left.type) === 'one-to-many' ? 1 : 0;
+        const rightPriority = normalizeRelationType(right.type) === 'one-to-many' ? 1 : 0;
+        return leftPriority - rightPriority;
+      });
+      for (const relation of deferredRelations) {
+        const relationResult = await appendRelationToTable({
+          sourceTableId: relation.sourceTableId,
+          targetTableId: relation.targetTable,
+          type: relation.type,
+          propertyName: relation.propertyName,
+          inversePropertyName: relation.inversePropertyName,
+          mappedBy: relation.mappedBy,
+          isNullable: relation.isNullable,
+          onDelete: relation.onDelete,
+          description: relation.description,
+          globalRulesAckKey,
+        });
+	        createdRelations.push({ index: relation.index, ...JSON.parse(relationResult.content[0].text) });
+	      }
+
+	      const appliedDeferredConstraints: AnyRecord[] = [];
+	      for (const constraints of deferredConstraints) {
+	        const constraintResult = await withSchemaQueue(() => applyDeferredConstraints(constraints.tableId, {
+	          indexes: constraints.indexes,
+	          uniques: constraints.uniques,
+	        }));
+	        if (constraintResult) appliedDeferredConstraints.push({ index: constraints.index, ...constraintResult });
+	      }
+
+	      return jsonContent({
+	        action: 'tables_created',
+	        requested: parsedItems.length,
+	        createdCount: created.length,
+	        deferredRelationCount: deferredRelations.length,
+	        createdRelationCount: createdRelations.length,
+	        deferredConstraintCount: deferredConstraints.length,
+	        appliedDeferredConstraintCount: appliedDeferredConstraints.length,
+	        sequential: true,
+	        relationPhaseAfterTables: true,
+	        constraintPhaseAfterRelations: true,
+	        created,
+	        createdRelations,
+	        appliedDeferredConstraints,
+	      });
+	    }
+	  );
+
+  server.tool(
+    'update_tables',
+    'Update one or more table definitions. Always pass items as a native JSON array; for one table, pass one item. Items run sequentially through the schema queue.',
+    {
+      items: bulkObjectArrayParam(z, 'Table update items').describe('Native JSON array of table update items: [{ tableId, name?, alias?, description?, isSingleRecord?, graphqlEnabled?, indexes?, uniques? }]. indexes/uniques may be arrays.'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+    },
+    async ({ items, maxItems, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      const parsedItems = parseBulkItemsParam('items', items);
+      assertBulkLimit('update_tables', parsedItems, maxItems);
+      const updated: AnyRecord[] = [];
+      for (const [index, item] of parsedItems.entries()) {
+        if (!item.tableId) throw new Error(`items[${index}].tableId is required.`);
+        const result = await withSchemaQueue(() => updateOneTable(item));
+        updated.push({ index, ...result });
       }
-
-      const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, body);
-      return jsonContent({
-        action: 'table_updated',
-        tableId,
-        result,
-      });
-    })
+      return jsonContent({ action: 'tables_updated', requested: parsedItems.length, updatedCount: updated.length, sequential: true, updated });
+    }
   );
 
-  // ─── DELETE TABLE ───
-
   server.tool(
-    'delete_table',
-    [
-      'Delete a table and ALL associated data. This is DESTRUCTIVE and IRREVERSIBLE.',
-      'Deletes: table metadata, all columns, all relations (source + target), all routes, junction tables, FK columns from other tables, and the PHYSICAL DATABASE TABLE with ALL DATA.',
-      'Always confirm with the user before calling this tool.',
-    ].join(' '),
+    'delete_tables',
+    'Delete one or more table definitions. Always pass items as a native JSON array; for one table, pass one item. confirm=false previews every target; confirm=true deletes sequentially.',
     {
-      tableId: z.string().describe('Table definition ID to delete.'),
-      confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
+      items: bulkObjectArrayParam(z, 'Table delete items').describe('Native JSON array of delete items: [{ tableId }] or [{ tableName }]. Names are resolved through live metadata before preview/delete.'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+      confirm: z.boolean().optional().default(false).describe('Required true to apply destructive deletes. Omit/false returns previews only.'),
       globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
     },
-    async ({ tableId, confirm, globalRulesAckKey }) => withSchemaQueue(async () => {
-      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
-      if (!confirm) {
-        return {
-          content: [{ type: 'text', text: JSON.stringify({
-            action: 'delete_table_preview',
-            tableId,
-            tableName: tableData.name,
-            columnCount: (tableData.columns || []).length,
-            relationCount: (tableData.relations || []).length,
-            destructive: true,
-            next: 'Call delete_table again with confirm=true to delete metadata, routes, derived FK/junction structures, the physical table, and all table data.',
-          }, null, 2) }],
-        };
+    async ({ items, maxItems, confirm, globalRulesAckKey }) => {
+      const parsedItems = parseBulkItemsParam('items', items);
+      assertBulkLimit('delete_tables', parsedItems, maxItems);
+      if (confirm) assertGlobalRulesAck(globalRulesAckKey);
+      const results: AnyRecord[] = [];
+      for (const [index, item] of parsedItems.entries()) {
+        if (!item.tableId && !item.tableName) throw new Error(`items[${index}] requires tableId or tableName.`);
+        const result = await withSchemaQueue(() => deleteOneTable({ tableId: item.tableId, tableName: item.tableName, confirm }));
+        results.push({ index, ...result });
       }
-      assertGlobalRulesAck(globalRulesAckKey);
-      const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}`, {
-        method: 'DELETE',
-      });
       return jsonContent({
-        action: 'table_deleted',
-        tableId,
-        result,
+        action: confirm ? 'tables_deleted' : 'delete_tables_preview',
+        requested: parsedItems.length,
+        sequential: true,
+        destructive: true,
+        results,
+        next: confirm ? undefined : 'Call delete_tables again with the same items and confirm=true to delete sequentially.',
       });
-    })
+    }
   );
 
-  // ─── CREATE COLUMN ───
+  // ─── COLUMN MUTATIONS ───
 
   server.tool(
-    'create_column',
-    [
-      'Add a column to an existing table via PATCH /enfyra_table/{tableId}.',
-      'Columns are managed through cascade with enfyra_table — there is NO direct /enfyra_column endpoint.',
-      'This tool reads full table metadata, keeps only persisted column rows with id/_id, appends the new one, PATCHes the table, and verifies unrelated columns survived.',
-      'Generated metadata projections such as createdAt, updatedAt, or relation-derived FK display fields without id are not valid cascade rows and are skipped.',
-      'Run schema changes sequentially — migration locks DB per operation.',
-    ].join(' '),
+    'create_columns',
+    'Create one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue.',
     {
-      ...columnCreateSchema,
-    },
-    appendColumnToTable
-  );
-
-  // ─── UPDATE COLUMN ───
-
-  server.tool(
-    'update_column',
-    [
-      'Update an existing column on a table via PATCH /enfyra_table/{tableId}.',
-      'Reads full table metadata, keeps only persisted rows with id/_id, modifies the target column, PATCHes the table, and verifies unrelated columns survived.',
-      'Generated metadata projections such as createdAt, updatedAt, or relation-derived FK display fields without id are skipped.',
-      'Run schema changes sequentially — migration locks DB per operation.',
-    ].join(' '),
-    {
-      tableId: z.string().describe('Table definition ID.'),
-      columnId: z.string().describe('Column definition ID to update.'),
-      name: z.string().optional().describe('New column name.'),
-      type: z.string().optional().describe('New column type.'),
-      isNullable: z.boolean().optional().describe('Set nullable.'),
-      isPublished: z.boolean().optional().describe('Set column visibility baseline. false = unpublished (omitted from response unless allowed by field permission rules).'),
-      isUpdatable: z.boolean().optional().describe('Set false for immutable fields that should be stripped from update payloads.'),
-      defaultValue: z.string().optional().describe('New default value as JSON string.'),
-      description: z.string().optional().describe('New description.'),
-      options: z.string().optional().describe('New options as JSON string.'),
+      items: bulkObjectArrayParam(z, 'Column definitions').optional().describe('Native JSON array of column definitions. Each item uses create_columns fields: { tableId, name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, isPrimary?, isGenerated?, isSystem?, defaultValue?, description?, options? }.'),
+      columns: bulkObjectArrayParam(z, 'Column definitions').optional().describe('Alias for items when the caller naturally names the batch columns. Pass either items or columns, not both.'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
       globalRulesAckKey: globalRulesAckParam(z),
     },
-    async ({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options, globalRulesAckKey }) => withSchemaQueue(async () => {
+    async ({ items, columns, maxItems, globalRulesAckKey }) => {
       assertGlobalRulesAck(globalRulesAckKey);
-      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
-      if (!tableData) {
-        throw new Error(`Table with ID ${tableId} not found.`);
+      if (items !== undefined && columns !== undefined) throw new Error('Pass either items or columns to create_columns, not both.');
+      const parsedItems = parseBulkItemsParam('items', items ?? columns);
+      assertBulkLimit('create_columns', parsedItems, maxItems);
+      const created: AnyRecord[] = [];
+      for (const [index, item] of parsedItems.entries()) {
+        const result = await appendColumnToTable({ ...item, globalRulesAckKey });
+        created.push({ index, ...JSON.parse(result.content[0].text) });
       }
+      return jsonContent({ action: 'columns_created', requested: parsedItems.length, createdCount: created.length, sequential: true, created });
+    }
+  );
 
-      const existingColumns = getPatchableColumns(tableData.columns);
-      const beforeIds = existingColumns.map((column) => String(getId(column)));
-      if (!beforeIds.includes(String(columnId))) {
-        throw new Error(`Column ${columnId} was not found on table ${tableId}; refusing schema cascade patch.`);
+  server.tool(
+    'update_columns',
+    'Update one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue.',
+    {
+      items: bulkObjectArrayParam(z, 'Column update items').describe('Native JSON array of column update items: [{ tableId, columnId, name?, type?, isNullable?, isPublished?, isUpdatable?, defaultValue?, description?, options? }].'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+    },
+    async ({ items, maxItems, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      const parsedItems = parseBulkItemsParam('items', items);
+      assertBulkLimit('update_columns', parsedItems, maxItems);
+      const updated: AnyRecord[] = [];
+      for (const [index, item] of parsedItems.entries()) {
+        if (!item.tableId) throw new Error(`items[${index}].tableId is required.`);
+        if (!item.columnId) throw new Error(`items[${index}].columnId is required.`);
+        const result = await withSchemaQueue(() => updateOneColumn(item));
+        updated.push({ index, ...result });
       }
+      return jsonContent({ action: 'columns_updated', requested: parsedItems.length, updatedCount: updated.length, sequential: true, updated });
+    }
+  );
 
-      const columns = existingColumns.map(col => {
-        const rest = normalizeColumnForTablePatch(col);
-        if (String(getId(col)) === String(columnId)) {
-          if (name !== undefined) rest.name = name;
-          if (type !== undefined) rest.type = type;
-          if (isNullable !== undefined) rest.isNullable = isNullable;
-          if (isPublished !== undefined) rest.isPublished = isPublished;
-          if (isUpdatable !== undefined) rest.isUpdatable = isUpdatable;
-          if (defaultValue !== undefined) rest.defaultValue = defaultValue;
-          if (description !== undefined) rest.description = description;
-          if (options !== undefined) rest.options = JSON.parse(options);
-        }
-        return rest;
-      });
-
-      const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns });
-      await verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
-        action: 'update',
-        columnId,
-      });
-
+  server.tool(
+    'delete_columns',
+    'Delete one or more columns. Always pass items as a native JSON array; for one column, pass one item. confirm=false previews every target; confirm=true deletes sequentially.',
+    {
+      items: bulkObjectArrayParam(z, 'Column delete items').describe('Native JSON array of delete items: [{ tableId, columnId }].'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+      confirm: z.boolean().optional().default(false).describe('Required true to apply destructive deletes. Omit/false returns previews only.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+    },
+    async ({ items, maxItems, confirm, globalRulesAckKey }) => {
+      const parsedItems = parseBulkItemsParam('items', items);
+      assertBulkLimit('delete_columns', parsedItems, maxItems);
+      if (confirm) assertGlobalRulesAck(globalRulesAckKey);
+      const results: AnyRecord[] = [];
+      for (const [index, item] of parsedItems.entries()) {
+        if (!item.tableId) throw new Error(`items[${index}].tableId is required.`);
+        if (!item.columnId) throw new Error(`items[${index}].columnId is required.`);
+        const result = await removeColumnFromTable({ ...item, confirm, globalRulesAckKey });
+        results.push({ index, ...JSON.parse(result.content[0].text) });
+      }
       return jsonContent({
-        action: 'column_updated',
-        tableId,
-        columnId,
-        result,
+        action: confirm ? 'columns_deleted' : 'delete_columns_preview',
+        requested: parsedItems.length,
+        sequential: true,
+        destructive: true,
+        results,
+        next: confirm ? undefined : 'Call delete_columns again with the same items and confirm=true to delete sequentially.',
       });
-    })
+    }
   );
 
-  // ─── DELETE COLUMN ───
+  // ─── RELATION MUTATIONS ───
 
   server.tool(
-    'delete_column',
-    [
-      'Delete a column from a table via PATCH /enfyra_table/{tableId}.',
-      'Reads full table metadata, keeps only persisted rows with id/_id, removes the target, PATCHes the table, and verifies unrelated columns survived.',
-      'The physical column is dropped from the database. System columns (id, createdAt, updatedAt) cannot be deleted.',
-      'Run schema changes sequentially — migration locks DB per operation.',
-    ].join(' '),
+    'create_relations',
+    'Create one or more relations. Always pass items as a native JSON array; for one relation, pass one item. Items run sequentially through the schema queue and table names/aliases are resolved internally.',
     {
-      ...columnDeleteSchema,
+      items: bulkObjectArrayParam(z, 'Relation definitions').optional().describe('Native JSON array of relation definitions. Each item uses { sourceTableId, targetTableId or targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. Do not send physical FK fields.'),
+      relations: bulkObjectArrayParam(z, 'Relation definitions').optional().describe('Alias for items when the caller naturally names the batch relations. Pass either items or relations, not both.'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+      globalRulesAckKey: globalRulesAckParam(z),
     },
-    removeColumnFromTable
+    async ({ items, relations, maxItems, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      if (items !== undefined && relations !== undefined) throw new Error('Pass either items or relations to create_relations, not both.');
+      const parsedItems = parseBulkItemsParam('items', items ?? relations);
+      assertBulkLimit('create_relations', parsedItems, maxItems);
+      const created: AnyRecord[] = [];
+      for (const [index, item] of parsedItems.entries()) {
+        const result = await appendRelationToTable({ ...item, globalRulesAckKey });
+        created.push({ index, ...JSON.parse(result.content[0].text) });
+      }
+      return jsonContent({ action: 'relations_created', requested: parsedItems.length, createdCount: created.length, sequential: true, created });
+    }
   );
-
-  // ─── CREATE RELATION ───
 
   server.tool(
-    'create_relation',
-    [
-      'Create a relation between two tables (many-to-one, one-to-many, one-to-one, many-to-many).',
-      'sourceTableId and targetTableId may be table ids, exact table names, or aliases; MCP resolves them from metadata before mutation.',
-      'For many-to-one: a physical FK column is created on the source table. For one-to-many: the FK is on the target (inverse relation). This physical FK is derived by Enfyra and hidden from app schema/forms.',
-      'Never ask the user for physical FK column names and never send fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. The public API uses relation propertyName only.',
-      'Run sequentially — DB migration locks per operation.',
-    ].join(' '),
+    'delete_relations',
+    'Delete one or more relations. Always pass items as a native JSON array; for one relation, pass one item. confirm=false previews every target; confirm=true deletes sequentially.',
     {
-      ...relationCreateSchema,
+      items: bulkObjectArrayParam(z, 'Relation delete items').describe('Native JSON array of delete items: [{ tableId, relationId }].'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+      confirm: z.boolean().optional().default(false).describe('Required true to apply destructive deletes. Omit/false returns previews only.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
     },
-    appendRelationToTable
+    async ({ items, maxItems, confirm, globalRulesAckKey }) => {
+      const parsedItems = parseBulkItemsParam('items', items);
+      assertBulkLimit('delete_relations', parsedItems, maxItems);
+      if (confirm) assertGlobalRulesAck(globalRulesAckKey);
+      const results: AnyRecord[] = [];
+      for (const [index, item] of parsedItems.entries()) {
+        if (!item.tableId) throw new Error(`items[${index}].tableId is required.`);
+        if (!item.relationId) throw new Error(`items[${index}].relationId is required.`);
+        const result = await removeRelationFromTable({ ...item, confirm, globalRulesAckKey });
+        results.push({ index, ...JSON.parse(result.content[0].text) });
+      }
+      return jsonContent({
+        action: confirm ? 'relations_deleted' : 'delete_relations_preview',
+        requested: parsedItems.length,
+        sequential: true,
+        destructive: true,
+        results,
+        next: confirm ? undefined : 'Call delete_relations again with the same items and confirm=true to delete sequentially.',
+      });
+    }
   );
 
-  // ─── DELETE RELATION ───
-
-  server.tool(
-    'delete_relation',
-    [
-      'Delete a relation from a table via PATCH /enfyra_table/{tableId}.',
-      'Fetches all relations, removes the target, and PATCHes the table.',
-      'Drops FK columns and junction tables (for many-to-many).',
-    ].join(' '),
-    {
-      ...relationDeleteSchema,
-    },
-    removeRelationFromTable
-  );
 
 }

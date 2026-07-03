@@ -8,7 +8,11 @@ import {
   buildColumnDefinition,
   assertIndexesDoNotReferenceUniqueFields,
   fetchTableWithDetails,
+  getSupportedColumnTypesFromMetadata,
+  normalizeColumnsForLiveMetadata,
+  normalizeColumnTypeForLiveMetadata,
   normalizeRelationForTablePatch,
+  normalizeRelationType,
   registerTableTools,
   resolveTableIdentifierFromMetadata,
   resolveRelationTargetsFromMetadata,
@@ -16,9 +20,13 @@ import {
   resolveTableFromMetadataByName,
   sanitizeExistingRelationForTablePatch,
 } from '../dist/lib/table-tools.js';
-import { prepareRecordMutation } from '../dist/lib/mutation-guards.js';
+import { prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource } from '../dist/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../dist/lib/route-guards.js';
-import { GLOBAL_RULES_ACK_KEY } from '../dist/lib/required-knowledge.js';
+import {
+  DYNAMIC_CODE_KNOWLEDGE_ACK_KEY,
+  GLOBAL_RULES_ACK_KEY,
+  buildRequiredKnowledgePayload,
+} from '../dist/lib/required-knowledge.js';
 import { WORKFLOW_SURFACES, discoverWorkflowRoutes, listWorkflowSurfaces } from '../dist/lib/tool-routing.js';
 import {
   findRoutePermission,
@@ -56,6 +64,51 @@ test('extension local validation rejects manual component resolution mistakes', 
   );
 });
 
+test('dynamic script guard rejects non-portable secure repo accessor', () => {
+  assert.throws(
+    () => validatePortableScriptSource('const row = await @REPOS.secure.orders.find({ filter: {} })'),
+    /must not use @REPOS\.secure\.<table>/,
+  );
+  assert.throws(
+    () => validatePortableScriptSource('const row = await @REPOS.secure["orders"].find({ filter: {} })'),
+    /must not use @REPOS\.secure\.<table>/,
+  );
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('const row = await #orders.find({ fields: ["id"], filter: {} })'),
+  );
+});
+
+test('dynamic script guard locks numeric throw helper details contract', () => {
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('if (!request) @THROW404("Request not found")'),
+  );
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('if (!request) @THROW404("Request not found", { requestId })'),
+  );
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('if (!request) $ctx.$throw["404"]("Request not found", { requestId })'),
+  );
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('if (!request) @THROW.notFound("Request", requestId)'),
+  );
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('if (exists) @THROW.duplicate("User", "email", email)'),
+  );
+
+  for (const source of [
+    'if (!project) @THROW404("Project", projectId)',
+    'if (!project) @THROW404("Project", "p_123")',
+    'if (exists) @THROW409("User", email)',
+    'if (!project) $ctx.$throw["404"]("Project", projectId)',
+    'if (!valid) $ctx.$throw[\'422\']("Invalid value", "email")',
+  ]) {
+    assert.throws(
+      () => validatePortableScriptSource(source),
+      /Numeric @THROW helpers are raw HTTP message helpers/,
+    );
+  }
+});
+
 test('workflow routing gives progressive tool plans and negative boundaries', () => {
   assert.ok(WORKFLOW_SURFACES.includes('extension'));
   assert.ok(WORKFLOW_SURFACES.includes('api-endpoint'));
@@ -68,13 +121,13 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
     detail: 'plan',
   }).workflows[0];
   assert.equal(extension.key, 'extension');
-  assert.ok(extension.firstTools.includes('get_extension_theme_contract'));
+  assert.ok(extension.primaryPath.some((step) => step.tool === 'get_extension_theme_contract'));
+  assert.ok(extension.primaryPath.some((step) => step.tool === 'search_admin_extensions'));
   assert.ok(extension.requiredAck.includes('extensionAckKey when saving extension code'));
-  assert.ok(extension.writeTools.includes('extension_workflow'));
-  assert.ok(extension.writeTools.includes('update_extension_code'));
-  assert.ok(extension.writeTools.includes('reorder_menus'));
-  assert.ok(extension.writeTools.includes('ensure_global_extension'));
-  assert.ok(extension.verifyTools.includes('validate_extension_code'));
+  assert.ok(extension.primaryPath.some((step) => step.tool === 'extension_workflow or patch_extension_code/update_extension_code'));
+  assert.ok(extension.advancedTools.includes('reorder_menus'));
+  assert.ok(extension.advancedTools.includes('ensure_global_extension'));
+  assert.ok(extension.verifyPath.some((step) => step.tool === 'validate_extension_code'));
   assert.match(JSON.stringify(extension.avoidTools), /destination domain lists/);
   assert.match(JSON.stringify(extension.avoidTools), /destination-page fetch on click/);
 
@@ -84,7 +137,7 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
     detail: 'plan',
   }).workflows[0];
   assert.equal(endpoint.key, 'api-endpoint');
-  assert.ok(endpoint.writeTools.includes('api_endpoint_workflow'));
+  assert.ok(endpoint.primaryPath.some((step) => step.tool === 'api_endpoint_workflow'));
   assert.match(JSON.stringify(endpoint.avoidTools), /create_route/);
 
   const flow = discoverWorkflowRoutes({
@@ -94,8 +147,19 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
     detail: 'plan',
   }).workflows[0];
   assert.equal(flow.key, 'flow');
-  assert.ok(flow.firstTools.includes('choose_flow_step_tool'));
+  assert.ok(flow.primaryPath.some((step) => step.tool === 'plan_flow_steps'));
   assert.match(JSON.stringify(flow.avoidTools), /ensure_script_flow_step/);
+
+  const schema = discoverWorkflowRoutes({
+    intent: 'create a multi table app schema with columns relations and sample records',
+    surface: 'schema',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(schema.key, 'schema');
+  assert.ok(schema.primaryPath.some((step) => step.tool === 'get_schema_design_context'));
+  assert.match(JSON.stringify(schema.primaryPath), /live column types/);
+  assert.ok(schema.escapeHatches.includes('get_table_metadata'));
 
   const cache = discoverWorkflowRoutes({
     intent: 'metadata looks stale after a table change',
@@ -257,7 +321,7 @@ test('schema constraint validation rejects indexes that include unique fields', 
         [['is_active', 'version']],
         [['version'], ['docker_image']],
       ),
-    /indexes must not include fields that are already unique/,
+    /indexes must not include fields that appear in uniques, including composite unique groups/,
   );
 
   assert.doesNotThrow(() =>
@@ -265,6 +329,52 @@ test('schema constraint validation rejects indexes that include unique fields', 
       [['is_active', 'sort_order']],
       [['version'], ['docker_image']],
     ),
+  );
+});
+
+test('column type guidance uses live metadata and normalizes common SQL aliases', () => {
+  const metadata = {
+    data: {
+      tables: [{
+        name: 'enfyra_column',
+        columns: [{ name: 'type', type: 'enum', options: '{"int","varchar","text","boolean","datetime","simple-json","float"}' }],
+      }],
+    },
+  };
+  const supportedTypes = getSupportedColumnTypesFromMetadata(metadata);
+
+  assert.deepEqual(supportedTypes, ['int', 'varchar', 'text', 'boolean', 'datetime', 'simple-json', 'float']);
+  assert.deepEqual(
+    normalizeColumnTypeForLiveMetadata('decimal', supportedTypes),
+    { type: 'float', changed: true, originalType: 'decimal' },
+  );
+  assert.deepEqual(
+    normalizeColumnTypeForLiveMetadata('longtext', supportedTypes),
+    { type: 'text', changed: true, originalType: 'longtext' },
+  );
+  assert.deepEqual(
+    normalizeColumnTypeForLiveMetadata('json', supportedTypes),
+    { type: 'simple-json', changed: true, originalType: 'json' },
+  );
+  assert.deepEqual(
+    normalizeColumnsForLiveMetadata([
+      { name: 'price', type: 'decimal' },
+      { name: 'metadata', type: 'jsonb' },
+    ], supportedTypes),
+    {
+      columns: [
+        { name: 'price', type: 'float' },
+        { name: 'metadata', type: 'simple-json' },
+      ],
+      normalizations: [
+        { column: 'price', from: 'decimal', to: 'float' },
+        { column: 'metadata', from: 'jsonb', to: 'simple-json' },
+      ],
+    },
+  );
+  assert.throws(
+    () => normalizeColumnTypeForLiveMetadata('geometry', supportedTypes),
+    /Valid live types: int, varchar, text, boolean, datetime, simple-json, float/,
   );
 });
 
@@ -475,6 +585,21 @@ test('get_all_tables applies search and explicit all contract', async () => {
         data: {
           tables: [
             { id: 1, name: 'enfyra_user', alias: 'Users', description: 'System users', columns: [], relations: [] },
+            {
+              id: 10,
+              name: 'enfyra_column',
+              columns: [{ name: 'type', type: 'enum', options: '{"int","varchar","text","boolean","simple-json","float"}' }],
+              relations: [],
+            },
+            {
+              id: 11,
+              name: 'enfyra_relation',
+              columns: [
+                { name: 'type', type: 'enum', options: '{"many-to-one","one-to-many","one-to-one","many-to-many"}' },
+                { name: 'onDelete', type: 'enum', options: '{"CASCADE","SET NULL","RESTRICT"}' },
+              ],
+              relations: [],
+            },
             { id: 2, name: 'mcp_project', description: 'Test project', columns: [{ id: 1 }], relations: [] },
             { id: 3, name: 'mcp_issue', description: 'Test issue', columns: [], relations: [{ id: 9 }] },
           ],
@@ -493,20 +618,28 @@ test('get_all_tables applies search and explicit all contract', async () => {
       /requires either limit or all=true/
     );
 
-    const result = await server.get('get_all_tables').handler({ search: 'mcp_', all: true });
+    const result = await server.get('get_all_tables').handler({ search: 'mcp_' });
     const payload = JSON.parse(result.content[0].text);
 
     assert.equal(payload.matchedTableCount, 2);
     assert.equal(payload.returnedTableCount, 2);
+    assert.equal(payload.implicitSearchLimit, true);
     assert.match(result.content[0].text, /mcp_project/);
     assert.doesNotMatch(result.content[0].text, /enfyra_user/);
+
+    const designResult = await server.get('get_schema_design_context').handler({});
+    const designPayload = JSON.parse(designResult.content[0].text);
+    assert.deepEqual(designPayload.liveColumnTypes, ['int', 'varchar', 'text', 'boolean', 'simple-json', 'float']);
+    assert.match(designPayload.primaryKeyContext.createTableDefault, /auto-includes an int id primary key/);
+    assert.match(JSON.stringify(designPayload.recommendedSequence), /Create independent lookup\/base tables first/);
+    assert.match(JSON.stringify(designPayload.relationDefinitionInput.forbiddenPhysicalFields), /foreignKeyColumn/);
   } finally {
     resetTokens();
     global.fetch = originalFetch;
   }
 });
 
-test('create_relation resolves table names before schema patch', async () => {
+test('create_relations resolves table names before schema patch', async () => {
   const originalFetch = global.fetch;
   const server = createToolHarness();
   let patchedBody = null;
@@ -559,17 +692,216 @@ test('create_relation resolves table names before schema patch', async () => {
     resetTokens();
     initAuth('https://example.test/api', 'api-token');
     registerTableTools(server, 'https://example.test/api');
-    await server.get('create_relation').handler({
-      sourceTableId: 'mcp_issue',
-      targetTableId: 'enfyra_user',
-      type: 'many-to-one',
-      propertyName: 'owner',
-      onDelete: 'SET NULL',
+    await server.get('create_relations').handler({
+      items: [{
+        sourceTableId: 'mcp_issue',
+        targetTable: 'enfyra_user',
+        type: 'many-to-one',
+        propertyName: 'owner',
+        onDelete: 'SET NULL',
+      }],
       globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
     });
 
     assert.equal(patchedBody.relations[0].targetTable, 4);
     assert.equal(patchedBody.relations[0].propertyName, 'owner');
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('create_tables accepts tables alias and defers relation constraints until FK columns exist', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  const createdTables = new Map();
+  let nextRelationId = 30;
+  let constraintPatch = null;
+
+  const metadataPayload = () => ({
+    data: [
+      {
+        id: 1,
+        name: 'enfyra_column',
+        columns: [{ name: 'type', options: JSON.stringify(['int', 'varchar']) }],
+      },
+      { id: 4, name: 'enfyra_user', columns: [{ id: 40, name: 'id', isPrimary: true }] },
+      { id: 10, name: 'community_event', columns: [{ id: 100, name: 'id', isPrimary: true }] },
+      ...[...createdTables.values()],
+    ],
+  });
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresAt: new Date(Date.now() + 600000).toISOString() });
+    }
+    if (urlText.endsWith('/metadata')) {
+      return jsonResponse(metadataPayload());
+    }
+    if (urlText.includes('/metadata/event_registration')) {
+      return jsonResponse({ data: { table: createdTables.get(99) } });
+    }
+    if (urlText.endsWith('/enfyra_table') && init.method === 'POST') {
+      const body = JSON.parse(init.body);
+      assert.deepEqual(body.uniques, []);
+      assert.deepEqual(body.indexes, [['status']]);
+      assert.equal(body.columns.some((column) => column.name === 'createdAt'), false);
+      const table = {
+        id: 99,
+        name: body.name,
+        indexes: body.indexes,
+        uniques: body.uniques,
+        columns: body.columns.map((column, index) => ({ id: index + 1, ...column })),
+        relations: [],
+      };
+      createdTables.set(99, table);
+      return jsonResponse({ data: [table] });
+    }
+    if (urlText.includes('/enfyra_table?')) {
+      return jsonResponse({ data: [createdTables.get(99)] });
+    }
+    if (urlText.endsWith('/enfyra_table/99') && init.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      const table = createdTables.get(99);
+      if (body.relations) {
+        table.relations = body.relations.map((relation) => ({
+          id: relation.id || nextRelationId++,
+          ...relation,
+          foreignKeyColumn: relation.foreignKeyColumn || `${relation.propertyName}Id`,
+        }));
+        createdTables.set(99, table);
+        return jsonResponse({ data: [table] });
+      }
+      if (body.indexes || body.uniques) {
+        constraintPatch = body;
+        table.indexes = body.indexes;
+        table.uniques = body.uniques;
+        createdTables.set(99, table);
+        return jsonResponse({ data: [table] });
+      }
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    const result = await server.get('create_tables').handler({
+      tables: [{
+        name: 'event_registration',
+        columns: [
+          { name: 'status', type: 'varchar', isNullable: false },
+          { name: 'createdAt', type: 'datetime' },
+        ],
+        relations: [
+          { targetTable: 'community_event', type: 'many-to-one', propertyName: 'event', isNullable: false },
+          { targetTable: 'enfyra_user', type: 'many-to-one', propertyName: 'attendee', isNullable: false },
+        ],
+        indexes: [['status']],
+        uniques: [['event', 'attendee']],
+      }],
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.deferredConstraintCount, 1);
+    assert.deepEqual(payload.created[0].skippedAutoColumns, [{
+      name: 'createdAt',
+      reason: 'Enfyra manages id/createdAt/updatedAt automatically during table creation.',
+    }]);
+    assert.deepEqual(constraintPatch.uniques, [['eventId', 'attendeeId']]);
+    assert.deepEqual(constraintPatch.indexes, [['status']]);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('create_tables rejects constraints referencing undeclared fields before partial create', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let postCount = 0;
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresAt: new Date(Date.now() + 600000).toISOString() });
+    }
+    if (urlText.endsWith('/enfyra_table') && init.method === 'POST') {
+      postCount += 1;
+      return jsonResponse({ data: [{ id: 100 }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await assert.rejects(
+      () => server.get('create_tables').handler({
+        items: [
+          {
+            name: 'event_registration',
+            columns: [{ name: 'status', type: 'varchar' }],
+            uniques: [['attendee', 'event']],
+          },
+        ],
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      }),
+      /undeclared field\(s\): attendee, event/,
+    );
+    assert.equal(postCount, 0);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('create_tables rejects unique/index overlap before partial create', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let postCount = 0;
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresAt: new Date(Date.now() + 600000).toISOString() });
+    }
+    if (urlText.endsWith('/enfyra_table') && init.method === 'POST') {
+      postCount += 1;
+      return jsonResponse({ data: [{ id: 100 }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await assert.rejects(
+      () => server.get('create_tables').handler({
+        items: [
+          {
+            name: 'ok_table',
+            columns: [{ name: 'status', type: 'varchar' }],
+          },
+          {
+            name: 'reserve_table',
+            columns: [
+              { name: 'claim', type: 'varchar' },
+              { name: 'reserveType', type: 'varchar' },
+            ],
+            uniques: [['claim', 'reserveType']],
+            indexes: [['reserveType']],
+          },
+        ],
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      }),
+      /indexes must not include fields that appear in uniques/,
+    );
+    assert.equal(postCount, 0);
   } finally {
     resetTokens();
     global.fetch = originalFetch;
@@ -647,6 +979,74 @@ test('prepareRecordMutation rejects fields that are not in table metadata', asyn
       data: JSON.stringify({ name: 'Project', expiredAt: '2026-01-01' }),
     }),
     /expiredAt/
+  );
+});
+
+test('prepareRecordMutation directs array payloads to create_records', async () => {
+  await assert.rejects(
+    () => prepareRecordMutation({
+      fetchAPI: async () => ({ success: true, valid: true }),
+      apiUrl: 'https://example.test/api',
+      tables: [{
+        name: 'app_team',
+        columns: [{ name: 'name' }],
+        relations: [],
+      }],
+      tableName: 'app_team',
+      data: JSON.stringify([{ name: 'Platform' }]),
+    }),
+    /use create_records/
+  );
+});
+
+test('prepareRecordBatchMutation preflights every record and reports the failing index', async () => {
+  await assert.rejects(
+    () => prepareRecordBatchMutation({
+      fetchAPI: async () => ({ success: true, valid: true }),
+      apiUrl: 'https://example.test/api',
+      tables: [{
+        name: 'app_team',
+        columns: [{ name: 'name' }],
+        relations: [],
+      }],
+      tableName: 'app_team',
+      records: JSON.stringify([
+        { name: 'Platform' },
+        { name: 'Product', is_active: true },
+      ]),
+    }),
+    /index 1[\s\S]*is_active[\s\S]*name/
+  );
+
+  const prepared = await prepareRecordBatchMutation({
+    fetchAPI: async () => ({ success: true, valid: true }),
+    apiUrl: 'https://example.test/api',
+    tables: [{
+      name: 'app_team',
+      columns: [{ name: 'name' }],
+      relations: [{ propertyName: 'owner' }],
+    }],
+    tableName: 'app_team',
+    records: [{ name: 'Platform', owner: 1 }],
+  });
+  assert.equal(prepared.records.length, 1);
+  assert.equal(prepared.records[0].payload.owner, 1);
+});
+
+test('prepareRecordMutation explains relation property names when FK-shaped fields are sent', async () => {
+  await assert.rejects(
+    () => prepareRecordMutation({
+      fetchAPI: async () => ({ success: true, valid: true }),
+      apiUrl: 'https://example.test/api',
+      tables: [{
+        name: 'app_primary_record',
+        columns: [{ name: 'title' }],
+        relations: [{ propertyName: 'lookup' }, { propertyName: 'owner' }],
+      }],
+      tableName: 'app_primary_record',
+      data: JSON.stringify({ title: 'Intro', lookupId: 9, owner_id: 4 }),
+    }),
+    /lookupId -> use relation property "lookup".*owner_id -> use relation property "owner"/,
   );
 });
 
@@ -769,10 +1169,17 @@ test('code-writing tools require required-knowledge acknowledgement without bloc
   assert.match(instructions, /discover_enfyra_workflows/);
   assert.match(instructions, /globalRulesAckKey/);
 
-  assert.match(entry, /create_record[\s\S]*globalRulesAckKey/);
-  assert.match(entry, /create_record[\s\S]*knowledgeAckKey/);
-  assert.match(entry, /update_record[\s\S]*extensionKnowledgeAckKey/);
-  assert.match(entry, /delete_record[\s\S]*globalRulesAckKey/);
+  assert.match(entry, /server\.tool\(\s*['"]create_records['"]/);
+  assert.match(entry, /server\.tool\(\s*['"]update_records['"]/);
+  assert.match(entry, /server\.tool\(\s*['"]delete_records['"]/);
+  assert.match(entry, /create_records[\s\S]*prepareGenericBatchMutation/);
+  assert.match(entry, /create_records[\s\S]*sequential/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_record['"]/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]update_record['"]/);
+  assert.doesNotMatch(entry, /server\.tool\(\s*['"]delete_record['"]/);
+  assert.match(entry, /create_records[\s\S]*knowledgeAckKey/);
+  assert.match(entry, /update_records[\s\S]*extensionKnowledgeAckKey/);
+  assert.match(entry, /delete_records[\s\S]*globalRulesAckKey/);
   assert.match(entry, /SCRIPT_BACKED_TABLE_SET\.has\(tableName\)/);
   assert.match(entry, /patch_script_source[\s\S]*apply[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
   assert.match(entry, /update_script_source[\s\S]*assertGlobalRulesAck[\s\S]*assertDynamicCodeKnowledgeAck/);
@@ -1028,13 +1435,66 @@ test('discovery tools report target instance and avoid unbounded broad searches'
 test('query_table supports deep meta and aggregate query options', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /meta: z\.string\(\)\.optional\(\)/);
-  assert.match(entry, /deep: z\.string\(\)\.optional\(\)/);
-  assert.match(entry, /aggregate: z\.string\(\)\.optional\(\)/);
-  assert.match(entry, /queryParams\.set\('deep', deep\)/);
-  assert.match(entry, /queryParams\.set\('aggregate', aggregate\)/);
+  assert.match(entry, /deep: jsonObjectParam\(z, 'Deep relation fetch object'\)\.optional\(\)/);
+  assert.match(entry, /aggregate: jsonObjectParam\(z, 'Aggregate object'\)\.optional\(\)/);
+  assert.match(entry, /call discover_query_capabilities before using aggregate objects instead of guessing _sum\/_count operators/);
+  assert.match(entry, /queryParams\.set\('deep', deepParam\)/);
+  assert.match(entry, /queryParams\.set\('aggregate', aggregateParam\)/);
+  assert.match(entry, /function applyDeepFieldSelections/);
+  assert.match(entry, /autoAddedDeepFields/);
+  assert.match(entry, /query_table auto-adds missing top-level deep relation names to fields/);
 });
 
-test('list query tools require explicit limit or all intent', () => {
+test('dynamic script guidance documents repository deep projection contract', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const routing = readFileSync(new URL('../src/lib/tool-routing.ts', import.meta.url), 'utf8');
+  const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.ts', import.meta.url), 'utf8');
+
+  assert.match(entry, /For repository find\(\{ deep \}\) in scripts, include relation property names in top-level fields/);
+  assert.match(instructions, /`find\(\{deep\}\)` does not auto-add projections/);
+  assert.match(requiredKnowledge, /Inside dynamic server scripts, repository find\(\{ deep \}\) requires the relation property to also be present in top-level fields/);
+  assert.match(examples, /Workflow handler with relation read and side effects/);
+  assert.match(examples, /fields: \["id", "title", "status", "requester"\]/);
+  assert.match(examples, /Find one record by id in a handler/);
+  assert.match(examples, /do not keep retrying @REPOS\.<table>\.find id filter shapes/);
+  assert.match(examples, /top-level fields controls which parent properties appear/);
+  assert.match(routing, /fields\+deep projection contract for script repository reads/);
+  assert.match(entry, /do not use @REPOS\.secure\.<table>/);
+  assert.match(platformTools, /@REPOS\.secure\.<table> is rejected as non-portable/);
+  assert.doesNotMatch(examples, /@REPOS\.secure\.chat_/);
+});
+
+test('guidance rejects sql-like filter operators', () => {
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+  assert.match(instructions, /Do not use `_like`; use `_contains`, `_starts_with`, or `_ends_with`/);
+  assert.match(requiredKnowledge, /do not use _like/);
+});
+
+test('schema design context warns about column relation namespace clashes', () => {
+  const tableTools = readFileSync(new URL('../src/lib/table-tools.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+  assert.match(tableTools, /Column names and relation propertyName values share one table namespace/);
+  assert.match(tableTools, /Relation propertyName must be unique among both relation names and scalar column names/);
+  assert.match(tableTools, /parent detail\/read must deep-load a child collection/);
+  assert.match(instructions, /Parent deep child collections are such a need/);
+  assert.match(requiredKnowledge, /deep-read a parent with child collections/);
+});
+
+test('dynamic script guidance rejects physical relation filter names', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+  assert.match(entry, /not \{ incidentId: \{ _eq: incident\.id \} \}/);
+  assert.match(instructions, /not `\{ incidentId: \{ _eq: id \} \}`/);
+  assert.match(requiredKnowledge, /not \{ incidentId: \{ _eq: id \} \}/);
+});
+
+test('list query tools require explicit limit or all intent except bounded locator search', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
@@ -1042,12 +1502,24 @@ test('list query tools require explicit limit or all intent', () => {
 
   assert.match(entry, /query_table requires either limit or all=true/);
   assert.match(entry, /get_all_routes requires either limit or all=true/);
+  assert.match(entry, /If search is provided without limit, the tool returns a bounded lookup window of 10 matches/);
   assert.match(entry, /query_table accepts either all=true or limit, not both/);
   assert.match(entry, /get_all_routes accepts either all=true or limit, not both/);
   assert.match(entry, /all: z\.boolean\(\)\.optional\(\)\.default\(false\)\.describe\('Return all matching rows by sending REST limit=0/);
-  assert.match(instructions, /pass `limit` for bounded reads or `all: true` for a complete list/);
+  assert.match(instructions, /omit limit with `search`/);
   assert.match(examples, /pass all: true instead of choosing an arbitrary page size such as 30 or 50/);
-  assert.match(readme, /Every list\/query call must pass either `limit`/);
+  assert.match(readme, /Locator searches on `get_all_routes` and `get_all_tables` may omit `limit`/);
+});
+
+test('delete_tables accepts tableName or tableId and schema rules mention full-batch preflight', () => {
+  const tableTools = readFileSync(new URL('../src/lib/table-tools.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+
+  assert.match(tableTools, /Native JSON array of delete items: \[\{ tableId \}\] or \[\{ tableName \}\]/);
+  assert.match(tableTools, /items\[\$\{index\}\] requires tableId or tableName/);
+  assert.match(instructions, /create_tables` preflights the whole batch/);
+  assert.match(requiredKnowledge, /create_tables preflights all items before posting tables/);
 });
 
 test('websocket script context documents roomSize helper', () => {
@@ -1102,6 +1574,28 @@ test('script context discovery documents runtime macro and helper surface', () =
   assert.match(instructions, /@FETCH/);
   assert.match(instructions, /@UPLOADED_FILE/);
   assert.match(instructions, /Call `discover_script_contexts` for exact per-surface availability/);
+});
+
+test('dynamic throw contract is consistently documented and ack-versioned', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const payload = buildRequiredKnowledgePayload();
+  const payloadText = JSON.stringify(payload);
+
+  assert.match(GLOBAL_RULES_ACK_KEY, /20260704H$/);
+  assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-THROW-CONTRACT/);
+  assert.equal(payload.version, '2026-07-04.global-rules-v8-schema-preflight-query-contracts');
+
+  for (const text of [entry, instructions, examples, payloadText]) {
+    assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);
+    assert.match(text, /details.*object\/array|object or array/i);
+    assert.match(text, /notFound\(resource, id\?\)|notFound\(\.\.\.\)|notFound\(resource, identifier\)/);
+    assert.match(text, /duplicate\(resource, field, value\)|duplicate\(\.\.\.\)/);
+  }
+
+  assert.match(entry, /do not use @THROW404\("Project", id\) as a semantic shortcut/);
+  assert.ok(payloadText.includes('do not use @THROW404(\\"Project\\", id) as a semantic shortcut'));
 });
 
 test('SSR app examples include Nuxt Next and Angular connection patterns', () => {
@@ -1162,7 +1656,7 @@ test('query guidance documents fields exclusion mode', () => {
   assert.match(examples, /fields=-compiledCode/);
   assert.match(examples, /fields=id,-compiledCode returns all readable fields except compiledCode/);
   assert.match(examples, /Dotted exclusions and deep relation fields use the same exclude-mode rule/);
-  assert.match(instructions, /Field exclusion mode exists: `fields=-compiledCode`/);
+  assert.match(instructions, /Field exclusion mode: `fields=-compiledCode`/);
   assert.match(readme, /`fields=-compiledCode` returns all readable fields except `compiledCode`/);
   assert.match(readme, /`fields=-owner\.avatar`/);
 });
@@ -1178,6 +1672,21 @@ test('operator guidance avoids speculative warnings and physical FK generated co
   assert.match(examples, /Do not ask the client for senderId\. The sender relation is derived from @USER\.id/);
   assert.match(readme, /`compiledCode` is generated from `sourceCode` and may differ textually/);
   assert.match(readme, /use relation property names such as `conversation`, `sender`, and `member`/);
+});
+
+test('schema examples guide live types and relation mutation without stale update_table relation payloads', () => {
+  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+
+  assert.match(examples, /Bulk schema creation with one-item-or-many arrays/);
+  assert.match(examples, /amount.*type: "float"/s);
+  assert.match(examples, /lookup: "<app_lookup_id>"/);
+  assert.doesNotMatch(examples, /learning_/);
+  assert.match(requiredKnowledge, /call get_schema_design_context first/);
+  assert.match(examples, /create_tables creates tables\/columns first, then creates requested relations after all batch tables exist/);
+  assert.doesNotMatch(examples, /update_tables\(\{[\s\S]*relations: JSON\.stringify/);
+  assert.match(instructions, /call `get_schema_design_context`/);
 });
 
 test('RLS guidance preserves caller projection and pagination', () => {
@@ -1201,6 +1710,35 @@ test('normalizeRelationForTablePatch rejects physical FK column inputs', () => {
     }),
     /foreignKeyColumn/
   );
+});
+
+test('relation normalization accepts common aliases and removes invalid one-to-many inverse payloads', () => {
+  assert.equal(normalizeRelationType('many_to_one'), 'many-to-one');
+  assert.equal(normalizeRelationType('oneToMany'), 'one-to-many');
+  assert.throws(() => normalizeRelationType('belongs_to'), /Invalid relation type/);
+
+  assert.deepEqual(
+    normalizeRelationForTablePatch({
+      targetTable: 'app_tasks',
+      type: 'one_to_many',
+      propertyName: 'tasks',
+      mappedBy: 'project',
+      inversePropertyName: 'project',
+    }),
+    {
+      targetTable: 'app_tasks',
+      type: 'one-to-many',
+      propertyName: 'tasks',
+      mappedBy: 'project',
+    },
+  );
+});
+
+test('delete_records defaults to cascade-tolerant not-found cleanup', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  assert.match(entry, /skipNotFound: z\.boolean\(\)\.optional\(\)\.default\(true\)/);
+  assert.match(entry, /skippedNotFoundCount/);
+  assert.match(entry, /isNotFoundDeleteError/);
 });
 
 test('sanitizeExistingRelationForTablePatch strips physical fields from metadata relations', () => {

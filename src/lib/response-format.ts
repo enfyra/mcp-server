@@ -93,6 +93,7 @@ function buildCompressionStats(originalPayload: unknown, candidatePayload: unkno
 }
 
 function attachCompressionStats(originalPayload: unknown, candidatePayload: unknown, selectedPayload: UnknownRecord, applied: boolean) {
+  if (!applied) return selectedPayload;
   if (
     isPlainObject(selectedPayload)
     && selectedPayload.responseFormat === RESPONSE_FORMAT

@@ -79,10 +79,10 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
  * @param {string} filterStr - Filter JSON string
  * @returns {object|null} Parsed filter object
  */
-export function validateFilter(filterStr: string) {
+export function validateFilter(filterStr: any) {
   if (!filterStr) return null;
   try {
-    const parsed = JSON.parse(filterStr);
+    const parsed = typeof filterStr === 'string' ? JSON.parse(filterStr) : filterStr;
     // Check depth limit (max 10 levels)
     function checkDepth(obj: any, depth = 0) {
       if (depth > 10) {
