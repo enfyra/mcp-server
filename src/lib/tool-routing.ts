@@ -350,24 +350,24 @@ export const TOOL_WORKFLOWS = [
       'Testing or triggering a flow.',
     ],
     keywords: ['flow', 'scheduled', 'manual flow', 'flow step', 'trigger flow', 'workflow'],
-    firstTools: ['get_enfyra_required_knowledge', 'plan_flow_steps', 'choose_flow_step_tool', 'discover_script_contexts'],
+    firstTools: ['get_enfyra_required_knowledge', 'flow_workflow', 'plan_flow_steps', 'discover_script_contexts'],
     inspectTools: ['inspect_feature', 'query_table'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts'],
-    writeTools: ['ensure_manual_flow', 'ensure_scheduled_flow', 'plan_flow_steps', 'ensure_query_flow_step', 'ensure_create_flow_step', 'ensure_update_flow_step', 'ensure_delete_flow_step', 'ensure_http_flow_step', 'ensure_sleep_flow_step', 'ensure_trigger_flow_step', 'ensure_log_flow_step', 'ensure_condition_flow_step', 'ensure_script_flow_step'],
+    writeTools: ['flow_workflow', 'plan_flow_steps'],
     verifyTools: ['test_flow_step', 'run_admin_test', 'trigger_flow'],
     avoidTools: [
       {
         tool: 'ensure_script_flow_step',
         when: 'a fixed query/create/update/delete/http/sleep/trigger/log step can express the operation',
-        useInstead: 'choose_flow_step_tool then the fixed-type ensure_*_flow_step',
+        useInstead: 'flow_workflow or plan_flow_steps',
         reason: 'Atomic step types are easier to inspect, test, and maintain than oversized scripts.',
       },
     ],
     requiredAck: ['globalRulesAckKey', 'dynamicCodeAckKey for script or condition source'],
     exampleCategories: ['flows'],
     nextStepTemplate: [
-      'Use plan_flow_steps for multi-step flows; use choose_flow_step_tool only for one unclear step.',
-      'Prefer fixed-type flow step tools over script steps.',
+      'Use flow_workflow with apply=false for multi-step flows; use plan_flow_steps only for dry-run step selection.',
+      'Prefer fixed step types over script steps.',
       'Validate/test script or condition steps before relying on the flow.',
       'Trigger manually only after the saved steps are verified.',
     ],
@@ -621,9 +621,9 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
     case 'flow':
       return [
         step(1, 'get_enfyra_required_knowledge', 'Read flow/dynamic-code contracts.'),
-        step(2, 'plan_flow_steps', 'Plan the ordered fixed-type step tools for the whole flow before mutating step metadata.'),
+        step(2, 'flow_workflow', 'Plan the flow with apply=false; this is the front door for flow metadata and steps.'),
         step(3, 'discover_script_contexts', 'Load flow-step macros when script/condition logic is involved.'),
-        step(4, 'ensure_manual_flow / ensure_scheduled_flow / ensure_*_flow_step', 'Create or update the flow and steps through fixed-contract tools.'),
+        step(4, 'flow_workflow', 'Apply the reviewed flow plan with apply=true so the flow and steps are saved sequentially.'),
         step(5, 'test_flow_step or trigger_flow', 'Verify a step or enqueue the flow intentionally.'),
       ];
     case 'websocket':

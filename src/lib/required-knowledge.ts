@@ -186,6 +186,7 @@ export function buildRequiredKnowledgePayload() {
           'Relation filters use relation propertyName values, not physical FK-shaped names. Use { incident: { id: { _eq: id } } }, not { incidentId: { _eq: id } }.',
           'Do not use @REPOS.secure.<table> or @REPOS.secure["table"] in generated sourceCode; use @REPOS.main when the route has a main table or #table_name/@REPOS.table_name with explicit fields and auth checks.',
           'When using repository find({ deep }) in handlers/hooks/flows, include each deep relation name in top-level fields, then choose nested fields under deep.<relation>.fields.',
+          'Repository calls are async. Always await #table.find/create/update/delete/exists and @REPOS.table.find/create/update/delete/exists; reads return { data: [...], meta? }.',
           'Create/update repository calls return collection-shaped data arrays; read result.data?.[0] for a single row.',
           'For intentional HTTP errors, numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message).',
           'When numeric helpers include details, pass an object or array such as @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut.',

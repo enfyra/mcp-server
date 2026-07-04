@@ -287,6 +287,37 @@ function assertNoDuplicateFieldNames(fieldNames: string[], context: string) {
   }
 }
 
+function assertNoColumnRelationNameCollision(columnNames: string[], relationNames: string[], context: string) {
+  const relationNameSet = new Set(relationNames.filter(Boolean));
+  const collisions = columnNames.filter((name) => relationNameSet.has(name));
+  if (collisions.length > 0) {
+    throw new Error(
+      `${context} has column/relation namespace collision(s): ${[...new Set(collisions)].join(', ')}. ` +
+      `Column names and relation propertyName values share one namespace; remove the scalar column(s) and keep the relation propertyName(s) ${[...new Set(collisions)].join(', ')}. Do not create physical FK columns.`,
+    );
+  }
+  assertNoDuplicateFieldNames([...columnNames, ...relationNames], context);
+}
+
+function formatConstraintFieldHints(fields: string[], relationNames: string[], logicalFieldNames: string[]) {
+  const relationNameSet = new Set(relationNames);
+  const logicalNameSet = new Set(logicalFieldNames);
+  const normalizeName = (value: string) => value.replace(/[_\-\s]/gu, '').toLowerCase();
+  return fields
+    .map((field) => {
+      const normalized = String(field)
+        .replace(/_?ids?$/iu, '')
+        .replace(/_id$/iu, '')
+        .replace(/Id$/u, '')
+        .replace(/Ids$/u, '');
+      const match = [...relationNameSet].find((name) => name.toLowerCase() === normalized.toLowerCase());
+      if (match) return `${field} -> use relation propertyName "${match}" in indexes/uniques, not physical FK "${field}"`;
+      const logicalMatch = [...logicalNameSet].find((name) => normalizeName(name) === normalizeName(String(field)));
+      return logicalMatch ? `${field} -> did you mean "${logicalMatch}"? Constraint fields must match column/relation names exactly.` : null;
+    })
+    .filter(Boolean);
+}
+
 function preflightCreateTableDefinitions(items: AnyRecord[]) {
   items.forEach((item, index) => {
     const columns = Array.isArray(item.columns) ? item.columns : parseJsonArrayParam(`items[${index}].columns`, item.columns || '[]');
@@ -294,7 +325,7 @@ function preflightCreateTableDefinitions(items: AnyRecord[]) {
     const { columns: userColumns } = stripAutoManagedColumns(columns);
     const columnNames = userColumns.map((column) => String(column?.name ?? '')).filter(Boolean);
     const relationNames = relations.map((relation) => String(relation?.propertyName ?? '')).filter(Boolean);
-    assertNoDuplicateFieldNames([...columnNames, ...relationNames], `create_tables items[${index}] (${item.name || '<unnamed>'})`);
+    assertNoColumnRelationNameCollision(columnNames, relationNames, `create_tables items[${index}] (${item.name || '<unnamed>'})`);
 
     const logicalFields = new Set([...AUTO_MANAGED_COLUMN_NAMES, ...columnNames, ...relationNames]);
     const indexes = normalizeConstraintGroupsValue(`items[${index}].indexes`, item.indexes ?? []);
@@ -304,12 +335,50 @@ function preflightCreateTableDefinitions(items: AnyRecord[]) {
       .flat()
       .filter((field) => !logicalFields.has(field));
     if (unknownConstraintFields.length > 0) {
+      const uniqueUnknownFields = [...new Set(unknownConstraintFields)];
+      const hints = formatConstraintFieldHints(uniqueUnknownFields, relationNames, [...logicalFields]);
       throw new Error(
-        `create_tables items[${index}] (${item.name || '<unnamed>'}) has indexes/uniques referencing undeclared field(s): ${[...new Set(unknownConstraintFields)].join(', ')}. ` +
-        'Declare each field as a column or relation propertyName in the same table item. For relation-based unique pairs added after create, first create the relations, then call update_tables with the unique group.',
+        `create_tables items[${index}] (${item.name || '<unnamed>'}) has indexes/uniques referencing undeclared field(s): ${uniqueUnknownFields.join(', ')}. ` +
+        'Declare each field as a column or relation propertyName in the same table item. ' +
+        (hints.length ? `Hint(s): ${hints.join('; ')}. ` : '') +
+        'For relation-based unique pairs added after create, first create the relations, then call update_tables with the unique group.',
       );
     }
   });
+}
+
+function relationTargetName(relation: AnyRecord) {
+  const target = relation?.targetTable ?? relation?.targetTableId;
+  if (target && typeof target === 'object') return target.name ?? target.alias ?? target.id ?? target._id;
+  return target;
+}
+
+export function computeBatchCleanupOrder(items: AnyRecord[]) {
+  const tableNames = items.map((item) => String(item?.name || '')).filter(Boolean);
+  const tableSet = new Set(tableNames);
+  const edges: Array<[string, string]> = [];
+  for (const item of items) {
+    const source = String(item?.name || '');
+    if (!source) continue;
+    const relations = Array.isArray(item.relations) ? item.relations : parseJsonArrayParam(`${source}.relations`, item.relations || '[]');
+    for (const relation of relations) {
+      const target = String(relationTargetName(relation) || '');
+      if (target && tableSet.has(target) && target !== source) edges.push([source, target]);
+    }
+  }
+  const remaining = new Set(tableNames);
+  const ordered: string[] = [];
+  while (remaining.size > 0) {
+    const leaves = [...remaining]
+      .filter((name) => !edges.some(([source, target]) => target === name && remaining.has(source) && remaining.has(target)))
+      .sort();
+    const batch = leaves.length ? leaves : [[...remaining].sort()[0]];
+    for (const name of batch) {
+      remaining.delete(name);
+      ordered.push(name);
+    }
+  }
+  return ordered;
 }
 
 function splitRelationConstraintGroups(groups: ConstraintGroup[], relationNames: Set<string>) {
@@ -354,21 +423,39 @@ function resolveRelationConstraintGroups(table: AnyRecord, groups: ConstraintGro
 }
 
 export function assertIndexesDoNotReferenceUniqueFields(indexes: ConstraintGroup[], uniques: ConstraintGroup[]) {
-  const uniqueFields = new Set(uniques.flat());
   const conflicts = indexes
-    .map((group) => ({
-      index: group,
-      uniqueFields: group.filter((field) => uniqueFields.has(field)),
+    .map((indexGroup) => ({
+      indexGroup,
+      uniqueGroups: uniques
+        .map((uniqueGroup) => ({
+          uniqueGroup,
+          overlappingFields: indexGroup.filter((field) => uniqueGroup.includes(field)),
+        }))
+        .filter((conflict) => conflict.overlappingFields.length > 0),
     }))
-    .filter((conflict) => conflict.uniqueFields.length > 0);
+    .filter((conflict) => conflict.uniqueGroups.length > 0);
   if (conflicts.length > 0) {
     const groups = conflicts
-      .map((conflict) => `${JSON.stringify(conflict.index)} uses unique field(s) ${JSON.stringify(conflict.uniqueFields)}`)
+      .map((conflict) => `${JSON.stringify(conflict.indexGroup)} overlaps unique group(s) ${conflict.uniqueGroups.map((item) => `${JSON.stringify(item.uniqueGroup)} via ${JSON.stringify(item.overlappingFields)}`).join(', ')}`)
       .join('; ');
     throw new Error(
       `Invalid schema constraints: indexes must not include fields that appear in uniques, including composite unique groups. Conflict(s): ${groups}. Unique constraints already create indexed lookups for their fields; remove those fields from indexes and keep them only in uniques.`,
     );
   }
+}
+
+function pruneIndexesThatOverlapUniques(indexes: ConstraintGroup[], uniques: ConstraintGroup[]) {
+  const uniqueFields = new Set(uniques.flat());
+  const kept: ConstraintGroup[] = [];
+  const removed: ConstraintGroup[] = [];
+  for (const indexGroup of indexes) {
+    if (indexGroup.some((field) => uniqueFields.has(field))) {
+      removed.push(indexGroup);
+    } else {
+      kept.push(indexGroup);
+    }
+  }
+  return { indexes: kept, removed };
 }
 
 export function normalizeRelationForTablePatch(relation: AnyRecord): RelationPatch {
@@ -920,11 +1007,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 	    const { columns: normalizedUserColumns, normalizations } = normalizeColumnsForLiveMetadata(userColumnsWithoutAuto, supportedTypes);
 	    const deferredRelations = arrayValue('relations', args.relations).map(normalizeRelationForTablePatch);
 	    const relationNames = new Set(deferredRelations.map((relation) => relation.propertyName).filter(Boolean));
-	    assertNoDuplicateFieldNames(
-	      [
-	        ...normalizedUserColumns.map((column) => String(column.name || '')).filter(Boolean),
-	        ...deferredRelations.map((relation) => String(relation.propertyName || '')).filter(Boolean),
-	      ],
+	    assertNoColumnRelationNameCollision(
+	      normalizedUserColumns.map((column) => String(column.name || '')).filter(Boolean),
+	      deferredRelations.map((relation) => String(relation.propertyName || '')).filter(Boolean),
 	      `create_tables item "${args.name}"`,
 	    );
 	    const indexes = normalizeConstraintGroupsValue('indexes', args.indexes ?? []);
@@ -999,8 +1084,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 	    const mappedUniques = resolveRelationConstraintGroups(tableData, deferredUniques, 'uniques');
 	    const existingIndexes = normalizeConstraintGroupsValue('indexes', tableData.indexes || []);
 	    const existingUniques = normalizeConstraintGroupsValue('uniques', tableData.uniques || []);
-	    const indexes = mergeConstraintGroups(existingIndexes, mappedIndexes);
 	    const uniques = mergeConstraintGroups(existingUniques, mappedUniques);
+	    const prunedExistingIndexes = pruneIndexesThatOverlapUniques(existingIndexes, uniques);
+	    const indexes = mergeConstraintGroups(prunedExistingIndexes.indexes, mappedIndexes);
 	    assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
 	    const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { indexes, uniques });
 	    return {
@@ -1015,12 +1101,14 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 	        indexes: mappedIndexes,
 	        uniques: mappedUniques,
 	      },
+	      prunedExistingIndexes: prunedExistingIndexes.removed,
 	      result,
 	    };
 	  }
 
 	  async function updateOneTable(args) {
     const body: AnyRecord = {};
+    let schemaConstraintNormalization: AnyRecord | undefined;
     if (args.name !== undefined) body.name = args.name;
     if (args.alias !== undefined) body.alias = args.alias;
     if (args.description !== undefined) body.description = args.description;
@@ -1037,6 +1125,15 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         if (indexes === undefined) indexes = normalizeConstraintGroupsValue('indexes', existing.indexes);
         if (uniques === undefined) uniques = normalizeConstraintGroupsValue('uniques', existing.uniques);
       }
+      if (args.uniques !== undefined && args.indexes === undefined) {
+        const prunedExistingIndexes = pruneIndexesThatOverlapUniques(indexes ?? [], uniques ?? []);
+        indexes = prunedExistingIndexes.indexes;
+        body.indexes = indexes;
+        schemaConstraintNormalization = {
+          prunedExistingIndexes: prunedExistingIndexes.removed,
+          reason: 'Unique constraints already provide indexed lookups; MCP removed existing non-unique indexes that used fields now covered by uniques.',
+        };
+      }
       assertIndexesDoNotReferenceUniqueFields(indexes ?? [], uniques ?? []);
     }
 
@@ -1044,6 +1141,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     return {
       action: 'table_updated',
       tableId: args.tableId,
+      schemaConstraintNormalization,
       result,
     };
   }
@@ -1270,6 +1368,8 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       'Do not include id, _id, createdAt, or updatedAt in columns; Enfyra manages them and create_tables strips them before save.',
       'Every field named in indexes/uniques must be a scalar column, auto-managed column, or relation propertyName in the same table item; otherwise the tool rejects the whole batch before creating tables.',
       'Use get_schema_design_context first for live column types and relation rules. Do not include physical FK fields.',
+      'The response includes cleanupHints.recordCreateOrder; use it when seeding records so parent/target rows are created before child/source rows.',
+      'The response includes cleanupHints.recordDeleteOrder; use it when deleting seeded test records so child/source rows are removed before parent/target rows.',
     ].join(' '),
     {
       items: bulkObjectArrayParam(z, 'Table definitions').optional().describe('Native JSON array of table definitions. Pass one object in the array for a single table.'),
@@ -1280,10 +1380,11 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     async ({ items, tables, maxItems, globalRulesAckKey }) => {
       assertGlobalRulesAck(globalRulesAckKey);
       if (items !== undefined && tables !== undefined) throw new Error('Pass either items or tables to create_tables, not both.');
-      const parsedItems = parseBulkItemsParam('items', items ?? tables);
-      assertBulkLimit('create_tables', parsedItems, maxItems);
-      preflightCreateTableDefinitions(parsedItems);
-	      const created: AnyRecord[] = [];
+	      const parsedItems = parseBulkItemsParam('items', items ?? tables);
+	      assertBulkLimit('create_tables', parsedItems, maxItems);
+	      preflightCreateTableDefinitions(parsedItems);
+	      const recordDeleteOrder = computeBatchCleanupOrder(parsedItems);
+		      const created: AnyRecord[] = [];
 	      const deferredRelations: AnyRecord[] = [];
 	      const deferredConstraints: AnyRecord[] = [];
 
@@ -1344,6 +1445,14 @@ export function registerTableTools(server, ENFYRA_API_URL) {
 	        sequential: true,
 	        relationPhaseAfterTables: true,
 	        constraintPhaseAfterRelations: true,
+	        cleanupHints: {
+	          recordCreateOrder: [...recordDeleteOrder].reverse(),
+	          recordDeleteOrder,
+	          tableDeleteOrder: recordDeleteOrder,
+	          recordCreateRule: 'When seeding sample data, create records sequentially in recordCreateOrder; parent/target rows must exist before child/source rows reference them.',
+	          recordRule: 'If you delete seeded records before deleting test tables, delete record batches sequentially in recordDeleteOrder; do not parallelize parent/child deletes.',
+	          tableRule: 'For full test cleanup, prefer delete_tables with tableDeleteOrder after deleting custom routes/flows; table deletion removes the remaining table data.',
+	        },
 	        created,
 	        createdRelations,
 	        appliedDeferredConstraints,

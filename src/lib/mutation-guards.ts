@@ -113,7 +113,21 @@ export function validatePortableScriptSource(sourceCode) {
     );
   }
 
+  validateAwaitedRepositoryCalls(sourceCode);
   validateNumericThrowDetails(sourceCode);
+}
+
+function validateAwaitedRepositoryCalls(sourceCode) {
+  const repoCallPattern = /(?:#[A-Za-z_][A-Za-z0-9_]*|@REPOS\.(?!secure\b)[A-Za-z_][A-Za-z0-9_]*|@REPOS\.main)\s*\.\s*(find|create|update|delete|exists)\s*\(/g;
+  let match;
+  while ((match = repoCallPattern.exec(sourceCode)) !== null) {
+    const lineStart = sourceCode.lastIndexOf('\n', match.index) + 1;
+    const beforeOnLine = sourceCode.slice(lineStart, match.index);
+    if (/\bawait\s*$/u.test(beforeOnLine) || /\breturn\s+await\s*$/u.test(beforeOnLine)) continue;
+    throw new Error(
+      `Dynamic repository calls are async. Add await before ${match[0].trim()} and read repository reads from result.data, e.g. const result = await #table.find({ fields: ["id"], limit: 10 }); const rows = result.data || [].`
+    );
+  }
 }
 
 function validateNumericThrowDetails(sourceCode) {

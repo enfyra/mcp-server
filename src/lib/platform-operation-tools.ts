@@ -1165,6 +1165,115 @@ function planFlowSteps(steps) {
   });
 }
 
+function normalizeFlowWorkflowStep(step, index) {
+  const input = typeof step === 'string' ? { intent: step } : (step || {});
+  const intent = String(input.intent || input.name || input.key || `Step ${index + 1}`);
+  const recommended = chooseFlowStepTool(input.type || intent);
+  const type = String(input.type || recommended.type || 'script');
+  const guidance = FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === type);
+  if (!guidance) {
+    throw new Error(`steps[${index}].type must be one of ${FLOW_STEP_TOOL_GUIDANCE.map((item) => item.type).join(', ')}.`);
+  }
+  const key = String(input.key || intent)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64) || `step_${index + 1}`;
+  return {
+    index,
+    key,
+    name: input.name || intent,
+    intent,
+    type,
+    order: input.order ?? index * 10,
+    config: input.config ?? guidance.config ?? {},
+    sourceCode: input.sourceCode ?? guidance.sourceCode,
+    scriptLanguage: input.scriptLanguage || 'javascript',
+    timeout: input.timeout,
+    isEnabled: input.isEnabled ?? true,
+    chosenByIntent: !input.type,
+    recommendedTool: guidance.tool,
+  };
+}
+
+async function runFlowWorkflow(apiUrl, opts) {
+  const steps = parseJsonArrayArg('steps', opts.steps, []);
+  const plan = steps.map(normalizeFlowWorkflowStep);
+  const hasDynamicCode = plan.some((step) => ['script', 'condition'].includes(step.type) && step.sourceCode);
+  const triggerType = opts.triggerType || 'manual';
+  const flowInput = {
+    name: opts.name,
+    triggerType,
+    triggerConfig: triggerType === 'schedule' ? opts.triggerConfig : (opts.triggerConfig ?? {}),
+    timeout: opts.timeout,
+    maxExecutions: opts.maxExecutions,
+    isEnabled: opts.isEnabled,
+    description: opts.description,
+    globalRulesAckKey: opts.globalRulesAckKey,
+  };
+
+  if (!opts.apply) {
+    return {
+      action: 'flow_workflow_planned',
+      flow: {
+        name: opts.name,
+        triggerType,
+      },
+      stepCount: plan.length,
+      plan,
+      requiredAckParams: ['globalRulesAckKey', ...(hasDynamicCode ? ['knowledgeAckKey'] : [])],
+      nextSteps: [
+        'Review the plan. Prefer fixed step types; script is only for logic not covered by query/create/update/delete/http/sleep/trigger/log/condition.',
+        'Call flow_workflow again with apply=true and the required ack params to create/update the flow and steps sequentially.',
+        'Use test_flow_step for script, condition, or high-risk steps before triggering the flow.',
+      ],
+    };
+  }
+
+  if (!opts.name) throw new Error('name is required.');
+  assertGlobalRulesAck(opts.globalRulesAckKey);
+  if (hasDynamicCode) assertDynamicCodeKnowledgeAck(opts.knowledgeAckKey);
+  const flowResult = await ensureFlow(apiUrl, flowInput);
+  const flowId = flowResult.flow.id;
+  const operations = [];
+  for (const step of plan) {
+    const result = await ensureFlowStep(apiUrl, {
+      flowName: undefined,
+      flowId,
+      key: step.key,
+      type: step.type,
+      order: step.order,
+      config: step.config,
+      sourceCode: step.sourceCode,
+      scriptLanguage: step.scriptLanguage,
+      timeout: step.timeout,
+      isEnabled: step.isEnabled,
+      globalRulesAckKey: opts.globalRulesAckKey,
+      knowledgeAckKey: opts.knowledgeAckKey,
+    });
+    operations.push({
+      index: step.index,
+      key: step.key,
+      type: step.type,
+      result,
+    });
+  }
+  return {
+    action: 'flow_workflow_applied',
+    flow: flowResult.flow,
+    flowResult,
+    stepCount: plan.length,
+    plan,
+    operations,
+    sequential: true,
+    nextSteps: [
+      'Use test_flow_step for script, condition, or high-risk steps before triggering the flow.',
+      'Use trigger_flow only after saved behavior is verified.',
+    ],
+  };
+}
+
 function normalizeEndpointAccess(anonymousAccess, makePublic) {
   if (makePublic !== undefined) return makePublic ? 'public' : 'private';
   return anonymousAccess || 'private';
@@ -2005,7 +2114,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER and #table_name. Do not send compiledCode. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
+      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER and #table_name. Repository calls are async: use `const result = await #table.find(...)` and read rows from `result.data || []`. Do not send compiledCode. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       anonymousAccess: z.enum(['public', 'private']).optional().default('private').describe('public adds the method to publicMethods; private removes this method from publicMethods.'),
       public: z.boolean().optional().describe('Compatibility alias for anonymousAccess. true means public, false means private.'),
@@ -2040,7 +2149,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER and #table_name. Do not send compiledCode. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
+      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER and #table_name. Repository calls are async: use `const result = await #table.find(...)` and read rows from `result.data || []`. Do not send compiledCode. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       public: z.boolean().optional().default(false).describe('When true, the method is added to publicMethods for anonymous access.'),
       description: z.string().optional().describe('Route description.'),
@@ -2428,6 +2537,43 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       const reload = naturalPartialReload('Websocket event writes trigger the server partial reload contract; there is no dedicated websocket reload endpoint.');
       return jsonText({ action: 'websocket_event_ensured', gateway: { id: getId(gateway), path: gateway.path }, eventName, validation, operation, reload });
     },
+  );
+
+  server.tool(
+    'flow_workflow',
+    [
+      'Workflow front door for creating or updating an Enfyra flow and its steps in one guided path.',
+      'Use apply=false first to plan step types from plain-language intents. Use apply=true only after reviewing the plan; the tool creates/updates the flow first, then steps sequentially.',
+      'Prefer this over choosing individual ensure_*_flow_step tools in guided mode.',
+    ].join(' '),
+    {
+      name: z.string().describe('Flow name. Existing flow with this name is updated.'),
+      triggerType: z.enum(['manual', 'schedule']).optional().default('manual').describe('manual for API/admin/hook/child flow usage, schedule for cron/time-based flows.'),
+      triggerConfig: z.union([z.record(z.any()), z.string()]).optional().describe('Trigger config object or JSON string. Required for scheduled flows.'),
+      steps: z.array(z.union([
+        z.string(),
+        z.object({
+          key: z.string().optional().describe('Stable step key. Generated from intent when omitted.'),
+          name: z.string().optional().describe('Human label. Defaults from intent.'),
+          intent: z.string().optional().describe('Plain-language step intent. Used to choose a fixed step type when type is omitted.'),
+          type: z.enum(['query', 'create', 'update', 'delete', 'http', 'condition', 'sleep', 'trigger_flow', 'log', 'script']).optional().describe('Explicit step type. Omit to let the workflow choose from intent.'),
+          config: z.union([z.record(z.any()), z.string()]).optional().describe('Step config object or JSON string. For query/create/update/delete/http/sleep/trigger/log steps, prefer config over sourceCode.'),
+          sourceCode: z.string().optional().describe('Only for script or condition steps. Use fixed step types when possible.'),
+          scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript'),
+          order: z.number().optional().describe('Step order. Defaults to index * 10.'),
+          timeout: z.number().int().positive().optional().describe('Step timeout in ms.'),
+          isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
+        }),
+      ])).min(1).max(30).describe('Ordered step intents/definitions. Keep one business operation per step.'),
+      timeout: z.number().int().positive().optional().describe('Flow timeout in ms.'),
+      maxExecutions: z.number().int().positive().optional().default(100).describe('Execution history cap.'),
+      isEnabled: z.boolean().optional().default(true).describe('Enable flow.'),
+      description: z.string().optional().describe('Admin note.'),
+      apply: z.boolean().optional().default(false).describe('false returns plan only; true applies flow and steps sequentially.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when apply=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required when apply=true and any script/condition step has sourceCode.'),
+    },
+    async (input) => jsonText(await runFlowWorkflow(ENFYRA_API_URL, input)),
   );
 
   server.tool(

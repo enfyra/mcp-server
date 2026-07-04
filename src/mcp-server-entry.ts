@@ -57,6 +57,15 @@ function jsonObjectParam(z, label: string) {
   return z.record(z.any()).describe(`${label} as a native JSON object. Do not JSON.stringify this value.`);
 }
 
+function normalizeSortParam(sort?: string) {
+  if (!sort) return sort;
+  return sort
+    .split(',')
+    .map((item) => item.trim().replace(/^(['"])(.*)\1$/u, '$2'))
+    .filter(Boolean)
+    .join(',');
+}
+
 // Import modules
 import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
 import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
@@ -1513,7 +1522,8 @@ server.tool('query_table', 'Query any route-backed table. Response is minimal un
   const deepFieldSelection = applyDeepFieldSelections(requestedFields, deep);
   const selectedFields = deepFieldSelection.fields;
   if (filterParam) queryParams.set('filter', filterParam);
-  if (sort) queryParams.set('sort', sort);
+  const normalizedSort = normalizeSortParam(sort);
+  if (normalizedSort) queryParams.set('sort', normalizedSort);
   if (page) queryParams.set('page', String(page));
   if (meta) queryParams.set('meta', meta);
   if (deepParam) queryParams.set('deep', deepParam);
@@ -1651,7 +1661,7 @@ server.tool(
 // CRUD TOOLS
 // ============================================================================
 
-server.tool('create_records', 'Create one or more route-backed records. Always pass records as a native JSON array; for one record, pass a one-item array. MCP preflights every item against live metadata first, then sends one POST per record sequentially; this is not a backend bulk endpoint or transaction.', {
+server.tool('create_records', 'Create one or more route-backed records. Always pass records as a native JSON array; for one record, pass a one-item array. MCP preflights every item against live metadata first, then sends one POST per record sequentially; this is not a backend bulk endpoint or transaction. create_records only writes one table at a time, so when seeding related tables, follow create_tables cleanupHints.recordCreateOrder and create parent/target records before child/source records.', {
   tableName: z.string().describe('Table name to insert into'),
   records: bulkObjectArrayParam(z, 'Records').describe('Records as a native JSON array. Each item must be a JSON object using metadata-backed column names and relation propertyName values.'),
   queryParams: z.string().optional().describe('Optional query params as JSON object string applied to every POST, for route contracts that intentionally keep workflow fields out of the validated body.'),

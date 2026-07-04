@@ -7,6 +7,7 @@ import { fetchAPI } from '../dist/lib/fetch.js';
 import {
   buildColumnDefinition,
   assertIndexesDoNotReferenceUniqueFields,
+  computeBatchCleanupOrder,
   fetchTableWithDetails,
   getSupportedColumnTypesFromMetadata,
   normalizeColumnsForLiveMetadata,
@@ -78,6 +79,20 @@ test('dynamic script guard rejects non-portable secure repo accessor', () => {
   );
 });
 
+test('dynamic script guard requires awaiting repository calls', () => {
+  assert.throws(
+    () => validatePortableScriptSource('const result = #orders.find({ fields: ["id"], limit: 10 })'),
+    /Dynamic repository calls are async/,
+  );
+  assert.throws(
+    () => validatePortableScriptSource('const created = @REPOS.orders.create({ data: @BODY })'),
+    /Dynamic repository calls are async/,
+  );
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('const result = await #orders.find({ fields: ["id"], limit: 10 })\nreturn result.data || []'),
+  );
+});
+
 test('dynamic script guard locks numeric throw helper details contract', () => {
   assert.doesNotThrow(
     () => validatePortableScriptSource('if (!request) @THROW404("Request not found")'),
@@ -145,10 +160,10 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
     surface: 'flow',
     risk: 'write',
     detail: 'plan',
-  }).workflows[0];
-  assert.equal(flow.key, 'flow');
-  assert.ok(flow.primaryPath.some((step) => step.tool === 'plan_flow_steps'));
-  assert.match(JSON.stringify(flow.avoidTools), /ensure_script_flow_step/);
+	  }).workflows[0];
+	  assert.equal(flow.key, 'flow');
+	  assert.ok(flow.primaryPath.some((step) => step.tool === 'flow_workflow'));
+	  assert.match(JSON.stringify(flow.avoidTools), /ensure_script_flow_step/);
 
   const schema = discoverWorkflowRoutes({
     intent: 'create a multi table app schema with columns relations and sample records',
@@ -322,6 +337,14 @@ test('schema constraint validation rejects indexes that include unique fields', 
         [['version'], ['docker_image']],
       ),
     /indexes must not include fields that appear in uniques, including composite unique groups/,
+  );
+  assert.throws(
+    () =>
+      assertIndexesDoNotReferenceUniqueFields(
+        [['status', 'scheduled_start']],
+        [['patient', 'scheduled_start']],
+      ),
+    /\["status","scheduled_start"\] overlaps unique group\(s\) \["patient","scheduled_start"\] via \["scheduled_start"\]/,
   );
 
   assert.doesNotThrow(() =>
@@ -723,7 +746,7 @@ test('create_tables accepts tables alias and defers relation constraints until F
       {
         id: 1,
         name: 'enfyra_column',
-        columns: [{ name: 'type', options: JSON.stringify(['int', 'varchar']) }],
+        columns: [{ name: 'type', options: JSON.stringify(['int', 'varchar', 'date']) }],
       },
       { id: 4, name: 'enfyra_user', columns: [{ id: 40, name: 'id', isPrimary: true }] },
       { id: 10, name: 'community_event', columns: [{ id: 100, name: 'id', isPrimary: true }] },
@@ -750,7 +773,7 @@ test('create_tables accepts tables alias and defers relation constraints until F
       const table = {
         id: 99,
         name: body.name,
-        indexes: body.indexes,
+        indexes: [...body.indexes, ['scheduledDate']],
         uniques: body.uniques,
         columns: body.columns.map((column, index) => ({ id: index + 1, ...column })),
         relations: [],
@@ -793,6 +816,7 @@ test('create_tables accepts tables alias and defers relation constraints until F
         name: 'event_registration',
         columns: [
           { name: 'status', type: 'varchar', isNullable: false },
+          { name: 'scheduledDate', type: 'date', isNullable: false },
           { name: 'createdAt', type: 'datetime' },
         ],
         relations: [
@@ -800,7 +824,7 @@ test('create_tables accepts tables alias and defers relation constraints until F
           { targetTable: 'enfyra_user', type: 'many-to-one', propertyName: 'attendee', isNullable: false },
         ],
         indexes: [['status']],
-        uniques: [['event', 'attendee']],
+        uniques: [['event', 'scheduledDate']],
       }],
       globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
     });
@@ -810,12 +834,39 @@ test('create_tables accepts tables alias and defers relation constraints until F
       name: 'createdAt',
       reason: 'Enfyra manages id/createdAt/updatedAt automatically during table creation.',
     }]);
-    assert.deepEqual(constraintPatch.uniques, [['eventId', 'attendeeId']]);
+    assert.deepEqual(constraintPatch.uniques, [['eventId', 'scheduledDate']]);
     assert.deepEqual(constraintPatch.indexes, [['status']]);
+    assert.deepEqual(payload.appliedDeferredConstraints[0].prunedExistingIndexes, [['scheduledDate']]);
+    assert.deepEqual(payload.cleanupHints.recordCreateOrder, ['event_registration']);
+    assert.match(payload.cleanupHints.recordCreateRule, /parent\/target rows/);
   } finally {
     resetTokens();
     global.fetch = originalFetch;
   }
+});
+
+test('create_tables cleanup order puts child/source tables before parent/target tables', () => {
+  const order = computeBatchCleanupOrder([
+    { name: 'zz_accounts' },
+    { name: 'zz_products' },
+    { name: 'zz_plans', relations: [{ targetTable: 'zz_products', propertyName: 'product' }] },
+    {
+      name: 'zz_subscriptions',
+      relations: [
+        { targetTable: 'zz_accounts', propertyName: 'account' },
+        { targetTable: 'zz_plans', propertyName: 'plan' },
+      ],
+    },
+    { name: 'zz_invoices', relations: [{ targetTable: 'zz_subscriptions', propertyName: 'subscription' }] },
+    { name: 'zz_usage_events', relations: [{ targetTable: 'zz_subscriptions', propertyName: 'subscription' }] },
+  ]);
+
+  assert.ok(order.indexOf('zz_invoices') < order.indexOf('zz_subscriptions'));
+  assert.ok(order.indexOf('zz_usage_events') < order.indexOf('zz_subscriptions'));
+  assert.ok(order.indexOf('zz_subscriptions') < order.indexOf('zz_accounts'));
+  assert.ok(order.indexOf('zz_subscriptions') < order.indexOf('zz_plans'));
+  assert.ok(order.indexOf('zz_plans') < order.indexOf('zz_products'));
+  assert.deepEqual([...order].reverse()[0], 'zz_products');
 });
 
 test('create_tables rejects constraints referencing undeclared fields before partial create', async () => {
@@ -851,6 +902,75 @@ test('create_tables rejects constraints referencing undeclared fields before par
         globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
       }),
       /undeclared field\(s\): attendee, event/,
+    );
+    assert.equal(postCount, 0);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('create_tables explains FK-shaped constraint fields and column relation collisions', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let postCount = 0;
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresAt: new Date(Date.now() + 600000).toISOString() });
+    }
+    if (urlText.endsWith('/enfyra_table') && init.method === 'POST') {
+      postCount += 1;
+      return jsonResponse({ data: [{ id: 100 }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await assert.rejects(
+      () => server.get('create_tables').handler({
+        items: [
+          {
+            name: 'event_hall',
+            columns: [{ name: 'name', type: 'varchar' }],
+            relations: [{ targetTable: 'event_venue', type: 'many-to-one', propertyName: 'venue' }],
+            indexes: [['venueId']],
+          },
+        ],
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      }),
+      /venueId -> use relation propertyName "venue"/,
+    );
+    await assert.rejects(
+      () => server.get('create_tables').handler({
+        items: [
+          {
+            name: 'crew_assignment',
+            columns: [{ name: 'start_date', type: 'date' }],
+            relations: [{ targetTable: 'crew', type: 'many-to-one', propertyName: 'crew' }],
+            uniques: [['crew', 'startDate']],
+          },
+        ],
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      }),
+      /startDate -> did you mean "start_date"/,
+    );
+    await assert.rejects(
+      () => server.get('create_tables').handler({
+        items: [
+          {
+            name: 'event_hall',
+            columns: [{ name: 'venue', type: 'int' }],
+            relations: [{ targetTable: 'event_venue', type: 'many-to-one', propertyName: 'venue' }],
+          },
+        ],
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      }),
+      /remove the scalar column\(s\) and keep the relation propertyName\(s\) venue/,
     );
     assert.equal(postCount, 0);
   } finally {
@@ -1257,10 +1377,11 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_field_permission['"]/);
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_route_permission['"]/);
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_guard['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_gateway['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_event['"]/);
-  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_flow['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_manual_flow['"]/);
+	  assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_gateway['"]/);
+	  assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_event['"]/);
+	  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_flow['"]/);
+	  assert.match(platformTools, /server\.tool\(\s*['"]flow_workflow['"]/);
+	  assert.match(platformTools, /server\.tool\(\s*['"]ensure_manual_flow['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_scheduled_flow['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]choose_flow_step_tool['"]/);
   assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_flow_step['"]/);
@@ -1397,9 +1518,9 @@ test('server instructions stay compact and route details to tools', () => {
   assert.match(instructions, /fetch only the relevant live context or example category/);
   assert.match(routing, /progressive disclosure/);
   assert.match(routing, /query_table on destination domain lists/);
-  assert.match(routing, /notification summary\/realtime shell signal plus destination-page fetch on click/);
-  assert.match(routing, /api_endpoint_workflow/);
-  assert.match(routing, /choose_flow_step_tool/);
+	  assert.match(routing, /notification summary\/realtime shell signal plus destination-page fetch on click/);
+	  assert.match(routing, /api_endpoint_workflow/);
+	  assert.match(routing, /flow_workflow/);
   assert.doesNotMatch(instructions, /#### Injected Vue API functions/);
   assert.doesNotMatch(instructions, /Tables confirmed to have REST routes/);
 });
@@ -1739,6 +1860,13 @@ test('delete_records defaults to cascade-tolerant not-found cleanup', () => {
   assert.match(entry, /skipNotFound: z\.boolean\(\)\.optional\(\)\.default\(true\)/);
   assert.match(entry, /skippedNotFoundCount/);
   assert.match(entry, /isNotFoundDeleteError/);
+});
+
+test('query_table normalizes quoted sort fields from weak clients', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  assert.match(entry, /function normalizeSortParam/);
+  assert.match(entry, /\.replace\(\/\^\(\['"\]\)\(\.\*\)\\1\$\/u, '\$2'\)/);
+  assert.match(entry, /queryParams\.set\('sort', normalizedSort\)/);
 });
 
 test('sanitizeExistingRelationForTablePatch strips physical fields from metadata relations', () => {

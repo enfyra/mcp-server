@@ -1493,8 +1493,8 @@ return order && order.total > 1000`,
   { "key": "write_audit_log", "stepOrder": 80, "type": "log" }
 ]`,
         notes: [
-          'Prefer the fixed-type flow step tool that matches each operation before falling back to script.',
-          'Use choose_flow_step_tool when the right step type is unclear.',
+          'Prefer flow_workflow for creating/updating a flow plus steps; it plans fixed step types before saving.',
+          'Use plan_flow_steps only as a lightweight dry-run when the flow itself is not being changed.',
           'Each step should return only ids, booleans, status keys, or small counters that later steps need.',
           'When refactoring an existing flow, add or extract adjacent focused enfyra_flow_step rows instead of making an oversized sourceCode block longer.',
         ],
