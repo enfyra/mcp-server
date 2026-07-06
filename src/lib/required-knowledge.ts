@@ -74,6 +74,7 @@ export function buildRequiredKnowledgePayload() {
           'Use narrow inspection tools for the table, route, feature, or script being changed instead of broad discovery after the target is known.',
           'When the thing to find lives in DB-backed runtime state rather than repo files, use search_admin_extensions for admin UI or search_runtime_zone for other runtime zones before raw query_table or broad trace tools.',
           'Read sourceCode, not compiledCode, for editable dynamic scripts.',
+          'Read code, not sourceCode, for editable enfyra_extension Vue SFC records. sourceCode is for dynamic server scripts; extension UI should be located with search_admin_extensions and edited with patch_extension_code/update_extension_code.',
         ],
       },
       {
@@ -182,6 +183,7 @@ export function buildRequiredKnowledgePayload() {
           'Use sourceCode and scriptLanguage; never send compiledCode.',
           'Prefer macros such as @BODY, @QUERY, @PARAMS, @USER, @REQ, @RES, @REPOS, @HELPERS, @STORAGE, @SOCKET, and @THROW* when available.',
           'Repository reads use filter, not where.',
+          'For dynamic file upload progress, clients send x-enfyra-upload-id on authenticated multipart requests and listen for $system:upload:progress; @STORAGE.$upload and blob-replacing @STORAGE.$update do not accept onProgress.',
           'Inside dynamic scripts, prefer #table_name.find with limit:1 and explicit fields for one-record lookups. If a primary-key id filter fails in a runtime, fetch a small bounded candidate set by a unique business field or use the canonical route/main-table context; do not keep retrying @REPOS.<table>.find id filter shapes.',
           'Relation filters use relation propertyName values, not physical FK-shaped names. Use { incident: { id: { _eq: id } } }, not { incidentId: { _eq: id } }.',
           'Do not use @REPOS.secure.<table> or @REPOS.secure["table"] in generated sourceCode; use @REPOS.main when the route has a main table or #table_name/@REPOS.table_name with explicit fields and auth checks.',
@@ -221,6 +223,7 @@ export function buildRequiredKnowledgePayload() {
         id: 'extension-runtime-contract',
         rules: [
           'Save extensions as enfyra_extension Vue SFC records; no static import statements in extension code.',
+          'Editable extension source is enfyra_extension.code. Do not request or write enfyra_extension.sourceCode.',
           'Do not call resolveComponent() in extension SFCs. Use auto-injected components such as <UButton>, <UBadge>, <PermissionGate>, and <Widget> directly in the template so the app/compiler resolves them correctly.',
           'Load app packages with getPackages(["package-name"]) inside extension runtime code.',
           'Prefer FormEditor/FormEditorLazy for direct table-backed forms when the form maps to metadata fields.',

@@ -435,14 +435,16 @@ export async function searchAdminExtensions(apiUrl: string, input: any) {
     ...result,
     results,
     action: mode === 'inspect' ? 'admin_extension_inspected' : 'admin_extensions_searched',
-    guidance: mode === 'inspect'
+        guidance: mode === 'inspect'
       ? [
+          'The editable source artifact is enfyra_extension.code, not sourceCode.',
           'For focused existing-code edits, prefer patch_extension_code with the inspected id/name.',
           'For page/menu wiring, use extension_workflow or ensure_*_extension.',
           'Use <UButton> and other auto-injected components directly in templates; do not use resolveComponent for them.',
         ]
       : [
           'Inspect one candidate before editing.',
+          'Admin extension source lives in enfyra_extension.code; do not query sourceCode on enfyra_extension.',
           'If the target is an existing page/widget/global extension, use patch_extension_code for a focused edit.',
           'Do not fetch destination business lists solely to draw menu/account-panel chips; use notification signals and fetch on click.',
         ],

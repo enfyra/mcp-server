@@ -76,6 +76,7 @@ const GUIDED_TOOL_NAMES = new Set([
   'set_table_graphql',
   'ensure_column_rule',
   'ensure_field_permission',
+  'ensure_route_rate_limit',
   'ensure_guard',
 
   'ensure_websocket_gateway',

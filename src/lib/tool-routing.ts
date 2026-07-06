@@ -309,21 +309,28 @@ export const TOOL_WORKFLOWS = [
     title: 'Guards, field permissions, and column validation rules',
     useWhen: [
       'Adding route guards, guard rules, field permissions, or column rules.',
+      'Adding request rate limits or throttling to a route.',
       'Restricting field read/write behavior.',
       'Adding body validation rules at metadata level.',
     ],
-    keywords: ['guard', 'field permission', 'column rule', 'validation rule', 'rule', 'rls'],
+    keywords: ['guard', 'rate limit', 'throttle', 'field permission', 'column rule', 'validation rule', 'rule', 'rls'],
     firstTools: ['get_enfyra_required_knowledge', 'inspect_table', 'inspect_route'],
     inspectTools: ['inspect_table', 'inspect_route', 'discover_query_capabilities'],
     knowledgeTools: ['get_enfyra_required_knowledge'],
-    writeTools: ['ensure_guard', 'ensure_field_permission', 'ensure_column_rule', 'create_pre_hook'],
+    writeTools: ['ensure_route_rate_limit', 'ensure_guard', 'ensure_field_permission', 'ensure_column_rule', 'create_pre_hook'],
     verifyTools: ['test_rest_endpoint', 'query_table', 'run_admin_test'],
     avoidTools: [
       {
         tool: 'raw create_records on guard/rule tables',
         when: 'a dedicated ensure_* operation exists',
-        useInstead: 'ensure_guard, ensure_field_permission, or ensure_column_rule',
+        useInstead: 'ensure_route_rate_limit, ensure_guard, ensure_field_permission, or ensure_column_rule',
         reason: 'Ensure tools resolve ids and preserve the current rule contract.',
+      },
+      {
+        tool: 'create_pre_hook',
+        when: 'the requirement is request throttling or rate limiting',
+        useInstead: 'ensure_route_rate_limit',
+        reason: 'Rate limits belong to the built-in guard engine, not custom pre-hook scripts.',
       },
       {
         tool: 'ensure_field_permission',
@@ -615,7 +622,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(1, 'get_enfyra_required_knowledge', 'Read access/security contracts.'),
         step(2, 'inspect_route or inspect_table', 'Inspect the exact route/table access surface.'),
         step(3, 'audit_route_access', 'Compare current route permissions against expected roles/users/methods.'),
-        step(4, 'ensure_route_access / create_pre_hook / ensure_field_permission / ensure_guard / ensure_column_rule', 'Apply the specific access/rule operation. Use create_pre_hook for owner/tenant row filters.'),
+        step(4, 'ensure_route_access / ensure_route_rate_limit / create_pre_hook / ensure_field_permission / ensure_guard / ensure_column_rule', 'Apply the specific access/rule operation. Use ensure_route_rate_limit for request throttling and create_pre_hook for owner/tenant row filters.'),
         step(5, 'audit_route_access or test_rest_endpoint', 'Verify the access behavior.'),
       ];
     case 'flow':

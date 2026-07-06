@@ -281,7 +281,7 @@ The MCP server includes safety guards for LLM callers:
 - Generated code should use relation property names such as `conversation`, `sender`, and `member` instead of physical FK fields such as `conversationId`, `senderId`, or `memberId`.
 - Custom route tools reject `mainTableId` unless the route is the canonical table route.
 - `discover_enfyra_workflows` maps task intent to workflow surfaces before the agent loads detailed examples or guesses between similar tools.
-- Platform operation tools such as `api_endpoint_workflow`, `extension_workflow`, `flow_workflow`, `search_admin_extensions`, `debug_field_exposure`, `enable_route`, `disable_route`, `delete_route`, `public_route_methods`, `set_table_graphql`, `ensure_guard`, `ensure_field_permission`, `ensure_column_rule`, `ensure_websocket_event`, `ensure_menu`, `reorder_menus`, `ensure_page_extension`, `ensure_global_extension`, and `ensure_widget_extension` resolve metadata ids and validate code before saving.
+- Platform operation tools such as `api_endpoint_workflow`, `extension_workflow`, `flow_workflow`, `search_admin_extensions`, `debug_field_exposure`, `enable_route`, `disable_route`, `delete_route`, `public_route_methods`, `set_table_graphql`, `ensure_route_rate_limit`, `ensure_guard`, `ensure_field_permission`, `ensure_column_rule`, `ensure_websocket_event`, `ensure_menu`, `reorder_menus`, `ensure_page_extension`, `ensure_global_extension`, and `ensure_widget_extension` resolve metadata ids and validate code before saving.
 - Schema changes are serialized.
 - Destructive deletes return a preview before requiring `confirm=true`.
 

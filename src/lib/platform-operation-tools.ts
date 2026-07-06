@@ -2380,8 +2380,84 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
   );
 
   server.tool(
+    'ensure_route_rate_limit',
+    'Business operation: create or update a route rate-limit guard through the Enfyra guard engine. Prefer this over pre-hooks or raw guard JSON for request throttling.',
+    {
+      name: z.string().optional().describe('Optional guard name. Defaults to a stable name based on path, methods, and scope.'),
+      routeId: z.union([z.string(), z.number()]).optional().describe('Optional route id.'),
+      path: z.string().optional().describe('Route path to protect, e.g. /newsletter_signup.'),
+      methods: z.array(z.string()).default(['POST']).describe('HTTP method names to protect.'),
+      scope: z.enum(['ip', 'user', 'route']).default('ip').describe('Rate-limit key scope. Use ip for public/pre-auth routes, user for authenticated users, route for a shared route-wide limit.'),
+      maxRequests: z.number().int().positive().describe('Allowed request count per window.'),
+      perSeconds: z.number().int().positive().describe('Window length in seconds.'),
+      position: z.enum(['pre_auth', 'post_auth']).optional().describe('Optional override. Defaults to pre_auth for ip/route and post_auth for user.'),
+      priority: z.number().optional().default(0).describe('Lower runs earlier.'),
+      isEnabled: z.boolean().optional().default(true).describe('Enable the guard. Defaults true.'),
+      description: z.string().optional().describe('Admin note.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+    },
+    async ({ name, routeId, path, methods, scope, maxRequests, perSeconds, position, priority, isEnabled, description, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      if (path && routeId) throw new Error('Provide path or routeId, not both.');
+      const resolvedPosition = position || (scope === 'user' ? 'post_auth' : 'pre_auth');
+      if (scope === 'user' && resolvedPosition === 'pre_auth') {
+        throw new Error('User-scoped rate limits require post_auth because user identity is unavailable before auth.');
+      }
+      const { route } = await resolveRoute(ENFYRA_API_URL, { path, routeId });
+      const { methodMap } = await getMethodContext(ENFYRA_API_URL);
+      const methodNames = uniqueMethodNames(methods?.length ? methods : ['POST']);
+      const ruleType = scope === 'user' ? 'rate_limit_by_user' : scope === 'route' ? 'rate_limit_by_route' : 'rate_limit_by_ip';
+      const guardName = name || `Rate limit ${scope} ${route.path} ${methodNames.join('_')}`;
+      const existing = await findRecord(ENFYRA_API_URL, 'enfyra_guard', { name: { _eq: guardName } }, 'id,_id,name');
+      const guardBody = {
+        name: guardName,
+        position: resolvedPosition,
+        combinator: 'and',
+        priority,
+        isGlobal: false,
+        isEnabled,
+        description: description || `Rate-limit ${methodNames.join(', ')} ${route.path} by ${scope}.`,
+        route: { id: getId(route) },
+        methods: resolveMethodRefs(methodMap, methodNames),
+      };
+      const guardOperation = await createOrPatch(ENFYRA_API_URL, 'enfyra_guard', existing, guardBody);
+      const guardId = guardOperation.id || getId(existing);
+      const existingRules = await fetchRecords(ENFYRA_API_URL, 'enfyra_guard_rule', { guard: { id: { _eq: guardId } } }, 'id,_id,isEnabled');
+      const disabledRules = [];
+      for (const rule of existingRules) {
+        disabledRules.push(await fetchAPI(ENFYRA_API_URL, `/enfyra_guard_rule/${encodeURIComponent(String(getId(rule)))}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ isEnabled: false }),
+        }));
+      }
+      const rule = await fetchAPI(ENFYRA_API_URL, '/enfyra_guard_rule', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: ruleType,
+          config: { maxRequests, perSeconds },
+          priority: 0,
+          isEnabled: true,
+          description: `${maxRequests} request${maxRequests === 1 ? '' : 's'} per ${perSeconds} seconds by ${scope}.`,
+          guard: { id: guardId },
+        }),
+      });
+      const reload = await reloadBestEffort(ENFYRA_API_URL, '/admin/reload/guards');
+      return jsonText({
+        action: 'route_rate_limit_ensured',
+        route: { id: getId(route), path: route.path },
+        methods: methodNames,
+        guard: { id: guardId, name: guardName, position: resolvedPosition, isEnabled },
+        rule: { type: ruleType, config: { maxRequests, perSeconds }, result: rule },
+        disabledRuleCount: disabledRules.length,
+        reload,
+        next: 'Call inspect_route({ path }) to confirm the guard is attached, then test behavior through the actual REST route if doing so will not consume a production rate-limit bucket.',
+      });
+    },
+  );
+
+  server.tool(
     'ensure_guard',
-    'Business operation: create or update a request guard and optional guard rules. It resolves route/method ids and prevents pre_auth user-based rules.',
+    'Advanced business operation: create or update a custom request guard tree and optional guard rules. For simple request throttling use ensure_route_rate_limit instead.',
     {
       name: z.string().describe('Guard name. Existing guard with this name is updated unless guardId is provided.'),
       guardId: z.union([z.string(), z.number()]).optional().describe('Optional existing guard id.'),

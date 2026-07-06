@@ -1176,20 +1176,13 @@ ensure_route_access({
       },
       {
         name: 'Rate limit anonymous requests by IP',
-        code: `ensure_guard({
-  name: "Public signup IP rate limit",
+        code: `ensure_route_rate_limit({
   path: "/newsletter_signup",
   methods: ["POST"],
-  position: "pre_auth",
-  isEnabled: true,
+  scope: "ip",
+  maxRequests: 10,
+  perSeconds: 60,
   description: "Limit anonymous signup attempts by client IP.",
-  rules: JSON.stringify([
-    {
-      type: "rate_limit_by_ip",
-      config: { maxRequests: 10, perSeconds: 60 },
-      description: "10 signup attempts per minute per IP"
-    }
-  ])
 })
 
 inspect_route({ path: "/newsletter_signup" })
@@ -1200,31 +1193,25 @@ test_rest_endpoint({
   body: { email: "test@example.com" }
 })`,
         notes: [
-          'Use pre_auth for anonymous/public route protection because no user is available yet.',
-          'Rate-limit configs use maxRequests and perSeconds.',
+          'Use ensure_route_rate_limit for request throttling so the built-in guard engine enforces the limit.',
+          'Use scope "ip" for anonymous/public route protection because no user is available yet.',
           'Inspect and test after creation so the final behavior is verified through the actual REST route.',
         ],
       },
       {
         name: 'Rate limit authenticated users',
-        code: `ensure_guard({
-  name: "Project create per-user limit",
+        code: `ensure_route_rate_limit({
   path: "/projects",
   methods: ["POST"],
-  position: "post_auth",
-  isEnabled: true,
+  scope: "user",
+  maxRequests: 3,
+  perSeconds: 3600,
   description: "Authenticated users can create at most 3 projects per hour.",
-  rules: JSON.stringify([
-    {
-      type: "rate_limit_by_user",
-      config: { maxRequests: 3, perSeconds: 3600 }
-    }
-  ])
 })`,
         notes: [
-          'Use post_auth for rate_limit_by_user because the server only has user id after auth and RoleGuard.',
+          'User-scoped limits automatically use post_auth because the server only has user id after auth and RoleGuard.',
           'This does not grant access; users still need route permissions or a public method to reach the route.',
-          'Do not put rate_limit_by_user on pre_auth guards; the server drops that rule from pre-auth trees.',
+          'Use ensure_guard only for advanced guard trees such as IP allowlists/blacklists or composed AND/OR guard rules.',
         ],
       },
       {
@@ -1566,6 +1553,7 @@ return saved`,
         notes: [
           'Use file-specific context only in upload-capable routes.',
           'For request uploads, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from the temp file path.',
+          'For upload progress, the client should send x-enfyra-upload-id and listen for the authenticated $system:upload:progress event.',
           'Use @STORAGE.$registerFile when an external process already uploaded the object and the script only needs to create the enfyra_file record.',
           'Do not read @UPLOADED_FILE.path into a Buffer and do not generate examples using @UPLOADED_FILE.buffer.',
           'Use buffer only for small generated or transformed files, such as image thumbnails.',

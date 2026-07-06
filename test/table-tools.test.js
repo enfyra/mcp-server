@@ -1369,9 +1369,11 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]set_table_graphql['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_column_rule['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_field_permission['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_route_rate_limit['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_guard['"]/);
   assert.match(platformTools, /ensure_column_rule[\s\S]*globalRulesAckKey[\s\S]*assertGlobalRulesAck/);
   assert.match(platformTools, /ensure_field_permission[\s\S]*globalRulesAckKey[\s\S]*assertGlobalRulesAck/);
+  assert.match(platformTools, /ensure_route_rate_limit[\s\S]*globalRulesAckKey[\s\S]*assertGlobalRulesAck/);
   assert.match(platformTools, /ensure_guard[\s\S]*globalRulesAckKey[\s\S]*assertGlobalRulesAck/);
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_column_rule['"]/);
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_field_permission['"]/);
@@ -1564,6 +1566,20 @@ test('query_table supports deep meta and aggregate query options', () => {
   assert.match(entry, /function applyDeepFieldSelections/);
   assert.match(entry, /autoAddedDeepFields/);
   assert.match(entry, /query_table auto-adds missing top-level deep relation names to fields/);
+});
+
+test('generic read tools reject enfyra_extension sourceCode confusion', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+  const runtimeZoneTools = readFileSync(new URL('../src/lib/runtime-zone-tools.ts', import.meta.url), 'utf8');
+
+  assert.match(entry, /function assertExtensionReadFields/);
+  assert.match(entry, /enfyra_extension stores editable Vue SFC extension source in `code`, not `sourceCode`/);
+  assert.match(entry, /assertExtensionReadFields\(tableName, fields\)/);
+  assert.match(requiredKnowledge, /Read code, not sourceCode, for editable enfyra_extension Vue SFC records/);
+  assert.match(requiredKnowledge, /Editable extension source is enfyra_extension\.code/);
+  assert.match(runtimeZoneTools, /editable source artifact is enfyra_extension\.code/);
+  assert.match(runtimeZoneTools, /do not query sourceCode on enfyra_extension/);
 });
 
 test('dynamic script guidance documents repository deep projection contract', () => {

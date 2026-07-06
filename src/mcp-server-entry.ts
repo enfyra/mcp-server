@@ -66,6 +66,27 @@ function normalizeSortParam(sort?: string) {
     .join(',');
 }
 
+function normalizeFieldSelection(fields?: string[]) {
+  return (fields || [])
+    .flatMap((field) => String(field).split(','))
+    .map((field) => field.trim())
+    .filter(Boolean);
+}
+
+function assertExtensionReadFields(tableName: string, fields?: string[]) {
+  if (tableName !== 'enfyra_extension') return;
+  const requestedFields = normalizeFieldSelection(fields);
+  const requestsSourceCode = requestedFields.some((field) => field === 'sourceCode' || field.endsWith('.sourceCode'));
+  if (!requestsSourceCode) return;
+  throw new Error([
+    'enfyra_extension stores editable Vue SFC extension source in `code`, not `sourceCode`.',
+    '`sourceCode` belongs to dynamic server script records such as handlers, hooks, flow steps, websocket handlers, GraphQL resolvers, and bootstrap scripts.',
+    'For admin UI lookup, use search_admin_extensions(mode="search") then search_admin_extensions(mode="inspect").',
+    'For focused extension edits, use patch_extension_code or update_extension_code.',
+    'If you intentionally read raw extension records, request fields such as ["id","name","type","version","code"].',
+  ].join(' '));
+}
+
 // Import modules
 import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
 import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
@@ -88,6 +109,7 @@ import {
 } from './lib/required-knowledge.js';
 import { validateMainTableRoutePath } from './lib/route-guards.js';
 import { installColumnarToolFormatter, jsonContent } from './lib/response-format.js';
+import { startMcpUsageTelemetry } from './lib/mcp-usage-telemetry.js';
 import { compactSourceFields, writeSourceArtifact } from './lib/source-artifacts.js';
 import { installToolsetFilter, normalizeMcpToolset, summarizeToolsetForInstructions } from './lib/toolset-filter.js';
 import {
@@ -942,6 +964,7 @@ const server = new McpServer(
 );
 installColumnarToolFormatter(server);
 installToolsetFilter(server, MCP_TOOLSET);
+startMcpUsageTelemetry(ENFYRA_API_URL, MCP_TOOLSET);
 
 // ============================================================================
 // METADATA TOOLS
@@ -1438,7 +1461,7 @@ server.tool(
         },
         socketInHttpOrFlow: 'HTTP/flow context can emitToUser/emitToRoom/emitToGateway/broadcast and roomSize, but cannot reply/join/leave/disconnect/emitToCurrentRoom/broadcastToRoom because there is no bound socket. emitToRoom requires an explicit gateway path: emitToRoom(path, room, event, data). roomSize(room) counts sockets in that room across registered gateways.',
         packages: 'Server packages installed through install_package are exposed as $ctx.$pkgs.packageName in server scripts.',
-        files: 'Upload helpers are on $storage; raw create_records on enfyra_file is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the enfyra_file record without uploading bytes. Use buffer only for small generated files.',
+        files: 'Upload helpers are on $storage; raw create_records on enfyra_file is not equivalent to multipart upload/storage rollback. For multipart request files, pass file: @UPLOADED_FILE to @STORAGE.$upload/@STORAGE.$update so Enfyra streams from disk-backed temp storage. For progress, clients send x-enfyra-upload-id on authenticated multipart requests and listen for $system:upload:progress; $upload and blob-replacing $update do not accept onProgress. Use @STORAGE.$registerFile only when the object already exists in storage and the script should create the enfyra_file record without uploading bytes. Use buffer only for small generated files.',
       },
       adminTesting: {
         flowStep: 'Use test_flow_step or run_admin_test(kind=flow_step).',
@@ -1491,7 +1514,7 @@ server.tool(
   },
 );
 
-server.tool('query_table', 'Query any route-backed table. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators.', {
+server.tool('query_table', 'Query any route-backed table. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
   tableName: z.string().describe('Table name to query'),
   filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object. Example: {"status": {"_eq": "active"}}.'),
   sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
@@ -1510,6 +1533,7 @@ server.tool('query_table', 'Query any route-backed table. Response is minimal un
     throw new Error('query_table accepts either all=true or limit, not both.');
   }
   validateTableName(tableName);
+  assertExtensionReadFields(tableName, fields);
   const filterParam = stringifyJsonArg(filter);
   const deepParam = stringifyJsonArg(deep);
   const aggregateParam = stringifyJsonArg(aggregate);
@@ -1604,7 +1628,7 @@ server.tool(
 
 server.tool(
   'find_one_record',
-  'Find a single record by ID or filter. By ID uses GET with filter (Enfyra has no GET /table/:id route).',
+  'Find a single record by ID or filter. By ID uses GET with filter (Enfyra has no GET /table/:id route). For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.',
   {
 	    tableName: z.string().describe('Table name'),
 	    id: z.string().optional().describe('Record ID'),
@@ -1613,6 +1637,7 @@ server.tool(
   },
   async ({ tableName, id, filter, fields }) => {
     validateTableName(tableName);
+    assertExtensionReadFields(tableName, fields);
     const primaryKey = await getPrimaryFieldName(tableName);
     const selectedFields = fields && fields.length > 0 ? fields : [primaryKey];
     if (id) {

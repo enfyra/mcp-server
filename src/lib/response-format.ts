@@ -1,4 +1,5 @@
 import type { ToolResult, UnknownRecord } from "./types.js";
+import { recordMcpToolUsage } from './mcp-usage-telemetry.js';
 
 const RESPONSE_FORMAT = 'json+columnar-v1';
 const COLUMNAR_FORMAT = 'columnar-v1';
@@ -183,8 +184,16 @@ export function installColumnarToolFormatter(server: any) {
       return registerTool(name, description, schema, handler);
     }
     return registerTool(name, description, schema, async (...args) => {
-      const result = await handler(...args);
-      return formatToolResult(result);
+      const startedAt = Date.now();
+      try {
+        const result = await handler(...args);
+        const formatted = formatToolResult(result);
+        recordMcpToolUsage(name, startedAt, args, formatted);
+        return formatted;
+      } catch (error) {
+        recordMcpToolUsage(name, startedAt, args, undefined, error);
+        throw error;
+      }
     });
   };
 }
