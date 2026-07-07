@@ -975,9 +975,12 @@ server.tool(
   [
     'Return required Enfyra knowledge and acknowledgement keys for MCP code-writing tools.',
     'Call this before creating or updating dynamic server code or Enfyra extension code. Read the returned contracts and pass the matching ack key into write tools.',
+    'Pass scope to only load rules for the current task domain: "schema" (table/data/route/permission/guard work), "dynamic-code" (handler/hook/websocket/resolver scripts), "extension" (admin UI/menu/shell), or "flow". Omitting scope returns all rules.',
   ].join(' '),
-  {},
-  async () => jsonContent(buildRequiredKnowledgePayload()),
+  {
+    scope: z.enum(['schema', 'dynamic-code', 'extension', 'flow']).optional().describe('Limit knowledge to one domain. Omit to load all rules.'),
+  },
+  async ({ scope }) => jsonContent(buildRequiredKnowledgePayload(scope)),
 );
 
 server.tool('get_all_metadata', 'Get concise metadata summary for all tables. Use get_table_metadata or inspect_table for detail.', {

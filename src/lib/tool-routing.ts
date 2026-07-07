@@ -49,6 +49,7 @@ type ToolWorkflow = {
   requiredAck: string[];
   exampleCategories: string[];
   nextStepTemplate: string[];
+  recommendedScope: string;
 };
 
 type WorkflowRouteOptions = {
@@ -96,6 +97,7 @@ export const TOOL_WORKFLOWS = [
       'Apply one pending step or use applyAll only when the plan is fully understood.',
       'Verify the endpoint with test_rest_endpoint or run_admin_test.',
     ],
+    recommendedScope: 'dynamic-code',
   },
   {
     key: 'extension',
@@ -141,6 +143,7 @@ export const TOOL_WORKFLOWS = [
       'Choose count only when the source already owns an exact count; choose dot/chip for new-attention signals.',
       'Validate extension code or use an ensure_*_extension tool that validates before saving.',
     ],
+    recommendedScope: 'extension',
   },
   {
     key: 'schema',
@@ -179,6 +182,7 @@ export const TOOL_WORKFLOWS = [
       'Apply schema tool changes with globalRulesAckKey.',
       'Re-inspect metadata instead of assuming the saved shape.',
     ],
+    recommendedScope: 'schema',
   },
   {
     key: 'record-data',
@@ -229,6 +233,7 @@ export const TOOL_WORKFLOWS = [
       'For writes, read required knowledge and use plural mutation tools with native array inputs, even for one item.',
       'Re-read with explicit fields after mutation when saved shape matters.',
     ],
+    recommendedScope: 'schema',
   },
   {
     key: 'dynamic-script',
@@ -266,6 +271,7 @@ export const TOOL_WORKFLOWS = [
       'Validate source before save unless the chosen write tool already validates.',
       'Verify behavior with the route/test runner that matches the script surface.',
     ],
+    recommendedScope: 'dynamic-code',
   },
   {
     key: 'route-access',
@@ -303,6 +309,7 @@ export const TOOL_WORKFLOWS = [
       'Use route operation tools instead of raw permission CRUD.',
       'Audit and test the route after the change.',
     ],
+    recommendedScope: 'schema',
   },
   {
     key: 'guards-permissions-rules',
@@ -347,6 +354,7 @@ export const TOOL_WORKFLOWS = [
       'Use the specific ensure_* operation for guard, field, or column rule surfaces.',
       'Verify with the route/query behavior the rule is meant to protect.',
     ],
+    recommendedScope: 'schema',
   },
   {
     key: 'flow',
@@ -378,6 +386,7 @@ export const TOOL_WORKFLOWS = [
       'Validate/test script or condition steps before relying on the flow.',
       'Trigger manually only after the saved steps are verified.',
     ],
+    recommendedScope: 'flow',
   },
   {
     key: 'websocket',
@@ -408,6 +417,7 @@ export const TOOL_WORKFLOWS = [
       'Ensure gateway first, then event.',
       'Use run_admin_test for event/connection scripts where possible.',
     ],
+    recommendedScope: 'dynamic-code',
   },
   {
     key: 'graphql',
@@ -438,6 +448,7 @@ export const TOOL_WORKFLOWS = [
       'Use set_table_graphql for enablement changes.',
       'Remember GraphQL table data requires Bearer auth even when REST is public.',
     ],
+    recommendedScope: 'schema',
   },
   {
     key: 'package',
@@ -467,6 +478,7 @@ export const TOOL_WORKFLOWS = [
       'Install with install_package and globalRulesAckKey.',
       'Use getPackages inside extension runtime code rather than static imports.',
     ],
+    recommendedScope: 'schema',
   },
   {
     key: 'cache',
@@ -496,6 +508,7 @@ export const TOOL_WORKFLOWS = [
       'If stale evidence truly requires manual reload, switch to ENFYRA_MCP_TOOLSET=full and choose the narrowest reload surface.',
       'Re-verify the same narrow behavior after reload.',
     ],
+    recommendedScope: 'schema',
   },
   {
     key: 'logs-debug',
@@ -526,6 +539,7 @@ export const TOOL_WORKFLOWS = [
       'Use the matching test tool to reproduce once the failing surface is known.',
       'Patch only after the failing step is identified.',
     ],
+    recommendedScope: 'schema',
   },
   {
     key: 'auth-context',
@@ -556,6 +570,7 @@ export const TOOL_WORKFLOWS = [
       'Use get_permission_profile before assuming admin helper route access with non-root tokens.',
       'Use login only when an interactive credential login is explicitly needed.',
     ],
+    recommendedScope: 'schema',
   },
 ] satisfies ToolWorkflow[];
 
@@ -564,6 +579,7 @@ function compactWorkflow(workflow: ToolWorkflow) {
     key: workflow.key,
     title: workflow.title,
     useWhen: workflow.useWhen,
+    recommendedScope: workflow.recommendedScope,
   };
 }
 
@@ -705,6 +721,7 @@ function verifyPathFor(workflow: ToolWorkflow) {
 function planWorkflow(workflow: ToolWorkflow) {
   return {
     ...compactWorkflow(workflow),
+    recommendedScope: workflow.recommendedScope,
     primaryPath: primaryPathFor(workflow),
     advancedTools: advancedToolsFor(workflow),
     escapeHatches: escapeHatchesFor(workflow),
