@@ -750,6 +750,9 @@ function scoreWorkflow(workflow: ToolWorkflow, { intent, surface, risk }: { inte
   if (risk === 'debug' && workflow.key === 'logs-debug') score += 6;
   if (risk === 'write' && workflow.writeTools.length) score += 2;
   if (risk === 'destructive' && workflow.avoidTools.some((item) => normalize(item.when).includes('delete'))) score += 2;
+  if (workflow.key === 'dynamic-script' && /\b(patch|edit|update|fix|change)\b/.test(text) && /\b(sourcecode|source|compiledcode|script)\b/.test(text)) score += 10;
+  if (workflow.key === 'dynamic-script' && /flow step/.test(text) && /\b(sourcecode|source|compiledcode|script)\b/.test(text)) score += 6;
+  if (workflow.key === 'flow' && /\b(patch|edit|update|fix|change)\b/.test(text) && /\b(sourcecode|source|compiledcode|script)\b/.test(text)) score -= 4;
   return score;
 }
 

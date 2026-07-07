@@ -165,6 +165,15 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
 	  assert.ok(flow.primaryPath.some((step) => step.tool === 'flow_workflow'));
 	  assert.match(JSON.stringify(flow.avoidTools), /ensure_script_flow_step/);
 
+  const flowSourcePatch = discoverWorkflowRoutes({
+    intent: 'patch existing flow step source and avoid compiledCode',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(flowSourcePatch.key, 'dynamic-script');
+  assert.ok(flowSourcePatch.primaryPath.some((step) => step.tool === 'get_script_source'));
+  assert.ok(flowSourcePatch.primaryPath.some((step) => step.tool === 'patch_script_source or update_script_source'));
+
   const schema = discoverWorkflowRoutes({
     intent: 'create a multi table app schema with columns relations and sample records',
     surface: 'schema',
