@@ -941,8 +941,63 @@ export function reviewExtensionUiContract(code) {
     issueCount: issues.length,
     issues,
     nextSteps: issues.length
-      ? ['Use build_extension_drawer or build_extension_modal for replacement snippets, then apply with patch_extension_code/update_extension_code.']
+      ? ['Use build_extension_ui with kind=drawer or kind=modal for replacement snippets, then apply with patch_extension_code/update_extension_code.']
       : ['Snippet matches the checked modal/drawer contract rules. Still validate the final SFC before saving.'],
+  };
+}
+
+export function buildExtensionUiSnippet(kind: string, input: AnyRecord = {}) {
+  let result;
+  switch (kind) {
+    case 'drawer':
+      result = buildExtensionDrawerSnippet(input);
+      break;
+    case 'modal':
+      result = buildExtensionModalSnippet(input);
+      break;
+    case 'page_shell':
+      result = buildExtensionPageShellSnippet(input);
+      break;
+    case 'permission_gate':
+      result = buildExtensionPermissionGateSnippet(input);
+      break;
+    case 'empty_state':
+      result = buildExtensionEmptyStateSnippet(input);
+      break;
+    case 'resource_list':
+      result = buildExtensionResourceListSnippet(input);
+      break;
+    case 'form_editor':
+      result = buildExtensionFormEditorSnippet(input);
+      break;
+    case 'widget':
+      result = buildExtensionWidgetSnippet(input);
+      break;
+    case 'menu_notification':
+      result = buildExtensionMenuNotificationSnippet(input);
+      break;
+    case 'account_panel_item':
+      result = buildExtensionAccountPanelSnippet(input);
+      break;
+    case 'tabs':
+      result = buildExtensionTabsSnippet(input);
+      break;
+    case 'upload_modal':
+      result = buildExtensionUploadModalSnippet(input);
+      break;
+    case 'review':
+      if (!input?.code) {
+        throw new Error('build_extension_ui kind=review requires input.code.');
+      }
+      result = reviewExtensionUiContract(input.code);
+      break;
+    default:
+      throw new Error(`Unsupported extension UI builder kind: ${kind}`);
+  }
+  return {
+    gateway: 'build_extension_ui',
+    kind,
+    ...result,
   };
 }
 
@@ -1010,8 +1065,8 @@ function getExtensionThemeContract() {
       'Use auto-injected components directly in the template with PascalCase names. Do not call resolveComponent() to manually resolve Nuxt UI/eApp components inside extension SFCs; it can compile but render unresolved lowercase DOM tags such as <ubutton>.',
       'Buttons should have stable geometry: hover may change color, border, or shadow but must not move the button or resize its content. Disabled buttons keep disabled cursor/visual state.',
       'Inputs and textareas should not add hover movement or decorative hover states; focus, invalid, disabled, and loading states must be explicit.',
-      'For drawers, modals, page shell headers/actions, permission gates, empty states, resource lists, form editors, widgets, menu/account panel registries, tabs, and upload modals, call the matching build_extension_* tool before patching raw Vue.',
-      'Use review_extension_ui_contract before saving generated snippets that include high-contract UI or native buttons.',
+      'For drawers, modals, page shell headers/actions, permission gates, empty states, resource lists, form editors, widgets, menu/account panel registries, tabs, and upload modals, call build_extension_ui with the matching kind after extension acknowledgement before patching raw Vue.',
+      'Use build_extension_ui kind=review before saving generated snippets that include high-contract UI or native buttons.',
       'Extension validation rejects UInput, UTextarea, USelect, USelectMenu, UInputMenu, UInputNumber, UInputTags, UInputTime, and UInputDate without class="w-full" unless marked data-compact or data-inline.',
       'Use UBadge or token-backed badge spans for status. Keep badges legible in both themes with tokenized background, text, and border.',
     ],
@@ -1026,23 +1081,23 @@ function getExtensionThemeContract() {
     ],
     shellComponentContracts: {
       CommonDrawer: [
-        'Use build_extension_drawer for generated drawer/editing snippets.',
+        'Use build_extension_ui kind=drawer for generated drawer/editing snippets.',
         'The builder owns slots, managed footer actions, full-width fields, native button types, and loading/error/body structure.',
       ],
       CommonModal: [
-        'Use build_extension_modal for generated modal/confirmation snippets.',
+        'Use build_extension_ui kind=modal for generated modal/confirmation snippets.',
         'The builder owns UModal/CommonModal aliasing, slots, managed footer actions, full-width fields, native button types, and modal surface constraints.',
       ],
       PermissionGate: [
-        'Use build_extension_permission_gate for generated permission wrapper snippets.',
+        'Use build_extension_ui kind=permission_gate for generated permission wrapper snippets.',
         'UI gates are operator UX only; backend route permissions and handler/hook owner checks remain authoritative.',
       ],
       Widget: [
-        'Use build_extension_widget for generated widget include snippets.',
+        'Use build_extension_ui kind=widget for generated widget include snippets.',
         'The builder owns numeric id usage, reactive prop/event wiring, and page/widget ownership warnings.',
       ],
       actionButtons: [
-        'Use review_extension_ui_contract for generated snippets with native buttons.',
+        'Use build_extension_ui kind=review for generated snippets with native buttons.',
         'Validation/review catches missing type="button" and high-contract component mistakes before saving.',
       ],
     },
@@ -2550,8 +2605,8 @@ async function runExtensionWorkflow(apiUrl, opts) {
       'Call get_extension_theme_contract before generating or reviewing extension UI.',
       'useApi returns refs { data, error, pending, status } plus execute/refresh; it does not auto-run. Pass query/body/filter/deep/aggregate as objects or computed objects, not JSON strings.',
       'useNotify exposes success/error/warning/info(title, description?) async helpers; do not pass Nuxt toast object payloads to it.',
-      'For high-contract UI, call build_extension_* builders before patching raw Vue: drawer, modal, page shell, permission gate, empty state, resource list, form editor, widget, menu notification, account panel item, tabs, or upload modal.',
-      'Use review_extension_ui_contract before saving generated snippets that include drawers, modals, fields, lists, tabs, upload modals, shell registry code, or native buttons.',
+      'For high-contract UI, call build_extension_ui after extension acknowledgement before patching raw Vue: drawer, modal, page shell, permission gate, empty state, resource list, form editor, widget, menu notification, account panel item, tabs, upload modal, or review.',
+      'Use build_extension_ui kind=review before saving generated snippets that include drawers, modals, fields, lists, tabs, upload modals, shell registry code, or native buttons.',
       'Extension validation rejects common field controls without class="w-full" unless intentionally marked data-compact or data-inline.',
       'PermissionGate renders the permitted slot directly and is UX-only; backend permissions and owner checks remain authoritative.',
       'For menu/account-panel notifications, use counts only when the signal source already owns an exact count; otherwise use a dot/chip for new attention.',
@@ -2694,6 +2749,38 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     ].join(' '),
     {},
     async () => jsonText(getThemeClassReference()),
+  );
+
+  server.tool(
+    'build_extension_ui',
+    [
+      'Lazy gateway for Enfyra admin extension UI builders.',
+      'Use this after get_enfyra_required_knowledge(scope="extension") when a high-contract extension UI snippet is needed.',
+      'It keeps guided startup small by dispatching drawer, modal, page_shell, permission_gate, empty_state, resource_list, form_editor, widget, menu_notification, account_panel_item, tabs, upload_modal, or review internally instead of exposing every builder tool up front.',
+    ].join(' '),
+    {
+      kind: z.enum([
+        'drawer',
+        'modal',
+        'page_shell',
+        'permission_gate',
+        'empty_state',
+        'resource_list',
+        'form_editor',
+        'widget',
+        'menu_notification',
+        'account_panel_item',
+        'tabs',
+        'upload_modal',
+        'review',
+      ]).describe('Which extension UI contract builder/reviewer to run.'),
+      input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=review, pass { code }.'),
+      extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
+    },
+    async ({ kind, input, extensionKnowledgeAckKey }) => {
+      assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
+      return jsonText(buildExtensionUiSnippet(kind, input));
+    },
   );
 
   server.tool(

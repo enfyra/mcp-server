@@ -2184,8 +2184,8 @@ onMounted(() => fetchOrders())
   </CommonModal>
 </template>`,
         notes: [
-          'Use build_extension_modal or build_extension_drawer to generate this shape instead of hand-writing the component contract.',
-          'Use review_extension_ui_contract before saving snippets with modals, drawers, fields, or native buttons.',
+          'Use build_extension_ui with kind=modal or kind=drawer to generate this shape after extension acknowledgement instead of hand-writing the component contract.',
+          'Use build_extension_ui kind=review before saving snippets with modals, drawers, fields, or native buttons.',
           'Extension validation rejects common field controls without class="w-full" unless marked data-compact or data-inline.',
         ],
       },

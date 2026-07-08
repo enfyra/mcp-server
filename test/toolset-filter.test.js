@@ -21,19 +21,20 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('debug_field_exposure', 'guided'), true);
   assert.equal(isToolVisibleInToolset('api_endpoint_workflow', 'guided'), true);
   assert.equal(isToolVisibleInToolset('patch_extension_code', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_drawer', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_modal', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_page_shell', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_permission_gate', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_empty_state', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_resource_list', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_form_editor', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_widget', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_menu_notification', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_account_panel_item', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_tabs', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_upload_modal', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('review_extension_ui_contract', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('build_extension_ui', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('build_extension_drawer', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_modal', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_page_shell', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_permission_gate', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_empty_state', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_resource_list', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_form_editor', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_widget', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_menu_notification', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_account_panel_item', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_tabs', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('build_extension_upload_modal', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('review_extension_ui_contract', 'guided'), false);
   assert.equal(isToolVisibleInToolset('create_pre_hook', 'guided'), true);
   assert.equal(isToolVisibleInToolset('ensure_route_rate_limit', 'guided'), true);
   assert.equal(isToolVisibleInToolset('flow_workflow', 'guided'), true);
@@ -48,6 +49,8 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
 
 test('full toolset exposes all tools', () => {
   assert.equal(isToolVisibleInToolset('create_route', 'full'), true);
+  assert.equal(isToolVisibleInToolset('build_extension_drawer', 'full'), true);
+  assert.equal(isToolVisibleInToolset('review_extension_ui_contract', 'full'), true);
   assert.equal(isToolVisibleInToolset('any_future_tool', 'full'), true);
 });
 

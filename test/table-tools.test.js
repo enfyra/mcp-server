@@ -140,6 +140,7 @@ test('extension component builders enforce drawer and modal contracts', async ()
     buildExtensionDrawerSnippet,
     buildExtensionEmptyStateSnippet,
     buildExtensionFormEditorSnippet,
+    buildExtensionUiSnippet,
     buildExtensionAccountPanelSnippet,
     buildExtensionMenuNotificationSnippet,
     buildExtensionModalSnippet,
@@ -186,6 +187,16 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(drawer.snippet, /<UTextarea class="w-full" v-model="form\.content"/);
   assert.match(drawer.snippet, /<button type="button" @click="pickColor">/);
 
+  const lazyDrawer = buildExtensionUiSnippet('drawer', {
+    model: 'drawerOpen',
+    title: 'New Note',
+    body: '<UInput v-model="form.title" />',
+  });
+  assert.equal(lazyDrawer.gateway, 'build_extension_ui');
+  assert.equal(lazyDrawer.kind, 'drawer');
+  assert.match(lazyDrawer.snippet, /<CommonDrawer/);
+  assert.match(lazyDrawer.snippet, /<UInput class="w-full" v-model="form\.title"/);
+
   const modal = buildExtensionModalSnippet({
     model: 'deleteModalOpen',
     title: 'Delete Note',
@@ -214,6 +225,13 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(JSON.stringify(review.issues), /common-drawer-slots/);
   assert.match(JSON.stringify(review.issues), /modal-drawer-field-width/);
   assert.match(JSON.stringify(review.issues), /native-button-type/);
+
+  const lazyReview = buildExtensionUiSnippet('review', {
+    code: '<template><CommonModal title="Bad"><UInput v-model="name" /></CommonModal></template>',
+  });
+  assert.equal(lazyReview.gateway, 'build_extension_ui');
+  assert.equal(lazyReview.kind, 'review');
+  assert.equal(lazyReview.valid, false);
 
   const pageShell = buildExtensionPageShellSnippet({
     title: 'Notes',
@@ -1624,6 +1642,9 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]create_api_endpoint['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]validate_dynamic_script['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]validate_extension_code['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_ui['"]/);
+  assert.match(platformTools, /Lazy gateway for Enfyra admin extension UI builders/);
+  assert.match(platformTools, /extensionKnowledgeAckKey/);
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_drawer['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_modal['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_page_shell['"]/);
@@ -1690,7 +1711,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /assertExtensionKnowledgeAck/);
   assert.match(platformTools, /get_extension_theme_contract before generating or reviewing extension UI/);
   assert.match(platformTools, /useApi returns refs/);
-  assert.match(platformTools, /For high-contract UI, call build_extension_\* builders/);
+  assert.match(platformTools, /For high-contract UI, call build_extension_ui/);
   assert.match(platformTools, /Generate a contract-safe CommonDrawer Vue snippet/);
   assert.match(platformTools, /Generate a contract-safe CommonModal\/UModal Vue snippet/);
   assert.match(platformTools, /Generate page-header and shell-header-action script setup code/);
@@ -1704,23 +1725,23 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /Generate a UTabs snippet/);
   assert.match(platformTools, /Generate a CommonUploadModal snippet/);
   assert.match(platformTools, /Review an Enfyra extension Vue snippet/);
-  assert.match(platformTools, /Use review_extension_ui_contract before saving generated snippets/);
+  assert.match(platformTools, /kind=review/);
   assert.match(platformTools, /field controls without class="w-full"/);
   assert.match(platformTools, /Extension validation rejects UInput, UTextarea/);
-  assert.match(routing, /build_extension_\* builders/);
-  assert.match(routing, /FormEditor, Widget, shell registries, tabs, or upload modal/);
-  assert.match(routing, /build_extension_page_shell/);
-  assert.match(instructions, /use `build_extension_\*` tools/);
-  assert.match(instructions, /FormEditor, Widget, menu\/account panel registries, tabs, and upload modals/);
-  assert.match(platformTools, /Use build_extension_drawer for generated drawer\/editing snippets/);
-  assert.match(platformTools, /Use build_extension_modal for generated modal\/confirmation snippets/);
+  assert.match(routing, /build_extension_ui/);
+  assert.match(routing, /FormEditor, Widget, shell registries, tabs, upload modal, or review/);
+  assert.match(routing, /kind: drawer, modal, page shell/);
+  assert.match(instructions, /use `build_extension_ui`/);
+  assert.match(instructions, /FormEditor, Widget, menu\/account panel registries, tabs, upload modals, and review/);
+  assert.match(platformTools, /Use build_extension_ui kind=drawer for generated drawer\/editing snippets/);
+  assert.match(platformTools, /Use build_extension_ui kind=modal for generated modal\/confirmation snippets/);
   assert.match(platformTools, /Unrestricted menu permission is null/);
   assert.match(platformTools, /patches=\[\{search,replace\}/);
   assert.match(platformTools, /searchMode="whitespace"/);
   assert.match(platformTools, /replaceAll=true/);
   assert.match(platformTools, /Atomic multi-patch list/);
   assert.match(platformTools, /shellComponentContracts/);
-  assert.match(platformTools, /Use build_extension_permission_gate for generated permission wrapper snippets/);
+  assert.match(platformTools, /Use build_extension_ui kind=permission_gate for generated permission wrapper snippets/);
   assert.match(platformTools, /PermissionGate renders the permitted slot directly/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_page_extension['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_global_extension['"]/);
@@ -1771,7 +1792,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /bg-primary\/10/);
   assert.match(platformTools, /Do not color large panels, alert-like success blocks, KPI cards, list containers, or reconciliation\/attention blocks green\/yellow\/red/);
   assert.match(platformTools, /PageHeader gradient must be "none"/);
-  assert.match(platformTools, /Use build_extension_modal for generated modal\/confirmation snippets/);
+  assert.match(platformTools, /Use build_extension_ui kind=modal for generated modal\/confirmation snippets/);
   assert.match(platformTools, /md:grid-cols-2 xl:grid-cols-3/);
   assert.match(examples, /eapp-surface-card p-4/);
   assert.match(examples, /eapp-primary-surface/);
