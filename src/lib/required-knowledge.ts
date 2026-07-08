@@ -1,8 +1,8 @@
 export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONES::SCHEMA-DESIGN-CONTEXT::RECORD-BATCH::20260704H';
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-THROW-CONTRACT::RAW-NUMERIC::SEMANTIC-NAMED::20260704A';
-export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-THEME-CONTRACT::VIOLET-IS-NOT-A-PLAN::7mQ';
+export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260708A';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-04.global-rules-v8-schema-preflight-query-contracts';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-07-08.global-rules-v9-app-composable-contracts';
 
 export function globalRulesAckParam(z) {
   return z.string().describe('Required global-rules acknowledgement key from get_enfyra_required_knowledge. Call that tool, read the global Enfyra MCP rules, then pass globalRulesAckKey exactly.');
@@ -225,10 +225,22 @@ const EXTENSION_SECTIONS = [
       'Editable extension source is enfyra_extension.code. Do not request or write enfyra_extension.sourceCode.',
       'Do not call resolveComponent() in extension SFCs. Use auto-injected components such as <UButton>, <UBadge>, <PermissionGate>, and <Widget> directly in the template so the app/compiler resolves them correctly.',
       'Load app packages with getPackages(["package-name"]) inside extension runtime code.',
-      'Prefer FormEditor/FormEditorLazy for direct table-backed forms when the form maps to metadata fields.',
-      'For long admin setup workflows, open CommonDrawer immediately and show loading/error/content inside it.',
-      'Use Widget with numeric enfyra_extension widget ids; pass safe reactive props/events and keep page-level mutation ownership in the page unless the widget intentionally owns the workflow.',
-      'Use useMenuNotificationRegistry for sidebar menu counts/dots and useAccountPanelRegistry count/badge fields for account panel notifications; register these from global extensions when they should update across the shell.',
+      'For generated high-contract UI, call the matching build_extension_* tool instead of hand-writing component contracts: drawer, modal, page shell, permission gate, empty state, resource list, form editor, widget, menu notification, account panel item, tabs, or upload modal.',
+      'Use review_extension_ui_contract before saving generated snippets that include drawers, modals, fields, lists, tabs, upload modals, shell registry code, or native buttons.',
+      'Extension validation rejects UInput/UTextarea/USelect/USelectMenu/UInputMenu/UInputNumber/UInputTags/UInputTime/UInputDate without class="w-full" unless the field is explicitly marked data-compact or data-inline.',
+      'PermissionGate is operator UX only; backend route permissions and owner checks remain authoritative.',
+    ],
+  },
+  {
+    id: 'extension-app-composables',
+    rules: [
+      'useApi(url, options) returns { data, error, pending, status, execute, refresh }. data/error/pending/status are refs. execute(options?) is async and returns the response object or null.',
+      'useApi does not auto-run. Call execute() from onMounted, a watcher, or a user action.',
+      'Pass query/body as plain objects or computed objects. Do not JSON.stringify filter/deep/aggregate inside app/extension code; useApi forwards query through Nuxt $fetch.',
+      'For GET lists, read rows from data.value?.data when data.value is the normal Enfyra response shape. When using the returned response from execute(), read response?.data. Do not double-unwrap data?.value?.data in templates or sync helpers unless you are handling a legacy nested response explicitly.',
+      'For create/update/delete, set method in useApi options and pass execute({ body }) or execute({ id, body }). For PATCH/DELETE one record, use execute({ id }). For batch id operations, use execute({ ids }).',
+      'Use errorContext for readable failures. If you handle an error locally, return true from onError to suppress the default toast/error-page handling.',
+      'useNotify() returns async success/error/warning/info(title, description?) helpers plus dismiss/clear. Do not call it with Nuxt toast object payloads; use notify.success("Saved", "Changes were applied") rather than notify.add({ title: ... }).',
     ],
   },
 ];

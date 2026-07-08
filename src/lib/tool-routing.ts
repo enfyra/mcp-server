@@ -110,9 +110,9 @@ export const TOOL_WORKFLOWS = [
     keywords: ['extension', 'menu', 'account panel', 'notification', 'chip', 'badge', 'sidebar', 'shell', 'page ui', 'widget'],
     firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'search_admin_extensions'],
     inspectTools: ['search_admin_extensions(mode=search)', 'search_admin_extensions(mode=inspect)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
-    knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'get_theme_class_reference'],
+    knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'get_theme_class_reference', 'build_extension_drawer', 'build_extension_modal', 'build_extension_page_shell', 'build_extension_permission_gate', 'build_extension_empty_state', 'build_extension_resource_list', 'build_extension_form_editor', 'build_extension_widget', 'build_extension_menu_notification', 'build_extension_account_panel_item', 'build_extension_tabs', 'build_extension_upload_modal'],
     writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
-    verifyTools: ['validate_extension_code', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
+    verifyTools: ['review_extension_ui_contract', 'validate_extension_code', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     avoidTools: [
       {
         tool: 'create_records/update_records on enfyra_extension',
@@ -603,8 +603,9 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(2, 'get_extension_theme_contract', 'Load the required eApp/Nuxt UI theme and component contract.'),
         step(3, 'search_admin_extensions', 'Locate the menu/page/widget/global extension by visible text, path, button, icon, tab, or source term.'),
         step(4, 'search_admin_extensions', 'Inspect the selected admin UI artifact with mode=inspect using nextInspect.input.'),
-        step(5, 'extension_workflow or patch_extension_code/update_extension_code', 'Use extension_workflow for create/wire flows, patch_extension_code for focused edits, or update_extension_code for full replacements.'),
-        step(6, 'validate_extension_code', 'Validate only when the chosen write tool did not already validate and save atomically.'),
+        step(5, 'build_extension_* builders or review_extension_ui_contract', 'For high-contract extension UI such as drawer, modal, page shell, permission gate, empty state, resource list, FormEditor, Widget, shell registries, tabs, or upload modal, generate/review snippets with component contract builders before patching raw Vue.'),
+        step(6, 'extension_workflow or patch_extension_code/update_extension_code', 'Use extension_workflow for create/wire flows, patch_extension_code for focused edits, or update_extension_code for full replacements.'),
+        step(7, 'validate_extension_code', 'Validate only when the chosen write tool did not already validate and save atomically.'),
       ];
     case 'schema':
       return [

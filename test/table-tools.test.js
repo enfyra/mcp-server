@@ -48,7 +48,19 @@ test('extension local validation rejects manual component resolution mistakes', 
 
   assert.deepEqual(
     validateExtensionCodeLocally('<template><UButton>Save</UButton></template>'),
-    { componentCasing: 'passed' },
+    { componentCasing: 'passed', fieldWidth: 'passed' },
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<template><UInput v-model="name" /></template>'),
+    /must include class="w-full"/,
+  );
+  assert.deepEqual(
+    validateExtensionCodeLocally('<template><UInput v-model="name" class="w-full" /></template>'),
+    { componentCasing: 'passed', fieldWidth: 'passed' },
+  );
+  assert.deepEqual(
+    validateExtensionCodeLocally('<template><UInput v-model="name" data-compact /></template>'),
+    { componentCasing: 'passed', fieldWidth: 'passed' },
   );
   assert.throws(
     () => validateExtensionCodeLocally([
@@ -63,6 +75,250 @@ test('extension local validation rejects manual component resolution mistakes', 
     () => validateExtensionCodeLocally('<template><ubutton>Save</ubutton></template>'),
     /use <UButton> instead of <ubutton>/,
   );
+});
+
+test('extension patch helper supports atomic patches replaceAll and whitespace-flex search', async () => {
+  const { applyExtensionCodePatches } = await import('../dist/lib/platform-operation-tools.js');
+
+  const source = [
+    '<template>',
+    '  <CommonDrawer v-model="open">',
+    '    <p>Loading</p>',
+    '  </CommonDrawer>',
+    '  <span class="chip">One</span>',
+    '  <span class="chip">Two</span>',
+    '</template>',
+  ].join('\n');
+
+  const atomic = applyExtensionCodePatches(source, {
+    patches: [
+      {
+        search: '<CommonDrawer v-model="open">',
+        replace: '<CommonDrawer v-model="open">\n    <template #body>',
+      },
+      {
+        search: '    <p>Loading</p>',
+        replace: '      <p>Loading</p>',
+      },
+      {
+        search: '  </CommonDrawer>',
+        replace: '    </template>\n  </CommonDrawer>',
+      },
+    ],
+  });
+
+  assert.match(atomic.code, /<template #body>/);
+  assert.match(atomic.code, /<\/template>\n  <\/CommonDrawer>/);
+  assert.equal(atomic.results.length, 3);
+
+  const replaceAll = applyExtensionCodePatches(source, {
+    search: 'class="chip"',
+    replace: 'class="chip eapp-primary-soft"',
+    replaceAll: true,
+  });
+  assert.equal(replaceAll.results[0].occurrences, 2);
+  assert.equal((replaceAll.code.match(/eapp-primary-soft/g) || []).length, 2);
+
+  const whitespace = applyExtensionCodePatches(source, {
+    search: '<CommonDrawer v-model="open"> <p>Loading</p>',
+    replace: '<CommonDrawer v-model="open">\n    <template #body>\n      <p>Loading</p>\n    </template>',
+    searchMode: 'whitespace',
+  });
+  assert.match(whitespace.code, /<template #body>/);
+
+  assert.throws(
+    () => applyExtensionCodePatches(source, {
+      search: 'class="chip"',
+      replace: 'class="chip eapp-primary-soft"',
+    }),
+    /replaceAll=true/,
+  );
+});
+
+test('extension component builders enforce drawer and modal contracts', async () => {
+  const {
+    buildExtensionDrawerSnippet,
+    buildExtensionEmptyStateSnippet,
+    buildExtensionFormEditorSnippet,
+    buildExtensionAccountPanelSnippet,
+    buildExtensionMenuNotificationSnippet,
+    buildExtensionModalSnippet,
+    buildExtensionPageShellSnippet,
+    buildExtensionPermissionGateSnippet,
+    buildExtensionResourceListSnippet,
+    buildExtensionTabsSnippet,
+    buildExtensionUploadModalSnippet,
+    buildExtensionWidgetSnippet,
+    reviewExtensionUiContract,
+  } = await import('../dist/lib/platform-operation-tools.js');
+
+  const drawer = buildExtensionDrawerSnippet({
+    model: 'drawerOpen',
+    titleExpression: "mode === 'create' ? 'New Note' : 'Edit Note'",
+    body: [
+      '<div>',
+      '  <UInput v-model="form.title" placeholder="Title" />',
+      '  <UTextarea v-model="form.content" :rows="6" />',
+      '  <button @click="pickColor">Pick</button>',
+      '</div>',
+    ].join('\n'),
+    primaryAction: {
+      labelExpression: "mode === 'create' ? 'Create note' : 'Save note'",
+      icon: 'lucide:save',
+      loading: 'saving',
+      disabled: 'saving',
+      onClick: 'saveNote',
+    },
+    dangerAction: {
+      label: 'Delete',
+      icon: 'lucide:trash-2',
+      loading: 'deleting',
+      disabled: 'deleting',
+      onClick: 'confirmDelete',
+    },
+  });
+
+  assert.match(drawer.snippet, /<CommonDrawer/);
+  assert.match(drawer.snippet, /<template #header>/);
+  assert.match(drawer.snippet, /:primary-action="\{ label: mode === 'create' \? 'Create note' : 'Save note'/);
+  assert.match(drawer.snippet, /:danger-action="\{ label: 'Delete'/);
+  assert.match(drawer.snippet, /<UInput class="w-full" v-model="form\.title"/);
+  assert.match(drawer.snippet, /<UTextarea class="w-full" v-model="form\.content"/);
+  assert.match(drawer.snippet, /<button type="button" @click="pickColor">/);
+
+  const modal = buildExtensionModalSnippet({
+    model: 'deleteModalOpen',
+    title: 'Delete Note',
+    body: '<p>Are you sure? This cannot be undone.</p>',
+    dangerAction: {
+      label: 'Delete note',
+      icon: 'lucide:trash-2',
+      loading: 'deleting',
+      disabled: 'deleting',
+      onClick: 'deleteNote',
+    },
+  });
+  assert.match(modal.snippet, /<CommonModal/);
+  assert.match(modal.snippet, /v-model:open="deleteModalOpen"/);
+  assert.match(modal.snippet, /:danger-action="\{ label: 'Delete note'/);
+
+  const review = reviewExtensionUiContract([
+    '<CommonDrawer v-model="open" :title="title">',
+    '  <template #body>',
+    '    <UInput v-model="name" />',
+    '    <button @click="save">Save</button>',
+    '  </template>',
+    '</CommonDrawer>',
+  ].join('\n'));
+  assert.equal(review.valid, false);
+  assert.match(JSON.stringify(review.issues), /common-drawer-slots/);
+  assert.match(JSON.stringify(review.issues), /modal-drawer-field-width/);
+  assert.match(JSON.stringify(review.issues), /native-button-type/);
+
+  const pageShell = buildExtensionPageShellSnippet({
+    title: 'Notes',
+    description: 'Capture ideas',
+    leadingIcon: 'lucide:sticky-note',
+    headerActions: [{
+      id: 'new-note',
+      label: 'New Note',
+      icon: 'lucide:plus',
+      color: 'primary',
+      variant: 'solid',
+      onClick: 'openCreate',
+      order: 10,
+    }],
+  });
+  assert.match(pageShell.snippet, /usePageHeaderRegistry/);
+  assert.match(pageShell.snippet, /useHeaderActionRegistry/);
+  assert.match(pageShell.snippet, /registerHeaderActions/);
+
+  const gate = buildExtensionPermissionGateSnippet({
+    route: '/notes',
+    methods: ['POST'],
+    body: '<UInput v-model="name" />',
+  });
+  assert.match(gate.snippet, /<PermissionGate :condition="\{ or: \[\{ route: '\/notes', methods: \['POST'\] \}\] \}">/);
+  assert.match(gate.snippet, /<UInput class="w-full" v-model="name"/);
+
+  const empty = buildExtensionEmptyStateSnippet({
+    title: 'No notes',
+    description: 'Create the first note.',
+    icon: 'lucide:sticky-note',
+  });
+  assert.match(empty.snippet, /<CommonEmptyState/);
+  assert.match(empty.snippet, /variant="naked"/);
+
+  const list = buildExtensionResourceListSnippet({
+    itemsExpression: 'notes',
+    itemName: 'note',
+    titleExpression: "note.title || 'Untitled'",
+    descriptionExpression: 'note.content',
+    onClick: 'openEdit(note)',
+    emptyTitle: 'No notes yet',
+  });
+  assert.match(list.snippet, /<CommonResourceListFrame/);
+  assert.match(list.snippet, /<CommonResourceListItem/);
+  assert.match(list.snippet, /v-for="note in notes"/);
+
+  const formEditor = buildExtensionFormEditorSnippet({
+    tableName: 'notes',
+    model: 'form',
+    errors: 'errors',
+    includes: ['title', 'content', 'color'],
+    fieldMapExpression: 'noteFieldMap',
+    hasChangedHandler: '(changed) => (hasFormChanges = changed)',
+  });
+  assert.match(formEditor.snippet, /<FormEditorLazy/);
+  assert.match(formEditor.snippet, /v-model="form"/);
+  assert.match(formEditor.snippet, /v-model:errors="errors"/);
+  assert.match(formEditor.snippet, /:includes="\['title', 'content', 'color'\]"/);
+
+  const widget = buildExtensionWidgetSnippet({
+    id: 42,
+    props: { rows: 'noteRows' },
+    events: { refresh: 'loadNotes' },
+  });
+  assert.match(widget.snippet, /<Widget :id="42" :rows="noteRows" @refresh="loadNotes" \/>/);
+
+  const menuNotification = buildExtensionMenuNotificationSnippet({
+    id: 'notes-attention',
+    path: '/notes',
+    valueExpression: 'unreadCount',
+    color: 'primary',
+  });
+  assert.match(menuNotification.snippet, /useMenuNotificationRegistry/);
+  assert.match(menuNotification.snippet, /value: unreadCount/);
+
+  const accountPanel = buildExtensionAccountPanelSnippet({
+    id: 'notes-account',
+    label: 'Notes',
+    icon: 'lucide:sticky-note',
+    countExpression: 'draftCount',
+    onClick: "() => navigateTo('/notes')",
+  });
+  assert.match(accountPanel.snippet, /useAccountPanelRegistry/);
+  assert.match(accountPanel.snippet, /count: draftCount/);
+
+  const tabs = buildExtensionTabsSnippet({
+    model: 'activeTab',
+    itemsExpression: 'tabs',
+    body: '<div>{{ item.label }}</div>',
+  });
+  assert.match(tabs.snippet, /<UTabs v-model="activeTab" :items="tabs" class="w-full">/);
+  assert.match(tabs.snippet, /<template #content="\{ item \}">/);
+
+  const upload = buildExtensionUploadModalSnippet({
+    model: 'showUploadModal',
+    loadingExpression: 'uploadPending',
+    uploadProgressExpression: 'uploadProgress',
+    fileProgressExpression: 'fileProgressByIndex',
+    headerContent: '<USelectMenu v-model="selectedStorage" :items="storageOptions" />',
+  });
+  assert.match(upload.snippet, /<CommonUploadModal/);
+  assert.match(upload.snippet, /:upload-progress="uploadProgress"/);
+  assert.match(upload.snippet, /<USelectMenu class="w-full" v-model="selectedStorage"/);
+  assert.match(upload.companionSnippet, /useFileUploadProgress/);
 });
 
 test('dynamic script guard rejects non-portable secure repo accessor', () => {
@@ -1368,6 +1624,19 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]create_api_endpoint['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]validate_dynamic_script['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]validate_extension_code['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_drawer['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_modal['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_page_shell['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_permission_gate['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_empty_state['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_resource_list['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_form_editor['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_widget['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_menu_notification['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_account_panel_item['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_tabs['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_upload_modal['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]review_extension_ui_contract['"]/);
   assert.match(entry, /server\.tool\(\s*['"]get_permission_profile['"]/);
   assert.match(entry, /MCP_PERMISSION_REQUIREMENTS/);
   assert.match(entry, /\/admin\/script\/validate/);
@@ -1407,6 +1676,9 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_trigger_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_log_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu['"]/);
+  assert.match(platformTools, /normalizeMenuPermissionArg/);
+  assert.match(platformTools, /new menus default to null/);
+  assert.match(platformTools, /Empty objects are normalized to null/);
   assert.match(platformTools, /server\.tool\(\s*['"]reorder_menus['"]/);
   assert.match(platformTools, /\/admin\/menu\/reorder/);
   assert.match(platformTools, /Duplicate menu id in reorder payload/);
@@ -1417,6 +1689,39 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /extension_workflow_advanced/);
   assert.match(platformTools, /assertExtensionKnowledgeAck/);
   assert.match(platformTools, /get_extension_theme_contract before generating or reviewing extension UI/);
+  assert.match(platformTools, /useApi returns refs/);
+  assert.match(platformTools, /For high-contract UI, call build_extension_\* builders/);
+  assert.match(platformTools, /Generate a contract-safe CommonDrawer Vue snippet/);
+  assert.match(platformTools, /Generate a contract-safe CommonModal\/UModal Vue snippet/);
+  assert.match(platformTools, /Generate page-header and shell-header-action script setup code/);
+  assert.match(platformTools, /Generate a PermissionGate wrapper snippet/);
+  assert.match(platformTools, /Generate a CommonEmptyState snippet/);
+  assert.match(platformTools, /Generate a CommonResourceListFrame\/CommonResourceListItem snippet/);
+  assert.match(platformTools, /Generate a FormEditor\/FormEditorLazy snippet/);
+  assert.match(platformTools, /Generate a Widget snippet/);
+  assert.match(platformTools, /Generate useMenuNotificationRegistry registration code/);
+  assert.match(platformTools, /Generate useAccountPanelRegistry registration code/);
+  assert.match(platformTools, /Generate a UTabs snippet/);
+  assert.match(platformTools, /Generate a CommonUploadModal snippet/);
+  assert.match(platformTools, /Review an Enfyra extension Vue snippet/);
+  assert.match(platformTools, /Use review_extension_ui_contract before saving generated snippets/);
+  assert.match(platformTools, /field controls without class="w-full"/);
+  assert.match(platformTools, /Extension validation rejects UInput, UTextarea/);
+  assert.match(routing, /build_extension_\* builders/);
+  assert.match(routing, /FormEditor, Widget, shell registries, tabs, or upload modal/);
+  assert.match(routing, /build_extension_page_shell/);
+  assert.match(instructions, /use `build_extension_\*` tools/);
+  assert.match(instructions, /FormEditor, Widget, menu\/account panel registries, tabs, and upload modals/);
+  assert.match(platformTools, /Use build_extension_drawer for generated drawer\/editing snippets/);
+  assert.match(platformTools, /Use build_extension_modal for generated modal\/confirmation snippets/);
+  assert.match(platformTools, /Unrestricted menu permission is null/);
+  assert.match(platformTools, /patches=\[\{search,replace\}/);
+  assert.match(platformTools, /searchMode="whitespace"/);
+  assert.match(platformTools, /replaceAll=true/);
+  assert.match(platformTools, /Atomic multi-patch list/);
+  assert.match(platformTools, /shellComponentContracts/);
+  assert.match(platformTools, /Use build_extension_permission_gate for generated permission wrapper snippets/);
+  assert.match(platformTools, /PermissionGate renders the permitted slot directly/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_page_extension['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_global_extension['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_widget_extension['"]/);
@@ -1466,7 +1771,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /bg-primary\/10/);
   assert.match(platformTools, /Do not color large panels, alert-like success blocks, KPI cards, list containers, or reconciliation\/attention blocks green\/yellow\/red/);
   assert.match(platformTools, /PageHeader gradient must be "none"/);
-  assert.match(platformTools, /Do not pass ui\.content: "eapp-surface-card" or "surface-card"/);
+  assert.match(platformTools, /Use build_extension_modal for generated modal\/confirmation snippets/);
   assert.match(platformTools, /md:grid-cols-2 xl:grid-cols-3/);
   assert.match(examples, /eapp-surface-card p-4/);
   assert.match(examples, /eapp-primary-surface/);
@@ -1731,7 +2036,7 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260704H$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-THROW-CONTRACT/);
-  assert.equal(payload.version, '2026-07-04.global-rules-v8-schema-preflight-query-contracts');
+  assert.equal(payload.version, '2026-07-08.global-rules-v9-app-composable-contracts');
 
   for (const text of [entry, instructions, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);

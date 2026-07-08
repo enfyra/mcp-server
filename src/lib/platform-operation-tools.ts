@@ -66,6 +66,11 @@ const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
   'UFormField',
   'UIcon',
   'UInput',
+  'UInputMenu',
+  'UInputNumber',
+  'UInputTags',
+  'UInputTime',
+  'UInputDate',
   'UModal',
   'USelect',
   'USelectMenu',
@@ -79,6 +84,18 @@ const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
 const AUTO_INJECTED_EXTENSION_COMPONENT_BY_LOWERCASE = new Map(
   AUTO_INJECTED_EXTENSION_COMPONENT_TAGS.map((tag) => [tag.toLowerCase(), tag]),
 );
+const FULL_WIDTH_EXTENSION_FIELD_TAGS = [
+  'UInput',
+  'UTextarea',
+  'USelect',
+  'USelectMenu',
+  'UInputMenu',
+  'UInputNumber',
+  'UInputTags',
+  'UInputTime',
+  'UInputDate',
+];
+const FULL_WIDTH_EXTENSION_FIELD_PATTERN = new RegExp(`<(${FULL_WIDTH_EXTENSION_FIELD_TAGS.join('|')})(\\s[^<>]*?)(\\/?)>`, 'g');
 
 function unwrapData(result) {
   return Array.isArray(result?.data) ? result.data : [];
@@ -367,6 +384,568 @@ function jsonText(payload) {
   return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
 }
 
+function escapeSingleQuoted(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function quoteJsString(value) {
+  return `'${escapeSingleQuoted(value)}'`;
+}
+
+function normalizeVueBodySnippet(body) {
+  let code = String(body || '').trim();
+  const changes: string[] = [];
+  code = code.replace(FULL_WIDTH_EXTENSION_FIELD_PATTERN, (full, tag, attrs, slash) => {
+    if (/\bdata-compact\b/.test(attrs) || /\bdata-inline\b/.test(attrs)) return full;
+    if (/\bclass=/.test(attrs)) {
+      const nextAttrs = attrs.replace(/class="([^"]*)"/, (classMatch, classes) => {
+        if (String(classes).split(/\s+/).includes('w-full')) return classMatch;
+        changes.push(`Added w-full to ${tag}.`);
+        return `class="${classes} w-full"`;
+      });
+      if (nextAttrs !== attrs) return `<${tag}${nextAttrs}${slash}>`;
+      return full;
+    }
+    changes.push(`Added class="w-full" to ${tag}.`);
+    return `<${tag} class="w-full"${attrs}${slash}>`;
+  });
+  code = code.replace(/<button(\s[^>]*)?>/g, (full, attrs = '') => {
+    if (/\btype=/.test(attrs)) return full;
+    changes.push('Added type="button" to a native button.');
+    return `<button type="button"${attrs}>`;
+  });
+  return { code, changes: Array.from(new Set(changes)) };
+}
+
+function findMissingFullWidthFieldControls(code) {
+  const violations: Array<{ tag: string; snippet: string }> = [];
+  for (const template of readTemplateBlocks(code)) {
+    let match;
+    FULL_WIDTH_EXTENSION_FIELD_PATTERN.lastIndex = 0;
+    while ((match = FULL_WIDTH_EXTENSION_FIELD_PATTERN.exec(template))) {
+      const [snippet, tag, attrs] = match;
+      if (/\bdata-compact\b/.test(attrs) || /\bdata-inline\b/.test(attrs)) continue;
+      const classMatch = attrs.match(/\bclass="([^"]*)"/);
+      if (!classMatch || !classMatch[1].split(/\s+/).includes('w-full')) {
+        violations.push({ tag, snippet: snippet.length > 160 ? `${snippet.slice(0, 157)}...` : snippet });
+      }
+    }
+  }
+  return violations;
+}
+
+function indentLines(code, spaces = 2) {
+  const pad = ' '.repeat(spaces);
+  return String(code || '')
+    .split('\n')
+    .map((line) => (line.trim() ? `${pad}${line}` : line))
+    .join('\n');
+}
+
+function buildFooterActionObject(action) {
+  if (!action) return null;
+  if (typeof action === 'string') return action;
+  const entries: string[] = [];
+  if (action.labelExpression) entries.push(`label: ${action.labelExpression}`);
+  else if (action.label) entries.push(`label: ${quoteJsString(action.label)}`);
+  if (action.icon) entries.push(`icon: ${quoteJsString(action.icon)}`);
+  if (action.loading) entries.push(`loading: ${action.loading}`);
+  if (action.disabled) entries.push(`disabled: ${action.disabled}`);
+  if (action.color) entries.push(`color: ${quoteJsString(action.color)}`);
+  if (action.variant) entries.push(`variant: ${quoteJsString(action.variant)}`);
+  if (action.tone) entries.push(`tone: ${quoteJsString(action.tone)}`);
+  if (action.onClick) entries.push(`onClick: ${action.onClick}`);
+  return `{ ${entries.join(', ')} }`;
+}
+
+function titleMarkup(title, titleExpression) {
+  if (titleExpression) return `{{ ${titleExpression} }}`;
+  return String(title || 'Untitled');
+}
+
+export function buildExtensionDrawerSnippet(input) {
+  const normalized = normalizeVueBodySnippet(input.body || '');
+  const titleContent = titleMarkup(input.title, input.titleExpression);
+  const model = input.model || 'drawerOpen';
+  const attrs = [
+    `v-model="${model}"`,
+    `direction="${input.direction || 'right'}"`,
+  ];
+  if (input.nested) attrs.push('nested');
+  if (input.handleOnly) attrs.push('handle-only');
+
+  const cancelAction = input.cancelAction === false
+    ? null
+    : buildFooterActionObject(input.cancelAction || { label: 'Cancel', onClick: `() => (${model} = false)` });
+  const primaryAction = buildFooterActionObject(input.primaryAction);
+  const dangerAction = buildFooterActionObject(input.dangerAction);
+  if (cancelAction) attrs.push(`:cancel-action="${cancelAction}"`);
+  if (primaryAction) attrs.push(`:primary-action="${primaryAction}"`);
+  if (dangerAction) attrs.push(`:danger-action="${dangerAction}"`);
+  if (input.footerHint) attrs.push(`footer-hint="${escapeSingleQuoted(input.footerHint).replace(/"/g, '&quot;')}"`);
+
+  const snippet = [
+    '<CommonDrawer',
+    ...attrs.map((attr) => `  ${attr}`),
+    '>',
+    '  <template #header>',
+    `    <h2 class="text-lg font-semibold eapp-text-primary">${titleContent}</h2>`,
+    '  </template>',
+    '',
+    '  <template #body>',
+    indentLines(normalized.code, 4),
+    '  </template>',
+    '</CommonDrawer>',
+  ].join('\n');
+
+  const warnings: string[] = [];
+  if (!primaryAction) warnings.push('Editing/create drawers usually need primaryAction for Save/Create.');
+  return {
+    action: 'extension_drawer_built',
+    component: 'CommonDrawer',
+    snippet,
+    normalizedBodyChanges: normalized.changes,
+    warnings,
+    contract: [
+      'Use #header and #body slots; do not use a title prop.',
+      'Use primaryAction for Save/Create and dangerAction for destructive edit actions.',
+      'Body form controls are normalized to class="w-full" unless intentionally compact.',
+      'Native buttons in the body are normalized to type="button".',
+    ],
+  };
+}
+
+export function buildExtensionModalSnippet(input) {
+  const normalized = normalizeVueBodySnippet(input.body || '');
+  const titleContent = titleMarkup(input.title, input.titleExpression);
+  const model = input.model || 'modalOpen';
+  const tag = input.alias === 'UModal' ? 'UModal' : 'CommonModal';
+  const attrs = [`v-model:open="${model}"`];
+  const cancelAction = input.cancelAction === false
+    ? null
+    : buildFooterActionObject(input.cancelAction || { label: 'Cancel', onClick: `() => (${model} = false)` });
+  const primaryAction = buildFooterActionObject(input.primaryAction);
+  const dangerAction = buildFooterActionObject(input.dangerAction);
+  if (cancelAction) attrs.push(`:cancel-action="${cancelAction}"`);
+  if (primaryAction) attrs.push(`:primary-action="${primaryAction}"`);
+  if (dangerAction) attrs.push(`:danger-action="${dangerAction}"`);
+  if (input.footerHint) attrs.push(`footer-hint="${escapeSingleQuoted(input.footerHint).replace(/"/g, '&quot;')}"`);
+
+  const snippet = [
+    `<${tag}`,
+    ...attrs.map((attr) => `  ${attr}`),
+    '>',
+    '  <template #header>',
+    `    <h2 class="text-lg font-semibold eapp-text-primary">${titleContent}</h2>`,
+    '  </template>',
+    '',
+    '  <template #body>',
+    indentLines(normalized.code, 4),
+    '  </template>',
+    `</${tag}>`,
+  ].join('\n');
+
+  const warnings: string[] = [];
+  if (!primaryAction && !dangerAction) warnings.push('Mutation or confirmation modals usually need primaryAction or dangerAction for the final action.');
+  return {
+    action: 'extension_modal_built',
+    component: tag,
+    snippet,
+    normalizedBodyChanges: normalized.changes,
+    warnings,
+    contract: [
+      'Use v-model:open and #header/#body slots; do not use a title prop.',
+      'Use primaryAction for ordinary final actions and dangerAction for destructive confirmation.',
+      'Body form controls are normalized to class="w-full" unless intentionally compact.',
+      'Native buttons in the body are normalized to type="button".',
+    ],
+  };
+}
+
+function jsObjectLiteral(entries) {
+  return `{ ${entries.filter(Boolean).join(', ')} }`;
+}
+
+function jsArrayLiteral(values) {
+  return `[${(values || []).map(quoteJsString).join(', ')}]`;
+}
+
+function attrStaticOrBound(name, value, expression) {
+  if (expression) return `:${name}="${expression}"`;
+  if (value === undefined || value === null || value === '') return null;
+  return `${name}="${String(value).replace(/"/g, '&quot;')}"`;
+}
+
+function buildHeaderActionLiteral(action) {
+  const entries = [
+    action.id ? `id: ${quoteJsString(action.id)}` : null,
+    action.label ? `label: ${quoteJsString(action.label)}` : null,
+    action.icon ? `icon: ${quoteJsString(action.icon)}` : null,
+    `color: ${quoteJsString(action.color || 'neutral')}`,
+    `variant: ${quoteJsString(action.variant || 'outline')}`,
+    action.loading ? `loading: ${action.loading}` : null,
+    action.disabled ? `disabled: ${action.disabled}` : null,
+    action.to ? `to: ${quoteJsString(action.to)}` : null,
+    action.onClick ? `onClick: ${action.onClick}` : null,
+    typeof action.order === 'number' ? `order: ${action.order}` : null,
+    action.side ? `side: ${quoteJsString(action.side)}` : null,
+  ];
+  return jsObjectLiteral(entries);
+}
+
+export function buildExtensionPageShellSnippet(input) {
+  const title = input.titleExpression || quoteJsString(input.title || 'Untitled');
+  const headerEntries = [
+    `title: ${title}`,
+    input.description ? `description: ${quoteJsString(input.description)}` : null,
+    input.leadingIcon ? `leadingIcon: ${quoteJsString(input.leadingIcon)}` : null,
+    `gradient: ${quoteJsString(input.gradient || 'none')}`,
+    `variant: ${quoteJsString(input.variant || 'minimal')}`,
+  ];
+  const actions = Array.isArray(input.headerActions) ? input.headerActions : [];
+  const lines = [
+    'const { registerPageHeader } = usePageHeaderRegistry();',
+    `registerPageHeader(${jsObjectLiteral(headerEntries)});`,
+  ];
+  if (actions.length) {
+    lines.push('const { register: registerHeaderActions } = useHeaderActionRegistry();');
+    lines.push(`registerHeaderActions([\n${actions.map((action) => `  ${buildHeaderActionLiteral(action)}`).join(',\n')}\n]);`);
+  }
+  return {
+    action: 'extension_page_shell_built',
+    snippet: lines.join('\n'),
+    contract: [
+      'Use usePageHeaderRegistry so the app shell renders the page header.',
+      'Use useHeaderActionRegistry for toolbar actions instead of rendering duplicate page headers or local top bars.',
+      'Use primary solid only for the main scope action; secondary actions default to neutral outline.',
+    ],
+  };
+}
+
+export function buildExtensionPermissionGateSnippet(input) {
+  const normalized = normalizeVueBodySnippet(input.body || '<slot />');
+  let condition;
+  if (input.condition) {
+    condition = input.condition;
+  } else if (input.route) {
+    const methods = Array.isArray(input.methods) && input.methods.length ? input.methods : ['GET'];
+    condition = `{ or: [{ route: ${quoteJsString(input.route)}, methods: [${methods.map(quoteJsString).join(', ')}] }] }`;
+  } else {
+    condition = 'null';
+  }
+  const snippet = [
+    `<PermissionGate :condition="${condition}">`,
+    indentLines(normalized.code, 2),
+    '</PermissionGate>',
+  ].join('\n');
+  return {
+    action: 'extension_permission_gate_built',
+    component: 'PermissionGate',
+    snippet,
+    normalizedBodyChanges: normalized.changes,
+    warnings: condition === 'null' ? ['No condition/route was provided. PermissionGate with null condition permits the slot.'] : [],
+    contract: [
+      'PermissionGate is only operator UX; backend route permissions and owner checks remain authoritative.',
+      'PermissionGate renders its slot directly and should not be used as a layout wrapper.',
+    ],
+  };
+}
+
+export function buildExtensionEmptyStateSnippet(input) {
+  const action = input.action
+    ? `\n  :action="${buildFooterActionObject(input.action)}"`
+    : '';
+  return {
+    action: 'extension_empty_state_built',
+    component: 'CommonEmptyState',
+    snippet: `<CommonEmptyState\n  title="${String(input.title || 'No items found').replace(/"/g, '&quot;')}"\n  description="${String(input.description || '').replace(/"/g, '&quot;')}"\n  icon="${input.icon || 'lucide:inbox'}"\n  size="${input.size || 'sm'}"\n  variant="${input.variant || 'naked'}"${action}\n/>`,
+    contract: [
+      'Use CommonEmptyState for app-matched empty states.',
+      'Use variant="naked" inside framed panels/lists and outline/subtle for standalone framed empty surfaces.',
+    ],
+  };
+}
+
+export function buildExtensionResourceListSnippet(input) {
+  const itemsExpression = input.itemsExpression || 'items';
+  const itemName = input.itemName || 'item';
+  const keyExpression = input.keyExpression || `${itemName}.id`;
+  const titleExpression = input.titleExpression || `${itemName}.title || ${quoteJsString('Untitled')}`;
+  const descriptionExpression = input.descriptionExpression || `${itemName}.description`;
+  const iconExpression = input.iconExpression || quoteJsString(input.icon || 'lucide:file-text');
+  const onClick = input.onClick ? `\n      :on-click="() => ${input.onClick}"` : '';
+  const stats = input.statsExpression ? `\n      :stats="${input.statsExpression}"` : '';
+  const actions = input.actionsExpression ? `\n      :actions="${input.actionsExpression}"` : '';
+  const topBadge = input.topBadgeExpression ? `\n      :top-badge="${input.topBadgeExpression}"` : '';
+  const snippet = [
+    '<CommonResourceListFrame',
+    `  :loading="${input.loadingExpression || 'pending'}"`,
+    `  :has-items="${itemsExpression}.length > 0"`,
+    `  :total="${input.totalExpression || `${itemsExpression}.length`}"`,
+    `  :items-per-page="${input.itemsPerPageExpression || '0'}"`,
+    `  empty-title="${String(input.emptyTitle || 'No items found').replace(/"/g, '&quot;')}"`,
+    `  empty-description="${String(input.emptyDescription || '').replace(/"/g, '&quot;')}"`,
+    `  empty-icon="${input.emptyIcon || 'lucide:inbox'}"`,
+    '>',
+    `  <CommonResourceListItem`,
+    `    v-for="${itemName} in ${itemsExpression}"`,
+    `    :key="${keyExpression}"`,
+    `    :title="${titleExpression}"`,
+    `    :description="${descriptionExpression}"`,
+    `    :icon="${iconExpression}"`,
+    '    icon-color="primary"',
+    `${stats}${actions}${topBadge}${onClick}`,
+    '  />',
+    '</CommonResourceListFrame>',
+  ].join('\n');
+  return {
+    action: 'extension_resource_list_built',
+    components: ['CommonResourceListFrame', 'CommonResourceListItem'],
+    snippet,
+    contract: [
+      'Use CommonResourceListFrame and CommonResourceListItem for operational lists instead of ad hoc cards.',
+      'Keep first-load skeleton, empty state, and pagination owned by the frame.',
+      'Use explicit bounded list data and natural pagination/search outside this snippet when the domain list can grow.',
+    ],
+  };
+}
+
+export function buildExtensionFormEditorSnippet(input) {
+  const tag = input.lazy === false ? 'FormEditor' : 'FormEditorLazy';
+  const attrs = [
+    `v-model="${input.model || 'form'}"`,
+    `v-model:errors="${input.errors || 'errors'}"`,
+    attrStaticOrBound('table-name', input.tableName, input.tableNameExpression),
+    input.mode ? `mode="${input.mode}"` : null,
+    input.loadingExpression ? `:loading="${input.loadingExpression}"` : null,
+    input.layout ? `layout="${input.layout}"` : null,
+    input.includes?.length ? `:includes="${jsArrayLiteral(input.includes)}"` : null,
+    input.excluded?.length ? `:excluded="${jsArrayLiteral(input.excluded)}"` : null,
+    input.sectionsExpression ? `:sections="${input.sectionsExpression}"` : null,
+    input.fieldMapExpression ? `:field-map="${input.fieldMapExpression}"` : null,
+    input.virtualFieldsExpression ? `:virtual-fields="${input.virtualFieldsExpression}"` : null,
+    input.currentRecordIdExpression ? `:current-record-id="${input.currentRecordIdExpression}"` : null,
+    input.hasChangedHandler ? `@has-changed="${input.hasChangedHandler}"` : null,
+    input.virtualFieldEmitHandler ? `@virtual-field-emit="${input.virtualFieldEmitHandler}"` : null,
+  ].filter(Boolean);
+  const snippet = [
+    `<${tag}`,
+    ...attrs.map((attr) => `  ${attr}`),
+    '/>',
+  ].join('\n');
+  return {
+    action: 'extension_form_editor_built',
+    component: tag,
+    snippet,
+    contract: [
+      'Prefer FormEditor/FormEditorLazy for direct table-backed forms instead of hand-built UInput/UTextarea fields.',
+      'Use v-model for record state and v-model:errors for validation errors.',
+      'Use includes/sections to keep generated forms focused; do not expose compiledCode or unrelated system fields.',
+      'Use fieldMap only for behavior/renderer overrides such as code fields or custom labels.',
+    ],
+  };
+}
+
+export function buildExtensionWidgetSnippet(input) {
+  const attrs = [`:id="${typeof input.id === 'number' ? input.id : quoteJsString(input.id)}"`];
+  for (const [key, value] of Object.entries(input.props || {})) {
+    attrs.push(`:${key}="${value}"`);
+  }
+  for (const [event, handler] of Object.entries(input.events || {})) {
+    attrs.push(`@${event}="${handler}"`);
+  }
+  return {
+    action: 'extension_widget_built',
+    component: 'Widget',
+    snippet: `<Widget ${attrs.join(' ')} />`,
+    warnings: typeof input.id === 'number' ? [] : ['Widget ids should be numeric enfyra_extension ids; do not pass extension name or extensionId string.'],
+    contract: [
+      'Widget :id is the numeric enfyra_extension id, not name or extensionId.',
+      'Pass safe props/events; keep page-level mutation and modal ownership in the page unless the widget intentionally owns the full workflow.',
+    ],
+  };
+}
+
+export function buildExtensionMenuNotificationSnippet(input) {
+  const targetEntries = [
+    input.targetId !== undefined ? `id: ${quoteJsString(input.targetId)}` : null,
+    input.path ? `path: ${quoteJsString(input.path)}` : null,
+    input.route ? `route: ${quoteJsString(input.route)}` : null,
+  ];
+  const entries = [
+    `id: ${quoteJsString(input.id || 'extension-menu-notification')}`,
+    `target: ${jsObjectLiteral(targetEntries)}`,
+    input.valueExpression ? `value: ${input.valueExpression}` : input.value !== undefined ? `value: ${quoteJsString(input.value)}` : null,
+    `color: ${quoteJsString(input.color || 'primary')}`,
+    input.title ? `title: ${quoteJsString(input.title)}` : null,
+    typeof input.order === 'number' ? `order: ${input.order}` : null,
+  ];
+  return {
+    action: 'extension_menu_notification_built',
+    snippet: [
+      'const { register: registerMenuNotification } = useMenuNotificationRegistry();',
+      `registerMenuNotification(${jsObjectLiteral(entries)});`,
+    ].join('\n'),
+    contract: [
+      'Use count/value only when the signal source already owns an exact or bounded count.',
+      'Omit value for a dot-only notification when realtime only proves new attention exists.',
+      'Do not fetch destination domain lists solely to decorate the menu.',
+    ],
+  };
+}
+
+export function buildExtensionAccountPanelSnippet(input) {
+  const entries = [
+    `id: ${quoteJsString(input.id || 'extension-account-panel-item')}`,
+    typeof input.order === 'number' ? `order: ${input.order}` : null,
+    input.label ? `label: ${quoteJsString(input.label)}` : null,
+    input.description ? `description: ${quoteJsString(input.description)}` : null,
+    input.icon ? `icon: ${quoteJsString(input.icon)}` : null,
+    input.countExpression ? `count: ${input.countExpression}` : input.count !== undefined ? `count: ${quoteJsString(input.count)}` : null,
+    input.badgeExpression ? `badge: ${input.badgeExpression}` : input.badge !== undefined ? `badge: ${quoteJsString(input.badge)}` : null,
+    input.badgeColor ? `badgeColor: ${quoteJsString(input.badgeColor)}` : null,
+    input.trailingIcon ? `trailingIcon: ${quoteJsString(input.trailingIcon)}` : null,
+    input.expandedExpression ? `expanded: ${input.expandedExpression}` : null,
+    input.contentComponent ? `contentComponent: ${input.contentComponent}` : null,
+    input.contentPropsExpression ? `contentProps: ${input.contentPropsExpression}` : null,
+    input.onClick ? `onClick: ${input.onClick}` : null,
+    input.onToggle ? `onToggle: ${input.onToggle}` : null,
+  ];
+  return {
+    action: 'extension_account_panel_item_built',
+    snippet: [
+      'const { register: registerAccountPanelItem } = useAccountPanelRegistry();',
+      `registerAccountPanelItem(${jsObjectLiteral(entries)});`,
+    ].join('\n'),
+    contract: [
+      'Prefer data-driven account panel rows over fully custom row components.',
+      'Use count for notification-style chips; count takes precedence over badge.',
+      'Use onClick for direct actions and onToggle/contentComponent for expandable inline UI.',
+    ],
+  };
+}
+
+export function buildExtensionTabsSnippet(input) {
+  const model = input.model || 'activeTab';
+  const items = input.itemsExpression || 'tabs';
+  const body = input.body || '<div>{{ item.label }}</div>';
+  const snippet = [
+    `<UTabs v-model="${model}" :items="${items}" class="w-full">`,
+    '  <template #content="{ item }">',
+    indentLines(normalizeVueBodySnippet(body).code, 4),
+    '  </template>',
+    '</UTabs>',
+  ].join('\n');
+  return {
+    action: 'extension_tabs_built',
+    component: 'UTabs',
+    snippet,
+    contract: [
+      'Use app-level UTabs chrome instead of custom tab bars.',
+      'Do not add local full-width bottom borders/dividers to tab lists.',
+      'Keep tab items data-driven and render panel content through #content.',
+    ],
+  };
+}
+
+export function buildExtensionUploadModalSnippet(input) {
+  const model = input.model || 'showUploadModal';
+  const attrs = [
+    `v-model="${model}"`,
+    `title="${String(input.title || 'Upload Files').replace(/"/g, '&quot;')}"`,
+    `accept="${input.accept || '*/*'}"`,
+    input.multiple !== false ? ':multiple="true"' : ':multiple="false"',
+    input.maxSizeExpression ? `:max-size="${input.maxSizeExpression}"` : ':max-size="10 * 1024 * 1024"',
+    input.loadingExpression ? `:loading="${input.loadingExpression}"` : null,
+    input.uploadProgressExpression ? `:upload-progress="${input.uploadProgressExpression}"` : null,
+    input.fileProgressExpression ? `:file-progress="${input.fileProgressExpression}"` : null,
+    input.dragText ? `drag-text="${String(input.dragText).replace(/"/g, '&quot;')}"` : null,
+    input.acceptText ? `accept-text="${String(input.acceptText).replace(/"/g, '&quot;')}"` : null,
+    input.uploadText ? `upload-text="${String(input.uploadText).replace(/"/g, '&quot;')}"` : null,
+    input.uploadingText ? `uploading-text="${String(input.uploadingText).replace(/"/g, '&quot;')}"` : null,
+    `@upload="${input.uploadHandler || 'handleUpload'}"`,
+    input.errorHandler ? `@error="${input.errorHandler}"` : null,
+  ].filter(Boolean);
+  const headerContent = input.headerContent ? [
+    '>',
+    '  <template #header-content>',
+    indentLines(normalizeVueBodySnippet(input.headerContent).code, 4),
+    '  </template>',
+    '</CommonUploadModal>',
+  ] : ['/>'];
+  return {
+    action: 'extension_upload_modal_built',
+    component: 'CommonUploadModal',
+    snippet: [
+      '<CommonUploadModal',
+      ...attrs.map((attr) => `  ${attr}`),
+      ...headerContent,
+    ].join('\n'),
+    companionSnippet: [
+      'const {',
+      '  uploadProgress,',
+      '  trackedUploadProgressById,',
+      '  beginTrackedUploadProgress,',
+      '  getUploadProgressHeaders,',
+      '  resetUploadProgress,',
+      '} = useFileUploadProgress();',
+    ].join('\n'),
+    contract: [
+      'Use useFileUploadProgress for admin-socket upload progress.',
+      'Send x-enfyra-upload-id via getUploadProgressHeaders(id) for each uploaded file.',
+      'For multi-file uploads, call the useApi batch files path once, pass per-file headers through headersByIndex, and map each upload id to fileProgress[index].',
+      'CommonUploadModal owns selected-file rows and per-row progress chrome.',
+    ],
+  };
+}
+
+export function reviewExtensionUiContract(code) {
+  const source = String(code || '');
+  const issues: Array<{ severity: 'error' | 'warning'; rule: string; message: string; suggestion: string }> = [];
+  const push = (severity, rule, message, suggestion) => issues.push({ severity, rule, message, suggestion });
+
+  if (/<CommonDrawer\b[^>]*(?:\s:title=|\stitle=)/.test(source)) {
+    push('error', 'common-drawer-slots', 'CommonDrawer should not use title/:title props in generated extensions.', 'Use #header with a heading, and #body for content.');
+  }
+  if (/<(?:CommonModal|UModal)\b[^>]*(?:\s:title=|\stitle=)/.test(source)) {
+    push('error', 'common-modal-slots', 'CommonModal/UModal should not use title/:title props in generated extensions.', 'Use #header with a heading, and #body for content.');
+  }
+  if (/<CommonDrawer\b/.test(source) && !/primary-action=/.test(source)) {
+    push('warning', 'drawer-primary-action', 'CommonDrawer has no primaryAction.', 'Editing/create drawers should wire Save/Create through primaryAction.');
+  }
+  if (/<CommonDrawer\b/.test(source) && !/cancel-action=/.test(source)) {
+    push('warning', 'drawer-cancel-action', 'CommonDrawer has no cancelAction.', 'Use cancelAction for the ordinary Cancel footer button unless the workflow intentionally has no cancel.');
+  }
+  if (/<(?:CommonModal|UModal)\b/.test(source) && /delete|remove|confirm|cannot be undone/i.test(source) && !/danger-action=/.test(source)) {
+    push('warning', 'modal-danger-action', 'Destructive/confirmation modal has no dangerAction.', 'Wire the final destructive action through dangerAction.');
+  }
+  const fieldPattern = /<(UInput|UTextarea|USelectMenu|USelect)(\s[^<>]*?)\/?>/g;
+  let fieldMatch;
+  while ((fieldMatch = fieldPattern.exec(source))) {
+    const [, tag, attrs] = fieldMatch;
+    const classMatch = attrs.match(/\bclass="([^"]*)"/);
+    if (!classMatch || !classMatch[1].split(/\s+/).includes('w-full')) {
+      push('warning', 'modal-drawer-field-width', `${tag} is missing class="w-full".`, 'Use class="w-full" for form controls inside modal/drawer body forms unless intentionally inline.');
+    }
+  }
+  const buttonPattern = /<button(\s[^>]*)?>/g;
+  let buttonMatch;
+  while ((buttonMatch = buttonPattern.exec(source))) {
+    if (!/\btype=/.test(buttonMatch[1] || '')) {
+      push('warning', 'native-button-type', 'Native button is missing type="button".', 'Add type="button" unless the button intentionally submits a form.');
+    }
+  }
+  return {
+    action: 'extension_ui_contract_reviewed',
+    valid: issues.every((issue) => issue.severity !== 'error'),
+    issueCount: issues.length,
+    issues,
+    nextSteps: issues.length
+      ? ['Use build_extension_drawer or build_extension_modal for replacement snippets, then apply with patch_extension_code/update_extension_code.']
+      : ['Snippet matches the checked modal/drawer contract rules. Still validate the final SFC before saving.'],
+  };
+}
+
 function getExtensionThemeContract() {
   return {
     action: 'extension_theme_contract',
@@ -378,9 +957,9 @@ function getExtensionThemeContract() {
       'The extension is already mounted inside the Enfyra app shell. Do not add a duplicate page header, centered page wrapper, or root-level page padding.',
       'Page extensions should be full-bleed, responsive, and split large operations into focused pages or UTabs.',
       'Use usePageHeaderRegistry for the shell title and useHeaderActionRegistry/useSubHeaderActionRegistry for page actions.',
-      'Use useMenuNotificationRegistry from global extensions to register sidebar menu notification counts or dots. Register stable ids, target menus by id/path/route, use value for counts, omit value for a dot, and choose color from primary/success/warning/error/info/neutral.',
+      'Use build_extension_menu_notification for sidebar menu notification registration snippets.',
       'For shell menu notifications, first decide the signal source. Use a count only when the source already owns an exact count, such as a notification summary endpoint or bounded unread-notification query. Use a dot when a realtime event only proves that something new exists. Do not poll a domain list such as messages, tickets, orders, or jobs solely to decorate the menu; the destination page owns domain fetching.',
-      'Use useAccountPanelRegistry for account panel rows. AccountPanelItem supports count as the preferred numeric/text badge value, badge as a legacy alias, and badgeColor primary/neutral/info/error/warning/success.',
+      'Use build_extension_account_panel_item for account panel row registration snippets.',
       'For detail/form workflows that should stay left-aligned with empty space on the right, wrap the body in eapp-page-constrained; use eapp-page-constrained-wide only when the workflow genuinely needs more width.',
       'Card/list grids inside the default shell must account for the 280px desktop sidebar. Do not switch general card grids to three columns at lg; use md:grid-cols-2 xl:grid-cols-3 unless a local container proves three columns have enough width.',
     ],
@@ -431,14 +1010,42 @@ function getExtensionThemeContract() {
       'Use auto-injected components directly in the template with PascalCase names. Do not call resolveComponent() to manually resolve Nuxt UI/eApp components inside extension SFCs; it can compile but render unresolved lowercase DOM tags such as <ubutton>.',
       'Buttons should have stable geometry: hover may change color, border, or shadow but must not move the button or resize its content. Disabled buttons keep disabled cursor/visual state.',
       'Inputs and textareas should not add hover movement or decorative hover states; focus, invalid, disabled, and loading states must be explicit.',
-      'Dynamic extensions resolve UModal to the app CommonModal. Do not pass ui.content: "eapp-surface-card" or "surface-card" to UModal/CommonModal; modal content uses the app modal surface and caller ui.content should only append z-index, width, or max-width classes.',
-      'CommonModal and CommonDrawer own action-only footers through cancelAction, primaryAction, dangerAction, leadingActions, and footerHint. Pass footer button intent through those props instead of custom footer slots. cancelAction defaults to neutral outline; use dangerAction for irreversible destructive work and tone: "primary" for Keep editing in discard dialogs.',
-      'Use custom #footer content only when the footer contains real custom layout or non-button content. Every modal/drawer button should use type="button" unless it intentionally submits a form.',
-      'Use CommonDrawer for side-panel editing. Open drawers immediately on user action and render loading/error/content inside the drawer instead of waiting for fetch before opening.',
-      'Use UTabs for page sections and large grouped forms instead of custom tab bars; the app-level Nuxt UI override owns active and inactive indicators, focus rings, spacing, and theme contrast.',
+      'For drawers, modals, page shell headers/actions, permission gates, empty states, resource lists, form editors, widgets, menu/account panel registries, tabs, and upload modals, call the matching build_extension_* tool before patching raw Vue.',
+      'Use review_extension_ui_contract before saving generated snippets that include high-contract UI or native buttons.',
+      'Extension validation rejects UInput, UTextarea, USelect, USelectMenu, UInputMenu, UInputNumber, UInputTags, UInputTime, and UInputDate without class="w-full" unless marked data-compact or data-inline.',
       'Use UBadge or token-backed badge spans for status. Keep badges legible in both themes with tokenized background, text, and border.',
-      'Use shell registries for shell badges: useAccountPanelRegistry for the account panel and useMenuNotificationRegistry for sidebar menus. Do not draw detached fixed-position badges over the app shell.',
     ],
+    appComposables: [
+      'useApi(url, options) returns refs: data, error, pending, status, plus async execute(options?) and refresh(). execute returns the response object or null.',
+      'useApi does not auto-run; call execute() in onMounted, a watcher, or a user action.',
+      'Pass query/body as plain objects or computed objects. Do not JSON.stringify filter, deep, or aggregate in extension/app code.',
+      'Normal Enfyra list responses are available as data.value?.data, and the direct execute() response as response?.data. Avoid double-unwrapping data?.value?.data unless explicitly supporting an older nested response shape.',
+      'For mutations, set method in useApi options and call execute({ body }), execute({ id, body }), execute({ id }), or execute({ ids }) as appropriate.',
+      'Use errorContext for readable default failures. Return true from onError only when the component fully handles the error locally.',
+      'useNotify() provides async success/error/warning/info(title, description?) methods plus dismiss/clear. Do not use Nuxt toast object payloads with it.',
+    ],
+    shellComponentContracts: {
+      CommonDrawer: [
+        'Use build_extension_drawer for generated drawer/editing snippets.',
+        'The builder owns slots, managed footer actions, full-width fields, native button types, and loading/error/body structure.',
+      ],
+      CommonModal: [
+        'Use build_extension_modal for generated modal/confirmation snippets.',
+        'The builder owns UModal/CommonModal aliasing, slots, managed footer actions, full-width fields, native button types, and modal surface constraints.',
+      ],
+      PermissionGate: [
+        'Use build_extension_permission_gate for generated permission wrapper snippets.',
+        'UI gates are operator UX only; backend route permissions and handler/hook owner checks remain authoritative.',
+      ],
+      Widget: [
+        'Use build_extension_widget for generated widget include snippets.',
+        'The builder owns numeric id usage, reactive prop/event wiring, and page/widget ownership warnings.',
+      ],
+      actionButtons: [
+        'Use review_extension_ui_contract for generated snippets with native buttons.',
+        'Validation/review catches missing type="button" and high-contract component mistakes before saving.',
+      ],
+    },
     loadingAndLists: [
       'For first load of card/list pages, render calm skeleton cards with a slow pulse. Use USkeleton or shared loading components so the app-owned skeleton theme controls contrast and accent matching. For subsequent pagination/filter refreshes, keep the card shells mounted and skeletonize card content until the new list is ready.',
       'Keep pagination inside the same transition/loading branch as the list. Do not show pagination before the list content has left loading.',
@@ -569,6 +1176,13 @@ function parseJsonObjectArg(name, value, fallback = {}) {
   return parsed;
 }
 
+function normalizeMenuPermissionArg(permission) {
+  const parsed = parseJsonObjectArg('permission', permission, null);
+  if (!parsed) return null;
+  if (Object.keys(parsed).length === 0) return null;
+  return parsed;
+}
+
 function parseJsonArrayArg(name, value, fallback = []) {
   if (value === undefined || value === null || value === '') return fallback;
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -666,7 +1280,14 @@ export function validateExtensionCodeLocally(code) {
     const first = violations[0];
     throw new Error(`Invalid extension component casing: use <${first.expected}> instead of <${first.tag}>. Enfyra/Nuxt UI auto-injected components must keep PascalCase in extension templates; lowercase tags render as unresolved DOM elements.`);
   }
-  return { componentCasing: 'passed' };
+
+  const missingFullWidthFields = findMissingFullWidthFieldControls(code);
+  if (missingFullWidthFields.length) {
+    const first = missingFullWidthFields[0];
+    throw new Error(`Invalid extension field width: <${first.tag}> must include class="w-full" in Enfyra extensions unless it is intentionally compact with data-compact or data-inline. First offending snippet: ${first.snippet}`);
+  }
+
+  return { componentCasing: 'passed', fieldWidth: 'passed' };
 }
 
 export async function validateExtensionCode(apiUrl, code, name) {
@@ -705,7 +1326,7 @@ async function updateExtensionCode(apiUrl, {
   if (!existing) throw new Error(`Extension not found: ${id || name}`);
   const extensionId = getId(existing);
   const validation = await validateExtensionCode(apiUrl, code, name || existing.name || extensionId);
-  const body = {
+  const body: AnyRecord = {
     code,
     ...(description !== undefined ? { description } : {}),
     ...(isEnabled !== undefined ? { isEnabled } : {}),
@@ -729,11 +1350,129 @@ function sha256Text(value) {
   return createHash('sha256').update(String(value ?? '')).digest('hex');
 }
 
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function whitespaceFlexiblePattern(search) {
+  const parts = String(search ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) throw new Error('search must contain at least one non-whitespace token.');
+  return new RegExp(parts.map(escapeRegExp).join('\\s+'), 'g');
+}
+
+function regexMatches(code, regex) {
+  const matches = [];
+  regex.lastIndex = 0;
+  let match = regex.exec(code);
+  while (match) {
+    matches.push(match);
+    if (match[0] === '') regex.lastIndex += 1;
+    match = regex.exec(code);
+  }
+  regex.lastIndex = 0;
+  return matches;
+}
+
+function replaceFirstExact(code, search, replace) {
+  const index = code.indexOf(search);
+  if (index === -1) return code;
+  return `${code.slice(0, index)}${replace}${code.slice(index + search.length)}`;
+}
+
+function normalizeExtensionPatch(input, index) {
+  const search = input?.search;
+  if (typeof search !== 'string' || search.length === 0) {
+    throw new Error(`patches[${index}].search must be a non-empty string.`);
+  }
+  if (input?.replace === undefined) {
+    throw new Error(`patches[${index}].replace is required.`);
+  }
+  const searchMode = input?.searchMode || 'exact';
+  if (!['exact', 'whitespace'].includes(searchMode)) {
+    throw new Error(`patches[${index}].searchMode must be "exact" or "whitespace".`);
+  }
+  return {
+    search,
+    replace: String(input.replace),
+    searchMode,
+    replaceAll: Boolean(input?.replaceAll),
+  };
+}
+
+function normalizeExtensionPatchInputs({ search, replace, searchMode, replaceAll, patches }) {
+  if (Array.isArray(patches) && patches.length > 0) {
+    return patches.map(normalizeExtensionPatch);
+  }
+  return [normalizeExtensionPatch({ search, replace, searchMode, replaceAll }, 0)];
+}
+
+function applyOneExtensionPatch(code, patch, index) {
+  const beforeLength = code.length;
+  let occurrences = 0;
+  let nextCode = code;
+
+  if (patch.searchMode === 'whitespace') {
+    const regex = whitespaceFlexiblePattern(patch.search);
+    occurrences = regexMatches(code, regex).length;
+    if (occurrences === 0) {
+      throw new Error(`Patch ${index} search fragment was not found with whitespace-flex matching.`);
+    }
+    if (!patch.replaceAll && occurrences !== 1) {
+      throw new Error(`Patch ${index} expected search fragment to occur exactly once; found ${occurrences}. Use replaceAll=true, a more specific fragment, or update_extension_code for a full replacement.`);
+    }
+    let replaced = false;
+    nextCode = code.replace(regex, (match) => {
+      if (patch.replaceAll) return patch.replace;
+      if (replaced) return match;
+      replaced = true;
+      return patch.replace;
+    });
+  } else {
+    occurrences = code.split(patch.search).length - 1;
+    if (occurrences === 0) {
+      throw new Error(`Patch ${index} search fragment was not found.`);
+    }
+    if (!patch.replaceAll && occurrences !== 1) {
+      throw new Error(`Patch ${index} expected search fragment to occur exactly once; found ${occurrences}. Use replaceAll=true, a more specific fragment, or update_extension_code for a full replacement.`);
+    }
+    nextCode = patch.replaceAll
+      ? code.split(patch.search).join(patch.replace)
+      : replaceFirstExact(code, patch.search, patch.replace);
+  }
+
+  return {
+    code: nextCode,
+    result: {
+      index,
+      searchMode: patch.searchMode,
+      replaceAll: patch.replaceAll,
+      occurrences,
+      beforeLength,
+      afterLength: nextCode.length,
+    },
+  };
+}
+
+export function applyExtensionCodePatches(code, patches) {
+  const normalizedPatches = normalizeExtensionPatchInputs(patches);
+  let nextCode = String(code ?? '');
+  const results = [];
+  normalizedPatches.forEach((patch, index) => {
+    const applied = applyOneExtensionPatch(nextCode, patch, index);
+    nextCode = applied.code;
+    results.push(applied.result);
+  });
+  return { code: nextCode, patches: normalizedPatches, results };
+}
+
 async function patchExtensionCode(apiUrl, {
   id,
   name,
   search,
   replace,
+  searchMode,
+  replaceAll,
+  patches,
   expectedSha256,
   apply,
   description,
@@ -745,7 +1484,6 @@ async function patchExtensionCode(apiUrl, {
   assertGlobalRulesAck(globalRulesAckKey);
   assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
   if (!id && !name) throw new Error('Provide id or name to patch an existing extension.');
-  if (!search) throw new Error('search must be a non-empty exact code fragment.');
   const existing = id
     ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,menu.id,code')
     : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,menu.id,code');
@@ -756,12 +1494,18 @@ async function patchExtensionCode(apiUrl, {
   if (expectedSha256 && expectedSha256 !== currentSha256) {
     throw new Error(`Extension code hash mismatch. Expected ${expectedSha256}, got ${currentSha256}. Re-read the extension before patching.`);
   }
-  const occurrences = currentCode.split(search).length - 1;
-  if (occurrences !== 1) {
-    throw new Error(`Expected search fragment to occur exactly once; found ${occurrences}. Use a more specific fragment or update_extension_code for a full replacement.`);
-  }
-  const nextCode = currentCode.replace(search, replace);
+  const patchResult = applyExtensionCodePatches(currentCode, { search, replace, searchMode, replaceAll, patches });
+  const nextCode = patchResult.code;
   const nextSha256 = sha256Text(nextCode);
+  const occurrences = patchResult.results.reduce((total, item) => total + item.occurrences, 0);
+  const nextStepPatchInput = patchResult.patches.length === 1
+    ? {
+      search: patchResult.patches[0].search,
+      replace: patchResult.patches[0].replace,
+      searchMode: patchResult.patches[0].searchMode,
+      replaceAll: patchResult.patches[0].replaceAll,
+    }
+    : { patches: patchResult.patches };
   const preview = {
     action: apply ? 'extension_code_patch_applied' : 'extension_code_patch_previewed',
     id: extensionId,
@@ -772,6 +1516,8 @@ async function patchExtensionCode(apiUrl, {
     currentLength: currentCode.length,
     nextLength: nextCode.length,
     occurrences,
+    patchResults: patchResult.results,
+    atomic: patchResult.patches.length > 1,
     apply: Boolean(apply),
   };
   if (!apply) {
@@ -779,7 +1525,7 @@ async function patchExtensionCode(apiUrl, {
       ...preview,
       nextStep: {
         tool: 'patch_extension_code',
-        input: { id: extensionId, expectedSha256: currentSha256, search, replace, apply: true },
+        input: { id: extensionId, expectedSha256: currentSha256, ...nextStepPatchInput, apply: true },
       },
     };
   }
@@ -898,16 +1644,21 @@ async function ensureMenu(apiUrl, {
   const existing = normalizedPath
     ? await findRecord(apiUrl, 'enfyra_menu', { path: { _eq: normalizedPath } }, 'id,_id,path,label')
     : await findRecord(apiUrl, 'enfyra_menu', { label: { _eq: label } }, 'id,_id,path,label');
-  const operation = await createOrPatch(apiUrl, 'enfyra_menu', existing, {
+  const body: Record<string, any> = {
     label,
     ...(normalizedPath ? { path: normalizedPath } : {}),
     icon,
     type,
     order,
-    permission: parseJsonObjectArg('permission', permission, undefined),
     description,
     isEnabled,
-  });
+  };
+  if (permission !== undefined) {
+    body.permission = normalizeMenuPermissionArg(permission);
+  } else if (!existing) {
+    body.permission = null;
+  }
+  const operation = await createOrPatch(apiUrl, 'enfyra_menu', existing, body);
   return {
     id: operation.id || getId(existing),
     path: normalizedPath || existing?.path || null,
@@ -1797,13 +2548,45 @@ async function runExtensionWorkflow(apiUrl, opts) {
     nextSteps: latestState.nextSteps,
     guidance: [
       'Call get_extension_theme_contract before generating or reviewing extension UI.',
+      'useApi returns refs { data, error, pending, status } plus execute/refresh; it does not auto-run. Pass query/body/filter/deep/aggregate as objects or computed objects, not JSON strings.',
+      'useNotify exposes success/error/warning/info(title, description?) async helpers; do not pass Nuxt toast object payloads to it.',
+      'For high-contract UI, call build_extension_* builders before patching raw Vue: drawer, modal, page shell, permission gate, empty state, resource list, form editor, widget, menu notification, account panel item, tabs, or upload modal.',
+      'Use review_extension_ui_contract before saving generated snippets that include drawers, modals, fields, lists, tabs, upload modals, shell registry code, or native buttons.',
+      'Extension validation rejects common field controls without class="w-full" unless intentionally marked data-compact or data-inline.',
+      'PermissionGate renders the permitted slot directly and is UX-only; backend permissions and owner checks remain authoritative.',
       'For menu/account-panel notifications, use counts only when the signal source already owns an exact count; otherwise use a dot/chip for new attention.',
       'Do not fetch destination domain lists solely to decorate the shell; destination pages own domain fetching after click.',
+      'Unrestricted menu permission is null, not {}. Empty permission objects are normalized to null by ensure_menu.',
     ],
   };
 }
 
 export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
+  const extensionFooterActionSchema = z.object({
+    label: z.string().optional().describe('Static action label. Use labelExpression instead for dynamic labels.'),
+    labelExpression: z.string().optional().describe('Raw Vue expression for a dynamic label, e.g. mode === "create" ? "Create" : "Save".'),
+    icon: z.string().optional().describe('Optional icon name such as lucide:save or lucide:trash-2.'),
+    loading: z.string().optional().describe('Raw Vue expression/ref name for loading state, e.g. saving.'),
+    disabled: z.string().optional().describe('Raw Vue expression/ref name for disabled state, e.g. saving || !canSubmit.'),
+    color: z.string().optional().describe('Optional component-supported color. Usually omit and let the managed action choose intent.'),
+    variant: z.string().optional().describe('Optional component-supported variant. Usually omit and let the managed action choose intent.'),
+    tone: z.string().optional().describe('Optional action tone when supported by the shell component.'),
+    onClick: z.string().describe('Raw Vue expression or function reference for the click handler, e.g. saveNote or () => (open = false).'),
+  });
+  const extensionHeaderActionSchema = z.object({
+    id: z.string().describe('Stable action id.'),
+    label: z.string().optional().describe('Action label.'),
+    icon: z.string().optional().describe('Icon name such as lucide:plus or lucide:refresh-cw.'),
+    color: z.string().optional().default('neutral').describe('Nuxt UI color. Use primary only for the single main scope action; otherwise neutral.'),
+    variant: z.string().optional().default('outline').describe('Nuxt UI variant. Use solid for the main scope action; otherwise outline/ghost.'),
+    loading: z.string().optional().describe('Raw Vue expression/ref name for loading state.'),
+    disabled: z.string().optional().describe('Raw Vue expression/ref name for disabled state.'),
+    to: z.string().optional().describe('Route path for visible navigation actions.'),
+    onClick: z.string().optional().describe('Raw Vue expression or function reference for click behavior.'),
+    order: z.number().optional().describe('Sort order in the shell header action area.'),
+    side: z.enum(['left', 'right']).optional().describe('Optional shell side.'),
+  });
+
   server.tool(
     'validate_dynamic_script',
     [
@@ -1864,14 +2647,26 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     'patch_extension_code',
     [
       'Focused operation: patch an existing Enfyra admin extension code by exact search/replace.',
-      'Use this for small UI fixes instead of rewriting the whole Vue SFC. It hash-checks the current code, validates with /enfyra_extension/preview, and saves only when apply=true.',
+      'Use this for small UI fixes instead of rewriting the whole Vue SFC.',
+      'For edits that temporarily unbalance Vue tags or slots, pass patches=[{search,replace},...] so all patches are applied in memory, then the final SFC is validated and saved atomically when apply=true.',
+      'Default searchMode="exact"; use searchMode="whitespace" only when indentation/newline variation is the problem.',
+      'Default replaceAll=false requires exactly one match; set replaceAll=true only after preview confirms the match count.',
+      'It hash-checks the current code, validates with /enfyra_extension/preview, and saves only when apply=true.',
       'Default apply=false returns a preview and nextStep input.',
     ].join(' '),
     {
       id: z.union([z.string(), z.number()]).optional().describe('Existing extension id. Provide id or name.'),
       name: z.string().optional().describe('Existing extension unique name. Provide id or name.'),
-      search: z.string().describe('Exact code fragment that must occur once.'),
-      replace: z.string().describe('Replacement code fragment.'),
+      search: z.string().optional().describe('Single-patch search fragment. Exact by default; JSON strings can contain \\n for multiline fragments. Omit when using patches.'),
+      replace: z.string().optional().describe('Single-patch replacement code fragment. Required when search is provided. Omit when using patches.'),
+      searchMode: z.enum(['exact', 'whitespace']).optional().default('exact').describe('Single-patch matching mode. exact is safest. whitespace treats each run of whitespace in search as flexible whitespace.'),
+      replaceAll: z.boolean().optional().default(false).describe('Single-patch replace-all mode. false requires exactly one match; true replaces every match after previewing the count.'),
+      patches: z.array(z.object({
+        search: z.string().describe('Patch search fragment. JSON strings can contain \\n for multiline fragments.'),
+        replace: z.string().describe('Patch replacement fragment.'),
+        searchMode: z.enum(['exact', 'whitespace']).optional().default('exact').describe('Patch matching mode. Use whitespace only for indentation/newline variation.'),
+        replaceAll: z.boolean().optional().default(false).describe('Patch replace-all mode. false requires exactly one match for this patch.'),
+      })).optional().describe('Atomic multi-patch list. Patches apply sequentially in memory and only the final SFC is validated/saved when apply=true. Use this for slot/tag pairs that would be invalid as intermediate states.'),
       expectedSha256: z.string().optional().describe('Optional SHA-256 of current extension code from a prior inspect/read. Rejects stale patches.'),
       apply: z.boolean().optional().default(false).describe('Preview by default. Set true to validate and save.'),
       description: z.string().optional().describe('Optional replacement extension description. Omit to preserve.'),
@@ -1902,6 +2697,269 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
   );
 
   server.tool(
+    'build_extension_drawer',
+    [
+      'Generate a contract-safe CommonDrawer Vue snippet for Enfyra admin extensions.',
+      'Use this before writing or patching drawer/editing workflows so the model does not have to remember CommonDrawer slots, footer action props, full-width fields, or button type rules.',
+      'The tool returns code only; apply it with patch_extension_code or update_extension_code and then validate/save normally.',
+    ].join(' '),
+    {
+      model: z.string().optional().default('drawerOpen').describe('Vue state variable used with v-model.'),
+      title: z.string().optional().describe('Static drawer title.'),
+      titleExpression: z.string().optional().describe('Raw Vue expression for a dynamic title.'),
+      direction: z.enum(['right', 'left', 'top', 'bottom']).optional().default('right').describe('Drawer direction.'),
+      nested: z.boolean().optional().default(false).describe('Set true when rendering a drawer inside another modal/drawer.'),
+      handleOnly: z.boolean().optional().default(false).describe('Set true only when the drawer should use handle-only behavior.'),
+      body: z.string().describe('Vue template body content for #body. UInput/UTextarea/select controls are normalized to w-full; native buttons get type="button".'),
+      cancelAction: z.union([extensionFooterActionSchema, z.literal(false)]).optional().describe('Cancel action object. Omit for a default Cancel that closes the model; false disables cancelAction.'),
+      primaryAction: extensionFooterActionSchema.optional().describe('Primary action. Editing/create drawers should wire Save/Create here.'),
+      dangerAction: extensionFooterActionSchema.optional().describe('Danger action. Destructive edit drawers should wire Delete here.'),
+      footerHint: z.string().optional().describe('Optional footer hint text when supported by CommonDrawer.'),
+    },
+    async (input) => jsonText(buildExtensionDrawerSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_modal',
+    [
+      'Generate a contract-safe CommonModal/UModal Vue snippet for Enfyra admin extensions.',
+      'Use this before writing or patching confirmation/edit modals so the model does not have to remember v-model:open, slots, final action props, full-width fields, or button type rules.',
+      'The tool returns code only; apply it with patch_extension_code or update_extension_code and then validate/save normally.',
+    ].join(' '),
+    {
+      model: z.string().optional().default('modalOpen').describe('Vue state variable used with v-model:open.'),
+      title: z.string().optional().describe('Static modal title.'),
+      titleExpression: z.string().optional().describe('Raw Vue expression for a dynamic title.'),
+      alias: z.enum(['CommonModal', 'UModal']).optional().default('CommonModal').describe('Use UModal only when preserving an existing UModal tag is useful; dynamic extensions resolve it to CommonModal.'),
+      body: z.string().describe('Vue template body content for #body. UInput/UTextarea/select controls are normalized to w-full; native buttons get type="button".'),
+      cancelAction: z.union([extensionFooterActionSchema, z.literal(false)]).optional().describe('Cancel action object. Omit for a default Cancel that closes the model; false disables cancelAction.'),
+      primaryAction: extensionFooterActionSchema.optional().describe('Primary final action for non-destructive submit/confirm flows.'),
+      dangerAction: extensionFooterActionSchema.optional().describe('Danger final action for destructive confirmation flows.'),
+      footerHint: z.string().optional().describe('Optional footer hint text when supported by CommonModal.'),
+    },
+    async (input) => jsonText(buildExtensionModalSnippet(input)),
+  );
+
+  server.tool(
+    'review_extension_ui_contract',
+    [
+      'Review an Enfyra extension Vue snippet for common modal/drawer contract mistakes.',
+      'Use this before patching or saving generated extension UI when CommonDrawer, CommonModal, UModal, UInput, UTextarea, USelect, or native buttons are involved.',
+      'This is a static contract review, not a compiler validation; still validate the final SFC before saving.',
+    ].join(' '),
+    {
+      code: z.string().describe('Vue SFC or template snippet to review.'),
+    },
+    async ({ code }) => jsonText(reviewExtensionUiContract(code)),
+  );
+
+  server.tool(
+    'build_extension_page_shell',
+    [
+      'Generate page-header and shell-header-action script setup code for Enfyra page extensions.',
+      'Use this so generated page extensions register shell chrome through usePageHeaderRegistry/useHeaderActionRegistry instead of rendering duplicate local headers.',
+    ].join(' '),
+    {
+      title: z.string().optional().describe('Static page title.'),
+      titleExpression: z.string().optional().describe('Raw Vue expression for a dynamic title.'),
+      description: z.string().optional().describe('Optional page description.'),
+      leadingIcon: z.string().optional().describe('Optional page header icon.'),
+      gradient: z.enum(['none', 'purple', 'blue', 'cyan']).optional().default('none').describe('Generated operational extensions should usually use none.'),
+      variant: z.enum(['default', 'minimal', 'stats-focus']).optional().default('minimal').describe('Page header variant.'),
+      headerActions: z.array(extensionHeaderActionSchema).optional().describe('Optional shell header actions registered through useHeaderActionRegistry.'),
+    },
+    async (input) => jsonText(buildExtensionPageShellSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_permission_gate',
+    [
+      'Generate a PermissionGate wrapper snippet for Enfyra admin extension UI.',
+      'Use this when a visible button/block/list needs operator UX gating; backend route permissions and owner checks still remain authoritative.',
+    ].join(' '),
+    {
+      route: z.string().optional().describe('API route path to gate against, e.g. /notes.'),
+      methods: z.array(z.string()).optional().describe('HTTP methods for the route condition. Defaults to GET when route is provided.'),
+      condition: z.string().optional().describe('Raw Vue permission condition expression. Overrides route/methods when provided.'),
+      body: z.string().describe('Vue template content to render inside PermissionGate. Field controls are normalized to w-full.'),
+    },
+    async (input) => jsonText(buildExtensionPermissionGateSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_empty_state',
+    [
+      'Generate a CommonEmptyState snippet for Enfyra admin extensions.',
+      'Use this for app-matched empty/error/no-results states instead of hand-rolled blank panels.',
+    ].join(' '),
+    {
+      title: z.string().optional().describe('Empty state title.'),
+      description: z.string().optional().describe('Empty state description.'),
+      icon: z.string().optional().describe('Icon name. Defaults to lucide:inbox.'),
+      size: z.enum(['sm', 'md', 'lg']).optional().default('sm').describe('Empty state size.'),
+      variant: z.enum(['outline', 'naked', 'soft', 'subtle', 'solid']).optional().default('naked').describe('Use naked inside existing panels/lists.'),
+      action: extensionFooterActionSchema.optional().describe('Optional primary empty-state action.'),
+    },
+    async (input) => jsonText(buildExtensionEmptyStateSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_resource_list',
+    [
+      'Generate a CommonResourceListFrame/CommonResourceListItem snippet for Enfyra admin extensions.',
+      'Use this for operational list pages so loading, empty state, pagination placement, row chrome, icons, stats, and row actions follow the app contract.',
+    ].join(' '),
+    {
+      itemsExpression: z.string().optional().default('items').describe('Vue expression for the row array, e.g. notes.'),
+      itemName: z.string().optional().default('item').describe('Loop variable name.'),
+      keyExpression: z.string().optional().describe('Vue expression for :key. Defaults to item.id.'),
+      titleExpression: z.string().optional().describe('Vue expression for item title. Defaults to item.title || "Untitled".'),
+      descriptionExpression: z.string().optional().describe('Vue expression for item description. Defaults to item.description.'),
+      icon: z.string().optional().describe('Static row icon when iconExpression is omitted.'),
+      iconExpression: z.string().optional().describe('Vue expression for row icon.'),
+      loadingExpression: z.string().optional().default('pending').describe('Vue expression for frame loading.'),
+      totalExpression: z.string().optional().describe('Vue expression for total rows.'),
+      itemsPerPageExpression: z.string().optional().describe('Vue expression for items per page; use 0 to hide pagination.'),
+      statsExpression: z.string().optional().describe('Vue expression returning ResourceListStat[] for each row.'),
+      actionsExpression: z.string().optional().describe('Vue expression returning ResourceListAction[] for each row.'),
+      topBadgeExpression: z.string().optional().describe('Vue expression returning a ResourceListTopBadge for each row.'),
+      onClick: z.string().optional().describe('Raw Vue expression called for row click, e.g. openEdit(item).'),
+      emptyTitle: z.string().optional().describe('Empty title.'),
+      emptyDescription: z.string().optional().describe('Empty description.'),
+      emptyIcon: z.string().optional().describe('Empty icon.'),
+    },
+    async (input) => jsonText(buildExtensionResourceListSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_form_editor',
+    [
+      'Generate a FormEditor/FormEditorLazy snippet for Enfyra table-backed extension forms.',
+      'Use this instead of hand-writing UInput/UTextarea fields when the form maps directly to a table record.',
+    ].join(' '),
+    {
+      tableName: z.string().optional().describe('Static table name.'),
+      tableNameExpression: z.string().optional().describe('Raw Vue expression for dynamic table name.'),
+      model: z.string().optional().default('form').describe('Record state variable for v-model.'),
+      errors: z.string().optional().default('errors').describe('Errors state variable for v-model:errors.'),
+      mode: z.enum(['create', 'update']).optional().describe('Optional fixed form mode.'),
+      loadingExpression: z.string().optional().describe('Raw Vue expression/ref for loading.'),
+      layout: z.enum(['stack', 'grid']).optional().describe('Form layout.'),
+      includes: z.array(z.string()).optional().describe('Fields to include. Prefer explicit includes for focused generated forms.'),
+      excluded: z.array(z.string()).optional().describe('Fields to exclude. compiledCode is always excluded by FormEditor.'),
+      sectionsExpression: z.string().optional().describe('Raw Vue expression for FormEditorSection[].'),
+      fieldMapExpression: z.string().optional().describe('Raw Vue expression for fieldMap overrides.'),
+      virtualFieldsExpression: z.string().optional().describe('Raw Vue expression for virtual fields.'),
+      currentRecordIdExpression: z.string().optional().describe('Raw Vue expression for current record id.'),
+      hasChangedHandler: z.string().optional().describe('Handler expression for @has-changed.'),
+      virtualFieldEmitHandler: z.string().optional().describe('Handler expression for @virtual-field-emit.'),
+      lazy: z.boolean().optional().default(true).describe('Use FormEditorLazy by default.'),
+    },
+    async (input) => jsonText(buildExtensionFormEditorSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_widget',
+    [
+      'Generate a Widget snippet for reusing a widget extension inside an Enfyra page extension.',
+      'Use this so agents pass numeric widget ids and keep prop/event ownership explicit.',
+    ].join(' '),
+    {
+      id: z.union([z.number(), z.string()]).describe('Numeric enfyra_extension widget id. Strings are allowed but return a warning because names/extensionId are wrong for Widget.'),
+      props: z.record(z.string()).optional().describe('Map of prop name to raw Vue expression.'),
+      events: z.record(z.string()).optional().describe('Map of event name to handler expression.'),
+    },
+    async (input) => jsonText(buildExtensionWidgetSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_menu_notification',
+    [
+      'Generate useMenuNotificationRegistry registration code for a global extension.',
+      'Use this for sidebar menu count chips or dot notifications without mutating enfyra_menu records.',
+    ].join(' '),
+    {
+      id: z.string().optional().describe('Stable notification id.'),
+      targetId: z.union([z.string(), z.number()]).optional().describe('Target menu id.'),
+      path: z.string().optional().describe('Target menu path.'),
+      route: z.string().optional().describe('Target route path.'),
+      value: z.union([z.string(), z.number()]).optional().describe('Static count/chip value. Omit with valueExpression for a dot.'),
+      valueExpression: z.string().optional().describe('Raw Vue expression for count/chip value. Omit value for a dot-only notification.'),
+      color: z.enum(['primary', 'success', 'warning', 'error', 'info', 'neutral']).optional().default('primary').describe('Chip/dot color intent.'),
+      title: z.string().optional().describe('Optional tooltip/title.'),
+      order: z.number().optional().describe('Sort order when multiple notifications target the same menu.'),
+    },
+    async (input) => jsonText(buildExtensionMenuNotificationSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_account_panel_item',
+    [
+      'Generate useAccountPanelRegistry registration code for a global extension.',
+      'Use this for data-driven account panel rows instead of drawing full custom sidebar/account UI.',
+    ].join(' '),
+    {
+      id: z.string().optional().describe('Stable account panel item id.'),
+      order: z.number().optional().describe('Display order.'),
+      label: z.string().optional().describe('Row label.'),
+      description: z.string().optional().describe('Row description.'),
+      icon: z.string().optional().describe('Leading icon.'),
+      count: z.union([z.string(), z.number()]).optional().describe('Static notification chip value.'),
+      countExpression: z.string().optional().describe('Raw Vue expression for notification chip value.'),
+      badge: z.union([z.string(), z.number()]).optional().describe('Legacy static badge value. Prefer count.'),
+      badgeExpression: z.string().optional().describe('Raw Vue expression for badge. Prefer countExpression.'),
+      badgeColor: z.enum(['primary', 'neutral', 'info', 'error', 'warning', 'success']).optional().describe('Chip color.'),
+      trailingIcon: z.string().optional().describe('Trailing icon.'),
+      expandedExpression: z.string().optional().describe('Raw Vue expression controlling expanded state.'),
+      contentComponent: z.string().optional().describe('Raw component reference for inline expanded content.'),
+      contentPropsExpression: z.string().optional().describe('Raw Vue expression for content props.'),
+      onClick: z.string().optional().describe('Direct action handler expression.'),
+      onToggle: z.string().optional().describe('Expandable row toggle handler expression.'),
+    },
+    async (input) => jsonText(buildExtensionAccountPanelSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_tabs',
+    [
+      'Generate a UTabs snippet for Enfyra extension page sections.',
+      'Use this instead of custom tab bars so app-wide tab chrome owns active indicators, focus rings, spacing, and theme contrast.',
+    ].join(' '),
+    {
+      model: z.string().optional().default('activeTab').describe('Active tab model variable.'),
+      itemsExpression: z.string().optional().default('tabs').describe('Raw Vue expression for tab items.'),
+      body: z.string().optional().describe('Vue template body for #content="{ item }".'),
+    },
+    async (input) => jsonText(buildExtensionTabsSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_upload_modal',
+    [
+      'Generate a CommonUploadModal snippet and upload-progress companion snippet for Enfyra extensions.',
+      'Use this for file upload UI so progress, selected-file rows, and x-enfyra-upload-id wiring follow the app contract.',
+    ].join(' '),
+    {
+      model: z.string().optional().default('showUploadModal').describe('Modal open state variable.'),
+      title: z.string().optional().describe('Upload modal title.'),
+      accept: z.string().optional().default('*/*').describe('Accepted mime/extensions.'),
+      multiple: z.boolean().optional().default(true).describe('Allow multiple files.'),
+      maxSizeExpression: z.string().optional().describe('Raw Vue expression for max file size.'),
+      loadingExpression: z.string().optional().describe('Raw Vue expression/ref for upload pending state.'),
+      uploadProgressExpression: z.string().optional().describe('Raw Vue expression/ref for aggregate upload progress.'),
+      fileProgressExpression: z.string().optional().describe('Raw Vue expression for per-row progress map.'),
+      dragText: z.string().optional().describe('Drag/drop text.'),
+      acceptText: z.string().optional().describe('Accept/help text.'),
+      uploadText: z.string().optional().describe('Upload action text.'),
+      uploadingText: z.string().optional().describe('Uploading action text.'),
+      uploadHandler: z.string().optional().default('handleUpload').describe('@upload handler expression.'),
+      errorHandler: z.string().optional().describe('@error handler expression.'),
+      headerContent: z.string().optional().describe('Optional #header-content template, e.g. storage selector. Fields are normalized to w-full.'),
+    },
+    async (input) => jsonText(buildExtensionUploadModalSnippet(input)),
+  );
+
+  server.tool(
     'extension_workflow',
     [
       'Step-by-step workflow for creating or updating Enfyra admin page, global, or widget extensions.',
@@ -1920,7 +2978,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       menuIcon: z.string().optional().describe('Optional menu icon name.'),
       menuType: z.enum(['Menu', 'Dropdown Menu']).optional().describe('Menu type. Omit to preserve an existing menu value or use the platform default for a new menu.'),
       menuOrder: z.number().optional().describe('Menu display order. Omit to preserve an existing menu value or use the platform default for a new menu.'),
-      menuPermission: z.string().optional().describe('Optional menu permission JSON object.'),
+      menuPermission: z.string().optional().describe('Optional menu permission JSON object. Omit for unrestricted menus; empty objects are normalized to null.'),
       menuDescription: z.string().optional().describe('Optional menu admin note.'),
       menuIsEnabled: z.boolean().optional().describe('Enable the menu. Omit to preserve an existing menu value or use the platform default for a new menu.'),
       description: z.string().optional().describe('Extension description.'),
@@ -2955,7 +4013,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       icon: z.string().optional().describe('Menu icon name.'),
       type: z.enum(['Menu', 'Dropdown Menu']).optional().default('Menu').describe('Menu type.'),
       order: z.number().optional().default(0).describe('Display order.'),
-      permission: z.string().optional().describe('Menu permission JSON object.'),
+      permission: z.string().optional().describe('Menu permission JSON object. Omit to preserve existing permissions on update; new menus default to null. Empty objects are normalized to null.'),
       description: z.string().optional().describe('Admin note.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable menu.'),
       globalRulesAckKey: globalRulesAckParam(z),

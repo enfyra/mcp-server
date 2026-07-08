@@ -1812,7 +1812,7 @@ const route = useRoute()
 
 const notificationApi = useApi('/cloud_admin_notifications', {
   query: {
-    filter: JSON.stringify({ readAt: { _is_null: true } }),
+    filter: { readAt: { _is_null: true } },
     fields: 'id,kind,targetPath,readAt',
     sort: '-createdAt,-id',
     limit: 10,
@@ -1829,12 +1829,9 @@ const accountBadge = computed(() => notificationSignal.value ? 'New' : null)
 const accountDescription = computed(() => notificationSignal.value ? 'New admin attention' : 'All caught up')
 
 function syncFromNotificationRows() {
-  const value = notificationApi.data?.value
-  const rows = Array.isArray(value?.data)
-    ? value.data
-    : Array.isArray(value?.data?.data)
-      ? value.data.data
-      : []
+  const rows = Array.isArray(notificationApi.data.value?.data)
+    ? notificationApi.data.value.data
+    : []
   attentionRows.value = rows
   notificationSignal.value = rows.some((row) => !row.readAt)
 }
@@ -2129,27 +2126,42 @@ ensure_menu({
         code: `<script setup>
 const { data, pending, execute: fetchOrders } = useApi('/order', {
   query: {
+    fields: 'id,status,total,createdAt',
     limit: 10,
     sort: '-createdAt'
-  }
+  },
+  errorContext: 'Fetch orders'
 })
+
+const orders = computed(() => data.value?.data ?? [])
 
 onMounted(() => fetchOrders())
 </script>
 
 <template>
-  <UButton :loading="pending" @click="fetchOrders">Refresh</UButton>
-  <pre>{{ data }}</pre>
+  <section class="space-y-3">
+    <UButton type="button" color="neutral" variant="outline" :loading="pending" @click="fetchOrders">
+      Refresh
+    </UButton>
+    <div class="eapp-surface-card eapp-divide-y">
+      <div v-for="order in orders" :key="order.id" class="px-4 py-3">
+        <p class="text-sm font-medium eapp-text-primary">{{ order.status }}</p>
+        <p class="text-xs eapp-text-tertiary">{{ order.createdAt }}</p>
+      </div>
+    </div>
+  </section>
 </template>`,
         notes: [
           'Use app-provided composables in extensions.',
           'useApi does not auto-run; call execute() on mounted or through an action.',
+          'useApi returns refs. Read normal Enfyra list rows from data.value?.data, or from response?.data when using the direct execute() return value.',
+          'Pass query/body/filter/deep/aggregate as plain objects or computed objects in app/extension code; do not JSON.stringify them for useApi.',
           'The /order path is illustrative; inspect routes and fetch the smallest data shape the extension needs.',
           'Keep extension UI focused; move backend logic into handlers/hooks when needed.',
         ],
       },
       {
-        name: 'Managed modal and drawer footer actions',
+        name: 'Builder-reviewed modal and drawer footer actions',
         code: `<template>
   <CommonModal
     v-model:open="open"
@@ -2161,7 +2173,7 @@ onMounted(() => fetchOrders())
     </template>
 
     <template #body>
-      <UInput v-model="version" />
+      <UInput v-model="version" class="w-full" />
       <UButton
         type="button"
         icon="i-lucide-refresh-cw"
@@ -2172,12 +2184,9 @@ onMounted(() => fetchOrders())
   </CommonModal>
 </template>`,
         notes: [
-          'For action-only footers, use CommonModal/CommonDrawer footer props: cancelAction, primaryAction, dangerAction, leadingActions, and footerHint.',
-          'cancelAction defaults to neutral outline. Use dangerAction for irreversible destructive work and tone: "primary" for Keep editing in discard dialogs.',
-          'Every trigger/body action button inside CommonModal, CommonDrawer, or UModal should use type="button" unless it intentionally submits a form.',
-          'Use @click.stop.prevent on body action buttons so clicks do not bubble to row/page triggers.',
-          'Open modal/drawer shells immediately, then load content inside them; do not close and reopen after an API call.',
-          'Keep destructive final actions disabled until all confirmation inputs are valid.',
+          'Use build_extension_modal or build_extension_drawer to generate this shape instead of hand-writing the component contract.',
+          'Use review_extension_ui_contract before saving snippets with modals, drawers, fields, or native buttons.',
+          'Extension validation rejects common field controls without class="w-full" unless marked data-compact or data-inline.',
         ],
       },
       {
