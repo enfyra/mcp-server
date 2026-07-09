@@ -4,6 +4,7 @@
  */
 
 import { getValidToken, hasApiToken, resetTokens } from './auth.js';
+import { clearRuntimeCache, clearRuntimeCacheDomains, getRuntimeCache, isRuntimeCacheableGet, runtimeCacheDomainsForMutationPath, setRuntimeCache } from './runtime-cache.js';
 
 // Timeout configuration
 const FETCH_TIMEOUT = 30000; // 30 seconds
@@ -21,6 +22,12 @@ type FetchApiOptions = RequestInit & {
  */
 export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOptions = {}) {
   const url = `${apiUrl}${path}`;
+  const method = String(options.method || 'GET').toUpperCase();
+  const cacheable = isRuntimeCacheableGet(path, method);
+  if (cacheable) {
+    const cached = getRuntimeCache(path);
+    if (cached !== undefined) return cached;
+  }
 
   async function requestWithCurrentToken() {
     const token = await getValidToken(apiUrl);
@@ -62,6 +69,7 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
 
   let res = await requestWithCurrentToken();
   if ((res.status === 401 || res.status === 403) && hasApiToken()) {
+    clearRuntimeCache('auth');
     resetTokens();
     res = await requestWithCurrentToken();
   }
@@ -71,7 +79,12 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
     throw new Error(`API error (${res.status}): ${error}`);
   }
 
-  return res.json();
+  const result = await res.json();
+  if (cacheable) setRuntimeCache(path, result);
+  if (method !== 'GET') {
+    clearRuntimeCacheDomains(runtimeCacheDomainsForMutationPath(path), 'mutation');
+  }
+  return result;
 }
 
 /**

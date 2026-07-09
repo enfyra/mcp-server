@@ -36,7 +36,16 @@ test('mcp usage telemetry summarizes token, retry, failure, and compression evid
       outputEstimatedTokens: 6000,
       durationMs: 20,
     },
-  ], 'https://admin.enfyra.io/api', 'guided');
+  ], 'https://admin.enfyra.io/api', 'guided', {
+    hits: 8,
+    misses: 2,
+    hitRate: 0.8,
+    invalidations: { mutation: 1, auth: 0, reload: 2 },
+    warm: { attempted: 2, succeeded: 1, failed: 1 },
+    warmSuccessRate: 0.5,
+    domains: { metadata: { hits: 8, misses: 2, invalidations: 3, warmFailures: 1 } },
+    events: [{ timestamp: '2026-07-04T00:03:00.000Z', kind: 'warm_failure', domains: ['metadata'], entries: 1 }],
+  });
 
   assert.equal(report.schema_version, 'v1');
   assert.equal(report.tool_call_count, 3);
@@ -50,6 +59,8 @@ test('mcp usage telemetry summarizes token, retry, failure, and compression evid
   assert.equal(report.failure_stats['create_tables:ValidationError'].count, 1);
   assert.equal(report.retry_stats.create_tables.count, 1);
   assert.equal(report.samples.some((item) => item.kind === 'token_hotspot' && item.toolName === 'query_table'), true);
+  assert.equal(report.samples.some((item) => item.kind === 'cache_summary' && item.hitRate === 0.8 && item.warmSuccessRate === 0.5), true);
+  assert.equal(report.samples.some((item) => item.kind === 'cache_recovery' && item.warmFailures === 1 && item.events[0].kind === 'warm_failure'), true);
   assert.match(report.client_hash, /^[a-f0-9]{32}$/);
   assert.match(report.api_host_hash, /^[a-f0-9]{32}$/);
   assert.equal(JSON.stringify(report).includes('admin.enfyra.io'), false);

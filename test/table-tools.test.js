@@ -48,7 +48,7 @@ test('extension local validation rejects manual component resolution mistakes', 
 
   assert.deepEqual(
     validateExtensionCodeLocally('<template><UButton>Save</UButton></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed' },
+    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.throws(
     () => validateExtensionCodeLocally('<template><UInput v-model="name" /></template>'),
@@ -56,11 +56,11 @@ test('extension local validation rejects manual component resolution mistakes', 
   );
   assert.deepEqual(
     validateExtensionCodeLocally('<template><UInput v-model="name" class="w-full" /></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed' },
+    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.deepEqual(
     validateExtensionCodeLocally('<template><UInput v-model="name" data-compact /></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed' },
+    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.throws(
     () => validateExtensionCodeLocally([
@@ -74,6 +74,38 @@ test('extension local validation rejects manual component resolution mistakes', 
   assert.throws(
     () => validateExtensionCodeLocally('<template><ubutton>Save</ubutton></template>'),
     /use <UButton> instead of <ubutton>/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<template><section class="bg-violet-500">Bad</section></template>'),
+    /Invalid extension theme contract/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<template><section class="text-[var(--text-primary)]">Bad</section></template>'),
+    /Invalid extension theme contract/,
+  );
+  assert.deepEqual(
+    validateExtensionCodeLocally('<template><section class="eapp-surface-card eapp-divider border"><p class="eapp-text-primary">Ok</p></section></template>'),
+    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<script setup>import { debounce } from "lodash-es"</script><template><div /></template>'),
+    /Invalid extension runtime contract/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<script setup>const toast = useToast()</script><template><div /></template>'),
+    /Invalid extension runtime contract/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<script setup>const notify = useNotify(); notify.add({ title: "Saved" })</script><template><div /></template>'),
+    /Invalid extension runtime contract/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<script setup>const api = useApi("/notes", { query: JSON.stringify({ filter: { id: { _eq: 1 } } }) })</script><template><div /></template>'),
+    /Invalid extension runtime contract/,
+  );
+  assert.deepEqual(
+    validateExtensionCodeLocally('<script setup>const notes = await useApi("/notes")</script><template><div /></template>'),
+    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
 });
 
@@ -139,7 +171,9 @@ test('extension component builders enforce drawer and modal contracts', async ()
   const {
     buildExtensionDrawerSnippet,
     buildExtensionEmptyStateSnippet,
+    buildExtensionApiUsageSnippet,
     buildExtensionFormEditorSnippet,
+    buildExtensionNotifySnippet,
     buildExtensionUiSnippet,
     buildExtensionAccountPanelSnippet,
     buildExtensionMenuNotificationSnippet,
@@ -150,6 +184,8 @@ test('extension component builders enforce drawer and modal contracts', async ()
     buildExtensionTabsSnippet,
     buildExtensionUploadModalSnippet,
     buildExtensionWidgetSnippet,
+    reviewExtensionRuntimeContract,
+    reviewExtensionThemeContract,
     reviewExtensionUiContract,
   } = await import('../dist/lib/platform-operation-tools.js');
 
@@ -232,6 +268,74 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.equal(lazyReview.gateway, 'build_extension_ui');
   assert.equal(lazyReview.kind, 'review');
   assert.equal(lazyReview.valid, false);
+  assert.equal(lazyReview.ui.valid, false);
+  assert.equal(lazyReview.theme.valid, true);
+  assert.equal(lazyReview.runtime.valid, true);
+
+  const apiUsage = buildExtensionApiUsageSnippet({
+    resource: 'notes',
+    path: '/notes',
+    queryExpression: 'notesQuery',
+    errorContext: 'Load notes',
+  });
+  assert.match(apiUsage.snippet, /execute: loadNotes/);
+  assert.match(apiUsage.snippet, /query: notesQuery/);
+  assert.match(apiUsage.snippet, /onMounted\(\(\) => \{ loadNotes\(\); \}\)/);
+
+  const notifyUsage = buildExtensionNotifySnippet({
+    kind: 'success',
+    title: 'Saved',
+    description: 'Changes were applied.',
+  });
+  assert.match(notifyUsage.snippet, /const notify = useNotify\(\)/);
+  assert.match(notifyUsage.snippet, /await notify\.success\('Saved', 'Changes were applied\.'\)/);
+
+  const runtimeReview = reviewExtensionRuntimeContract('<script setup>const notify = useNotify(); notify.add({ title: "Saved" })</script><template><div /></template>');
+  assert.equal(runtimeReview.valid, false);
+  assert.match(JSON.stringify(runtimeReview.issues), /use-notify-add/);
+
+  const lazyApiUsage = buildExtensionUiSnippet('api_usage', {
+    resource: 'notes',
+    path: '/notes',
+  });
+  assert.equal(lazyApiUsage.gateway, 'build_extension_ui');
+  assert.equal(lazyApiUsage.kind, 'api_usage');
+  assert.match(lazyApiUsage.snippet, /useApi\('\/notes'\)/);
+
+  const lazyNotify = buildExtensionUiSnippet('notify', {
+    kind: 'error',
+    title: 'Save failed',
+  });
+  assert.equal(lazyNotify.gateway, 'build_extension_ui');
+  assert.equal(lazyNotify.kind, 'notify');
+  assert.match(lazyNotify.snippet, /await notify\.error\('Save failed'\)/);
+
+  const lazyRuntimeReview = buildExtensionUiSnippet('runtime_review', {
+    code: '<script setup>const api = useApi("/notes", { query: JSON.stringify({ page: 1 }) })</script><template><div /></template>',
+  });
+  assert.equal(lazyRuntimeReview.gateway, 'build_extension_ui');
+  assert.equal(lazyRuntimeReview.kind, 'runtime_review');
+  assert.equal(lazyRuntimeReview.valid, false);
+  assert.match(JSON.stringify(lazyRuntimeReview.issues), /use-api-json-stringify-options/);
+
+  const themeClasses = buildExtensionUiSnippet('theme_classes', {
+    intent: 'primary_identity',
+  });
+  assert.equal(themeClasses.gateway, 'build_extension_ui');
+  assert.equal(themeClasses.kind, 'theme_classes');
+  assert.match(themeClasses.contract.classes, /eapp-primary-surface/);
+
+  const themeReview = reviewExtensionThemeContract('<template><section class="bg-violet-500">Bad</section></template>');
+  assert.equal(themeReview.valid, false);
+  assert.match(JSON.stringify(themeReview.issues), /hardcoded-tailwind-palette/);
+
+  const lazyThemeReview = buildExtensionUiSnippet('theme_review', {
+    code: '<template><section class="text-[var(--text-primary)]">Bad</section></template>',
+  });
+  assert.equal(lazyThemeReview.gateway, 'build_extension_ui');
+  assert.equal(lazyThemeReview.kind, 'theme_review');
+  assert.equal(lazyThemeReview.valid, false);
+  assert.match(JSON.stringify(lazyThemeReview.issues), /raw-css-var-utility/);
 
   const pageShell = buildExtensionPageShellSnippet({
     title: 'Notes',
@@ -499,7 +603,7 @@ test('fetchTableWithDetails reads full columns from metadata instead of enfyra_t
     type: 'varchar',
   }));
 
-  global.fetch = async (url) => {
+  global.fetch = async (url, init = {}) => {
     calls.push(String(url));
     if (String(url).endsWith('/auth/token/exchange')) {
       return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
@@ -552,7 +656,7 @@ test('resolveTableFromMetadata supports array and keyed metadata shapes', () => 
 test('fetchTableWithDetails falls back to metadata table name when metadata id is malformed', async () => {
   const originalFetch = global.fetch;
 
-  global.fetch = async (url) => {
+  global.fetch = async (url, init = {}) => {
     if (String(url).endsWith('/auth/token/exchange')) {
       return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
     }
@@ -793,6 +897,42 @@ test('fetchAPI exchanges ENFYRA_API_TOKEN before authenticated requests', async 
     assert.equal(calls[0].url, 'https://example.test/api/auth/token/exchange');
     assert.equal(calls[1].url, 'https://example.test/api/me');
   } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('fetchAPI caches reloadable control-plane GET responses and clears their domain after a mutation', async () => {
+  const { clearRuntimeCache } = await import('../dist/lib/runtime-cache.js');
+  const originalFetch = global.fetch;
+  let metadataReads = 0;
+
+  global.fetch = async (url, init = {}) => {
+    if (String(url).endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'jwt-cache', expTime: Date.now() + 60_000 });
+    }
+    if (String(url).includes('/enfyra_flow') && String(init.method || 'GET').toUpperCase() === 'GET') {
+      metadataReads += 1;
+      return jsonResponse({ data: [{ name: 'cloud_projects' }] });
+    }
+    if (String(url).endsWith('/enfyra_flow')) return jsonResponse({ success: true });
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    clearRuntimeCache();
+    resetTokens();
+    initAuth('https://example.test/api', 'efy_pat_test');
+
+    await fetchAPI('https://example.test/api', '/enfyra_flow?limit=1');
+    await fetchAPI('https://example.test/api', '/enfyra_flow?limit=1');
+    assert.equal(metadataReads, 1);
+
+    await fetchAPI('https://example.test/api', '/enfyra_flow', { method: 'POST', body: '{}' });
+    await fetchAPI('https://example.test/api', '/enfyra_flow?limit=1');
+    assert.equal(metadataReads, 2);
+  } finally {
+    clearRuntimeCache();
     resetTokens();
     global.fetch = originalFetch;
   }
@@ -1570,7 +1710,7 @@ test('code-writing tools require required-knowledge acknowledgement without bloc
   assert.match(requiredKnowledge, /theme-contract-first/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(instructions, /discover_enfyra_workflows/);
-  assert.match(instructions, /globalRulesAckKey/);
+  assert.match(instructions, /one-shot done/);
 
   assert.match(entry, /server\.tool\(\s*['"]create_records['"]/);
   assert.match(entry, /server\.tool\(\s*['"]update_records['"]/);
@@ -1617,6 +1757,10 @@ test('mcp server exposes route platform operation tools', () => {
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const routing = readFileSync(new URL('../src/lib/tool-routing.ts', import.meta.url), 'utf8');
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const extensionThemeContractBlock = platformTools.slice(
+    platformTools.indexOf('function getExtensionThemeContract()'),
+    platformTools.indexOf('function getThemeClassReference()'),
+  );
 
   assert.match(entry, /registerPlatformOperationTools\(server, ENFYRA_API_URL\)/);
   assert.doesNotMatch(tableTools, /server\.tool\(\s*['"]add_column['"]/);
@@ -1710,8 +1854,8 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /extension_workflow_advanced/);
   assert.match(platformTools, /assertExtensionKnowledgeAck/);
   assert.match(platformTools, /get_extension_theme_contract before generating or reviewing extension UI/);
-  assert.match(platformTools, /useApi returns refs/);
-  assert.match(platformTools, /For high-contract UI, call build_extension_ui/);
+  assert.match(platformTools, /kind=api_usage/);
+  assert.match(platformTools, /For high-contract UI\/runtime code, call build_extension_ui/);
   assert.match(platformTools, /Generate a contract-safe CommonDrawer Vue snippet/);
   assert.match(platformTools, /Generate a contract-safe CommonModal\/UModal Vue snippet/);
   assert.match(platformTools, /Generate page-header and shell-header-action script setup code/);
@@ -1724,15 +1868,25 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /Generate useAccountPanelRegistry registration code/);
   assert.match(platformTools, /Generate a UTabs snippet/);
   assert.match(platformTools, /Generate a CommonUploadModal snippet/);
+  assert.match(platformTools, /extension_api_usage_built/);
+  assert.match(platformTools, /extension_notify_usage_built/);
+  assert.match(platformTools, /extension_runtime_contract_reviewed/);
+  assert.match(platformTools, /Invalid extension runtime contract/);
+  assert.match(platformTools, /api_usage/);
+  assert.match(platformTools, /runtime_review/);
+  assert.match(platformTools, /theme_classes/);
+  assert.match(platformTools, /theme_review/);
+  assert.match(platformTools, /extension_theme_contract_reviewed/);
+  assert.match(platformTools, /Invalid extension theme contract/);
   assert.match(platformTools, /Review an Enfyra extension Vue snippet/);
   assert.match(platformTools, /kind=review/);
   assert.match(platformTools, /field controls without class="w-full"/);
   assert.match(platformTools, /Extension validation rejects UInput, UTextarea/);
   assert.match(routing, /build_extension_ui/);
-  assert.match(routing, /FormEditor, Widget, shell registries, tabs, upload modal, or review/);
+  assert.match(routing, /FormEditor, Widget, shell registries, tabs, upload modal, api usage, notify, runtime review, theme classes, theme review, or full review/);
   assert.match(routing, /kind: drawer, modal, page shell/);
-  assert.match(instructions, /use `build_extension_ui`/);
-  assert.match(instructions, /FormEditor, Widget, menu\/account panel registries, tabs, upload modals, and review/);
+  assert.match(instructions, /build_extension_ui/);
+  assert.match(instructions, /build_extension_ui only when the requested UI needs those contracts/);
   assert.match(platformTools, /Use build_extension_ui kind=drawer for generated drawer\/editing snippets/);
   assert.match(platformTools, /Use build_extension_ui kind=modal for generated modal\/confirmation snippets/);
   assert.match(platformTools, /Unrestricted menu permission is null/);
@@ -1758,40 +1912,19 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(platformTools, /\/admin\/reload\/websockets/);
   assert.match(platformTools, /validateScriptSourceIfPresent/);
   assert.match(platformTools, /get_extension_theme_contract/);
-  assert.match(platformTools, /eApp theme class tokens/);
-  assert.match(platformTools, /Do not inject global CSS/);
+  assert.match(platformTools, /Never fix one extension by injecting global CSS/);
   assert.match(platformTools, /theme guards/);
-  assert.match(platformTools, /runtime-configurable/);
-  assert.match(platformTools, /app color picker/);
-  assert.match(platformTools, /must affect extension identity UI/);
-  assert.match(platformTools, /neutral surface, runtime-primary identity, or status/);
-  assert.match(platformTools, /decisionCases/);
-  assert.match(platformTools, /Normal accent, decorative icon/);
-  assert.match(platformTools, /True semantic state/);
-  assert.match(platformTools, /Use the matching state\/status color/);
-  assert.match(platformTools, /Do not force semantic state UI to primary/);
-  assert.match(platformTools, /Large ordinary surface/);
-  assert.match(platformTools, /patternExamples/);
-  assert.match(platformTools, /Ordinary KPI, metric, or summary card/);
-  assert.match(platformTools, /Selected\/current entity/);
-  assert.match(platformTools, /Progress, active tab indicator/);
-  assert.match(platformTools, /List rows, table-like records/);
-  assert.match(platformTools, /For Nuxt UI components, choose color="primary" by semantic intent/);
-  assert.match(platformTools, /eapp-primary-surface/);
-  assert.match(platformTools, /eapp-primary-soft/);
-  assert.match(platformTools, /eapp-primary-subtle/);
-  assert.match(platformTools, /eapp-surface-card/);
-  assert.match(platformTools, /eapp-text-tertiary/);
-  assert.match(platformTools, /eapp-status-success-soft/);
-  assert.match(platformTools, /eapp-status-warning-soft/);
-  assert.match(platformTools, /Do not read --badge-\* variables directly/);
-  assert.match(platformTools, /normal app cards with a very subtle active-primary tint/);
-  assert.match(platformTools, /must not be applied broadly to every KPI\/list wrapper/);
-  assert.match(platformTools, /Nuxt UI secondary is still a valid semantic color/);
-  assert.match(platformTools, /eapp-identity-\*/);
-  assert.match(platformTools, /bg-primary\/10/);
-  assert.match(platformTools, /Do not color large panels, alert-like success blocks, KPI cards, list containers, or reconciliation\/attention blocks green\/yellow\/red/);
-  assert.match(platformTools, /PageHeader gradient must be "none"/);
+  assert.match(extensionThemeContractBlock, /Do not choose theme classes from memory/);
+  assert.match(extensionThemeContractBlock, /themeIntents/);
+  assert.match(extensionThemeContractBlock, /neutral_surface/);
+  assert.match(extensionThemeContractBlock, /primary_identity/);
+  assert.match(extensionThemeContractBlock, /theme_review/);
+  assert.doesNotMatch(extensionThemeContractBlock, /decisionCases/);
+  assert.doesNotMatch(extensionThemeContractBlock, /patternExamples/);
+  assert.doesNotMatch(extensionThemeContractBlock, /compactExample/);
+  assert.doesNotMatch(extensionThemeContractBlock, /classReference/);
+  assert.doesNotMatch(extensionThemeContractBlock, /eapp-primary-surface/);
+  assert.doesNotMatch(extensionThemeContractBlock, /bg-primary\/10/);
   assert.match(platformTools, /Use build_extension_ui kind=modal for generated modal\/confirmation snippets/);
   assert.match(platformTools, /md:grid-cols-2 xl:grid-cols-3/);
   assert.match(examples, /eapp-surface-card p-4/);
@@ -1808,10 +1941,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(examples, /bg-\[var\(--eapp-surface-muted\)\]/);
   assert.doesNotMatch(examples, /hover:eapp-surface-muted/);
   assert.match(instructions, /Prefer the most specific business operation tool over raw metadata CRUD/);
-  assert.match(instructions, /validate_dynamic_script/);
-  assert.match(instructions, /get_permission_profile/);
-  assert.match(instructions, /non-root API tokens/);
-  assert.match(instructions, /\/admin\/script\/validate/);
+  assert.match(instructions, /lazy-load by domain/);
   assert.match(instructions, /discover_enfyra_workflows/);
   assert.match(routing, /ensure_websocket_event/);
   assert.match(routing, /extension_workflow/);
@@ -1822,8 +1952,6 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(routing, /public_route_methods/);
   assert.match(routing, /add_route_methods/);
   assert.match(routing, /enable_route/);
-  assert.match(instructions, /enfyra_route\.isEnabled/);
-  assert.match(instructions, /GraphQL table data requires Bearer auth/);
   assert.match(routing, /ensure_page_extension/);
   assert.match(instructions, /get_extension_theme_contract/);
 });
@@ -1847,12 +1975,12 @@ test('server instructions stay compact and route details to tools', () => {
   const routing = readFileSync(new URL('../src/lib/tool-routing.ts', import.meta.url), 'utf8');
 
   assert.ok(Buffer.byteLength(instructions, 'utf8') < 12000);
-  assert.match(instructions, /detail: "plan"/);
+  assert.match(instructions, /goal or tool path is ambiguous/);
   assert.match(instructions, /avoidTools/);
-  assert.match(instructions, /Load examples only when needed/);
+  assert.match(instructions, /Load examples with `get_enfyra_examples` only for an unfamiliar pattern/);
   assert.match(instructions, /get_enfyra_api_context/);
-  assert.match(instructions, /Run broad discovery tools sequentially, not in parallel/);
-  assert.match(instructions, /fetch only the relevant live context or example category/);
+  assert.match(instructions, /Do not run broad discovery after the target is known/);
+  assert.match(instructions, /Never load broad discovery, full knowledge, or a full reference merely as a precaution/);
   assert.match(routing, /progressive disclosure/);
   assert.match(routing, /query_table on destination domain lists/);
 	  assert.match(routing, /notification summary\/realtime shell signal plus destination-page fetch on click/);
@@ -1926,7 +2054,7 @@ test('dynamic script guidance documents repository deep projection contract', ()
   const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.ts', import.meta.url), 'utf8');
 
   assert.match(entry, /For repository find\(\{ deep \}\) in scripts, include relation property names in top-level fields/);
-  assert.match(instructions, /`find\(\{deep\}\)` does not auto-add projections/);
+  assert.match(instructions, /discover_script_contexts/);
   assert.match(requiredKnowledge, /Inside dynamic server scripts, repository find\(\{ deep \}\) requires the relation property to also be present in top-level fields/);
   assert.match(examples, /Workflow handler with relation read and side effects/);
   assert.match(examples, /fields: \["id", "title", "status", "requester"\]/);
@@ -1942,7 +2070,7 @@ test('dynamic script guidance documents repository deep projection contract', ()
 test('guidance rejects sql-like filter operators', () => {
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
-  assert.match(instructions, /Do not use `_like`; use `_contains`, `_starts_with`, or `_ends_with`/);
+  assert.match(instructions, /discover_query_capabilities/);
   assert.match(requiredKnowledge, /do not use _like/);
 });
 
@@ -1953,7 +2081,7 @@ test('schema design context warns about column relation namespace clashes', () =
   assert.match(tableTools, /Column names and relation propertyName values share one table namespace/);
   assert.match(tableTools, /Relation propertyName must be unique among both relation names and scalar column names/);
   assert.match(tableTools, /parent detail\/read must deep-load a child collection/);
-  assert.match(instructions, /Parent deep child collections are such a need/);
+  assert.match(instructions, /get_schema_design_context/);
   assert.match(requiredKnowledge, /deep-read a parent with child collections/);
 });
 
@@ -1962,7 +2090,7 @@ test('dynamic script guidance rejects physical relation filter names', () => {
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
   assert.match(entry, /not \{ incidentId: \{ _eq: incident\.id \} \}/);
-  assert.match(instructions, /not `\{ incidentId: \{ _eq: id \} \}`/);
+  assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(requiredKnowledge, /not \{ incidentId: \{ _eq: id \} \}/);
 });
 
@@ -1978,7 +2106,7 @@ test('list query tools require explicit limit or all intent except bounded locat
   assert.match(entry, /query_table accepts either all=true or limit, not both/);
   assert.match(entry, /get_all_routes accepts either all=true or limit, not both/);
   assert.match(entry, /all: z\.boolean\(\)\.optional\(\)\.default\(false\)\.describe\('Return all matching rows by sending REST limit=0/);
-  assert.match(instructions, /omit limit with `search`/);
+  assert.match(instructions, /domain-specific rule/);
   assert.match(examples, /pass all: true instead of choosing an arbitrary page size such as 30 or 50/);
   assert.match(readme, /Locator searches on `get_all_routes` and `get_all_tables` may omit `limit`/);
 });
@@ -1990,23 +2118,19 @@ test('delete_tables accepts tableName or tableId and schema rules mention full-b
 
   assert.match(tableTools, /Native JSON array of delete items: \[\{ tableId \}\] or \[\{ tableName \}\]/);
   assert.match(tableTools, /items\[\$\{index\}\] requires tableId or tableName/);
-  assert.match(instructions, /create_tables` preflights the whole batch/);
+  assert.match(instructions, /get_schema_design_context/);
   assert.match(requiredKnowledge, /create_tables preflights all items before posting tables/);
 });
 
 test('websocket script context documents roomSize helper', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
 
   assert.match(entry, /roomSize\(room\) counts sockets in that room across registered gateways/);
   assert.match(entry, /@SOCKET reply\/join\/leave\/disconnect\/emit helpers\/roomSize/);
-  assert.match(instructions, /`@SOCKET\.roomSize\(room\)` is available/);
-  assert.match(instructions, /HTTP\/flow contexts only have global emit helpers plus `roomSize`/);
 });
 
 test('script context discovery documents runtime macro and helper surface', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
 
   for (const macro of [
     '@BODY',
@@ -2042,15 +2166,11 @@ test('script context discovery documents runtime macro and helper surface', () =
   assert.match(entry, /\$ctx\.\$helpers includes \$bcrypt\.hash\/compare, autoSlug\(text\), \$fetch, \$sleep\(ms\)/);
   assert.match(entry, /@REQ websocket request metadata/);
   assert.match(entry, /@RES when response streaming is available/);
-  assert.match(instructions, /@REQ`, `@RES`/);
-  assert.match(instructions, /@FETCH/);
-  assert.match(instructions, /@UPLOADED_FILE/);
-  assert.match(instructions, /Call `discover_script_contexts` for exact per-surface availability/);
 });
 
 test('dynamic throw contract is consistently documented and ack-versioned', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   const payload = buildRequiredKnowledgePayload();
   const payloadText = JSON.stringify(payload);
@@ -2059,7 +2179,7 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-THROW-CONTRACT/);
   assert.equal(payload.version, '2026-07-08.global-rules-v9-app-composable-contracts');
 
-  for (const text of [entry, instructions, examples, payloadText]) {
+  for (const text of [entry, requiredKnowledge, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);
     assert.match(text, /details.*object\/array|object or array/i);
     assert.match(text, /notFound\(resource, id\?\)|notFound\(\.\.\.\)|notFound\(resource, identifier\)/);
@@ -2098,7 +2218,7 @@ test('OAuth setup examples guide provider console callback configuration', () =>
   assert.match(examples, /\/api\/auth\/google\/callback/);
   assert.match(examples, /enfyra_oauth_config/);
   assert.match(examples, /Do not ask the user to choose or type the callback URL manually/);
-  assert.match(instructions, /category: "oauth-setup"/);
+  assert.match(instructions, /get_enfyra_examples/);
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {
@@ -2128,7 +2248,7 @@ test('query guidance documents fields exclusion mode', () => {
   assert.match(examples, /fields=-compiledCode/);
   assert.match(examples, /fields=id,-compiledCode returns all readable fields except compiledCode/);
   assert.match(examples, /Dotted exclusions and deep relation fields use the same exclude-mode rule/);
-  assert.match(instructions, /Field exclusion mode: `fields=-compiledCode`/);
+  assert.match(instructions, /discover_query_capabilities/);
   assert.match(readme, /`fields=-compiledCode` returns all readable fields except `compiledCode`/);
   assert.match(readme, /`fields=-owner\.avatar`/);
 });
@@ -2137,9 +2257,7 @@ test('operator guidance avoids speculative warnings and physical FK generated co
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
-  assert.match(instructions, /Do not turn expected implementation details into speculative warnings/);
-  assert.match(instructions, /`compiledCode` is generated and may differ textually/);
-  assert.match(instructions, /not physical FK fields like `userId`, `conversationId`, `senderId`, or `memberId`/);
+  assert.match(instructions, /domain-specific rule/);
   assert.match(examples, /conversationId is accepted only as the room\/business identifier; persistence uses relation properties conversation and sender/);
   assert.match(examples, /Do not ask the client for senderId\. The sender relation is derived from @USER\.id/);
   assert.match(readme, /`compiledCode` is generated from `sourceCode` and may differ textually/);
@@ -2158,15 +2276,14 @@ test('schema examples guide live types and relation mutation without stale updat
   assert.match(requiredKnowledge, /call get_schema_design_context first/);
   assert.match(examples, /create_tables creates tables\/columns first, then creates requested relations after all batch tables exist/);
   assert.doesNotMatch(examples, /update_tables\(\{[\s\S]*relations: JSON\.stringify/);
-  assert.match(instructions, /call `get_schema_design_context`/);
+  assert.match(instructions, /get_schema_design_context/);
 });
 
 test('RLS guidance preserves caller projection and pagination', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
-  assert.match(instructions, /do not override `@QUERY\.fields`/);
-  assert.match(instructions, /Merge only security filters into `@QUERY\.filter`/);
+  assert.match(instructions, /merge row scope only into `@QUERY\.filter`/);
   assert.match(examples, /keep projection and pagination client-owned/);
   assert.match(entry, /preserve client-controlled query shape/);
   assert.match(entry, /pass through client fields\/deep\/sort\/page\/limit\/meta\/aggregate\/debugMode/);

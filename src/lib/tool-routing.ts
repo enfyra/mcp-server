@@ -92,9 +92,9 @@ export const TOOL_WORKFLOWS = [
     requiredAck: ['globalRulesAckKey', 'dynamicCodeAckKey when saving handler source'],
     exampleCategories: ['handlers-hooks', 'permissions-rls'],
     nextStepTemplate: [
-      'Inspect the route or run api_endpoint_workflow with apply=false.',
-      'Read required knowledge before apply/applyAll.',
-      'Apply one pending step or use applyAll only when the plan is fully understood.',
+      'For an ambiguous, high-risk, or approval-gated change, inspect the route or run api_endpoint_workflow with apply=false.',
+      'Read required knowledge before applying.',
+      'For a fully specified non-destructive endpoint, use applyAll after the required narrow reads; otherwise apply one reviewed pending step.',
       'Verify the endpoint with test_rest_endpoint or run_admin_test.',
     ],
     recommendedScope: 'dynamic-code',
@@ -112,7 +112,7 @@ export const TOOL_WORKFLOWS = [
     inspectTools: ['search_admin_extensions(mode=search)', 'search_admin_extensions(mode=inspect)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'get_theme_class_reference', 'build_extension_ui'],
     writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
-    verifyTools: ['build_extension_ui(kind=review)', 'validate_extension_code', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
+    verifyTools: ['build_extension_ui(kind=runtime_review|theme_review|review)', 'validate_extension_code', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     avoidTools: [
       {
         tool: 'create_records/update_records on enfyra_extension',
@@ -138,7 +138,7 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Call get_extension_theme_contract before writing or reviewing UI.',
       'Use search_admin_extensions to locate the existing menu/extension/global shell registration, then inspect one candidate before editing.',
-      'Use extension_workflow with apply=false when page/menu wiring or shell notification behavior needs multiple steps.',
+      'Use extension_workflow with apply=false only when page/menu wiring is ambiguous or needs approval; use applyAll after narrow inspection when the requested create/wire contract is fully specified.',
       'Use reorder_menus for menu order/parent changes instead of patching individual enfyra_menu records.',
       'Choose count only when the source already owns an exact count; choose dot/chip for new-attention signals.',
       'Validate extension code or use an ensure_*_extension tool that validates before saving.',
@@ -593,8 +593,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
       return [
         step(1, 'get_enfyra_required_knowledge', 'Read mutation/security contracts and collect acknowledgement keys.'),
         step(2, 'discover_script_contexts', 'Load handler/hook macros and repository contracts before writing source.'),
-        step(3, 'api_endpoint_workflow', 'Plan the endpoint with apply=false; this is the front door for handler-backed routes.'),
-        step(4, 'api_endpoint_workflow', 'Apply the next planned step, or applyAll only when the returned plan is fully understood.', { stopWhen: 'The workflow reports no pending steps or returns a validation/access error.' }),
+        step(3, 'api_endpoint_workflow', 'For a fully specified non-destructive endpoint, apply all safe steps in one call. Use apply=false only when a route/access decision is unresolved.'),
         step(5, 'test_rest_endpoint', 'Smoke-test the final route contract.'),
       ];
     case 'extension':
@@ -603,7 +602,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(2, 'get_extension_theme_contract', 'Load the required eApp/Nuxt UI theme and component contract.'),
         step(3, 'search_admin_extensions', 'Locate the menu/page/widget/global extension by visible text, path, button, icon, tab, or source term.'),
         step(4, 'search_admin_extensions', 'Inspect the selected admin UI artifact with mode=inspect using nextInspect.input.'),
-        step(5, 'build_extension_ui', 'After acknowledgement, generate or review high-contract extension UI lazily by kind: drawer, modal, page shell, permission gate, empty state, resource list, FormEditor, Widget, shell registries, tabs, upload modal, or review.'),
+        step(5, 'build_extension_ui', 'After acknowledgement, generate or review high-contract extension UI lazily by kind: drawer, modal, page shell, permission gate, empty state, resource list, FormEditor, Widget, shell registries, tabs, upload modal, api usage, notify, runtime review, theme classes, theme review, or full review.'),
         step(6, 'extension_workflow or patch_extension_code/update_extension_code', 'Use extension_workflow for create/wire flows, patch_extension_code for focused edits, or update_extension_code for full replacements.'),
         step(7, 'validate_extension_code', 'Validate only when the chosen write tool did not already validate and save atomically.'),
       ];
@@ -645,9 +644,8 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
     case 'flow':
       return [
         step(1, 'get_enfyra_required_knowledge', 'Read flow/dynamic-code contracts.'),
-        step(2, 'flow_workflow', 'Plan the flow with apply=false; this is the front door for flow metadata and steps.'),
-        step(3, 'discover_script_contexts', 'Load flow-step macros when script/condition logic is involved.'),
-        step(4, 'flow_workflow', 'Apply the reviewed flow plan with apply=true so the flow and steps are saved sequentially.'),
+        step(2, 'discover_script_contexts', 'Load flow-step macros only when a script or condition step is needed.'),
+        step(3, 'flow_workflow', 'For a fully specified non-destructive flow, apply the flow and all steps sequentially in one call. Use apply=false only when step selection is unresolved.'),
         step(5, 'test_flow_step or trigger_flow', 'Verify a step or enqueue the flow intentionally.'),
       ];
     case 'websocket':

@@ -2,6 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync,
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { getRuntimeCacheTelemetry } from './runtime-cache.js';
 
 type UnknownRecord = Record<string, any>;
 
@@ -271,7 +272,7 @@ function topEntries(value: UnknownRecord, limit: number) {
   );
 }
 
-function summarizeUsage(lines: UnknownRecord[], apiUrl: string, toolset: string) {
+function summarizeUsage(lines: UnknownRecord[], apiUrl: string, toolset: string, cacheStats = getRuntimeCacheTelemetry()) {
   const toolStats: UnknownRecord = {};
   const failureStats: UnknownRecord = {};
   const retryStats: UnknownRecord = {};
@@ -338,6 +339,26 @@ function summarizeUsage(lines: UnknownRecord[], apiUrl: string, toolset: string)
         outputTokens: item.outputTokens || 0,
       });
     }
+  }
+
+  samples.push({
+    kind: 'cache_summary',
+    hits: cacheStats.hits,
+    misses: cacheStats.misses,
+    hitRate: cacheStats.hitRate,
+    invalidations: cacheStats.invalidations,
+    warm: cacheStats.warm,
+    warmSuccessRate: cacheStats.warmSuccessRate,
+    domains: cacheStats.domains,
+    events: cacheStats.events,
+  });
+  if (Number(cacheStats.invalidations.auth || 0) > 0 || Number(cacheStats.warm.failed || 0) > 0) {
+    samples.push({
+      kind: 'cache_recovery',
+      authInvalidations: cacheStats.invalidations.auth || 0,
+      warmFailures: cacheStats.warm.failed || 0,
+      events: cacheStats.events,
+    });
   }
 
   const bucket = currentBucket();

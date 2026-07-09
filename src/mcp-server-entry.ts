@@ -110,6 +110,7 @@ import {
 import { validateMainTableRoutePath } from './lib/route-guards.js';
 import { installColumnarToolFormatter, jsonContent } from './lib/response-format.js';
 import { startMcpUsageTelemetry } from './lib/mcp-usage-telemetry.js';
+import { startRuntimeCacheSocket } from './lib/runtime-cache-socket.js';
 import { compactSourceFields, writeSourceArtifact } from './lib/source-artifacts.js';
 import { installToolsetFilter, normalizeMcpToolset, summarizeToolsetForInstructions } from './lib/toolset-filter.js';
 import {
@@ -3464,6 +3465,7 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
+  startRuntimeCacheSocket(ENFYRA_API_URL);
 
   console.error('Enfyra MCP Server running on stdio');
 }

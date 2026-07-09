@@ -3,6 +3,8 @@
  * Handles API-token exchange and token validation
  */
 
+import { clearRuntimeCache } from './runtime-cache.js';
+
 // Token state
 let accessToken = null;
 let refreshToken = null;
@@ -34,6 +36,7 @@ function normalizeExpiry(expTime) {
 export function initAuth(apiUrl, apiToken = '') {
   API_URL = apiUrl;
   API_TOKEN = apiToken;
+  clearRuntimeCache();
 }
 
 /**
