@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
+import { fetchMetadataTables, fetchTableCatalog, fetchTableMetadataByRef } from './metadata-client.js';
 import { jsonContent } from './response-format.js';
 import { writeSourceArtifact } from './source-artifacts.js';
 import { inspectExtensionLocation, searchExtensions } from './extension-search-tools.js';
@@ -120,18 +121,6 @@ function asArray(value: any): any[] {
   return Array.isArray(value) ? value : [];
 }
 
-function metadataTables(metadata: any): RuntimeRecord[] {
-  return Array.isArray(metadata?.data)
-    ? metadata.data
-    : Array.isArray(metadata)
-      ? metadata
-      : Object.values(metadata?.data ?? metadata ?? {});
-}
-
-function tableByName(tables: RuntimeRecord[], tableName: string) {
-  return tables.find((table) => table?.name === tableName) ?? null;
-}
-
 function relatedTableName(relation: any) {
   return relation?.targetTable?.name
     ?? relation?.targetTable
@@ -142,11 +131,13 @@ function relatedTableName(relation: any) {
     ?? null;
 }
 
-function resolveFieldExposurePath(tables: RuntimeRecord[], rootTableName: string, fieldPath: string) {
+async function resolveFieldExposurePath(apiUrl: string, rootTableName: string, fieldPath: string) {
   const segments = String(fieldPath || '').split('.').map((item) => item.trim()).filter(Boolean);
   const steps = [];
-  let current = tableByName(tables, rootTableName);
-  if (!current) {
+  let current: RuntimeRecord;
+  try {
+    current = await fetchTableMetadataByRef(apiUrl, rootTableName);
+  } catch {
     return { ok: false, reason: `Root table not found: ${rootTableName}`, steps, targetTable: null, targetField: null };
   }
   if (!segments.length) {
@@ -160,8 +151,12 @@ function resolveFieldExposurePath(tables: RuntimeRecord[], rootTableName: string
     }
     const nextTableName = relatedTableName(relation);
     steps.push({ type: 'relation', propertyName, fromTable: current.name, targetTable: nextTableName });
-    current = nextTableName ? tableByName(tables, String(nextTableName)) : null;
-    if (!current) {
+    if (!nextTableName) {
+      return { ok: false, reason: `Target table for relation "${propertyName}" could not be resolved.`, steps, targetTable: null, targetField: null };
+    }
+    try {
+      current = await fetchTableMetadataByRef(apiUrl, nextTableName);
+    } catch {
       return { ok: false, reason: `Target table for relation "${propertyName}" could not be resolved.`, steps, targetTable: null, targetField: null };
     }
   }
@@ -273,12 +268,8 @@ async function searchSchemaZone(apiUrl: string, input: any) {
   const query = String(input.query ?? '').trim();
   const normalizedQuery = normalizeText(query);
   const maxResults = Math.min(Math.max(Number(input.maxResults ?? 8), 1), 25);
-  const metadata = await fetchAPI(apiUrl, '/metadata');
-  const tables = Array.isArray(metadata?.data)
-    ? metadata.data
-    : Array.isArray(metadata)
-      ? metadata
-      : Object.values(metadata?.data ?? metadata ?? {});
+  const catalog = await fetchTableCatalog(apiUrl);
+  const tables = await fetchMetadataTables(apiUrl, catalog);
   const results = [];
   for (const table of tables as any[]) {
     const tableMatches = [];
@@ -457,9 +448,7 @@ export async function debugFieldExposure(apiUrl: string, input: any) {
   if (!tableName) throw new Error('tableName is required.');
   if (!fieldPath) throw new Error('fieldPath is required, for example "owner.secret_token" or "api_key".');
 
-  const metadata = await fetchAPI(apiUrl, '/metadata');
-  const tables = metadataTables(metadata);
-  const resolved = resolveFieldExposurePath(tables, tableName, fieldPath);
+  const resolved = await resolveFieldExposurePath(apiUrl, tableName, fieldPath);
   const targetField: any = resolved.targetField;
   const isPublished = targetField?.isPublished;
   const routePath = String(input.routePath ?? `/${tableName}`).trim();

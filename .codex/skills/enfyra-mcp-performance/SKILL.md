@@ -4,6 +4,7 @@ Use this skill when designing, reviewing, or debugging Enfyra apps through MCP w
 
 ## Rules
 - Verify capability with live metadata before claiming performance behavior. Use `inspect_table`, `inspect_route`, `discover_query_capabilities`, and `discover_runtime_context` first.
+- Treat metadata as lazy. Use `GET /metadata` only for `dbType` and `enfyraVersion`, use `GET /metadata/:name` for one schema, and use the lightweight `enfyra_table` catalog for table discovery. Only explicit broad schema search may fetch multiple table schemas, with bounded concurrency and runtime-cache reuse.
 - Prefer indexed relation filters over scalar mirror columns. Relation property names can be used in `indexes` and `uniques`; Enfyra resolves them to physical FK columns.
 - For hot read paths, design indexes with the most selective/user-scoped field first. Examples: `["member","is_read","conversation"]` for unread lookup and `["conversation","member","is_read"]` for mark-read updates.
 - Use existence checks for UI dots and badges unless the user explicitly needs exact counts. Avoid count queries on every conversation row.

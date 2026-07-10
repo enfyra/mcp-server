@@ -9,10 +9,26 @@ type ReloadPayload = {
 };
 
 let socket: Socket | null = null;
+let socketStarting = false;
 let warmTimer: ReturnType<typeof setTimeout> | null = null;
 
 function socketOrigin(apiUrl: string) {
   return apiUrl.replace(/\/api\/?$/, '');
+}
+
+export function runtimeCacheSocketConnection(apiUrl: string, token: string) {
+  return {
+    url: `${socketOrigin(apiUrl)}/ws/enfyra-admin`,
+    options: {
+      path: '/ws/socket.io',
+      reconnection: true,
+      reconnectionDelay: 2_000,
+      reconnectionDelayMax: 30_000,
+      autoConnect: false,
+      auth: { token },
+      extraHeaders: { Authorization: `Bearer ${token}` },
+    },
+  };
 }
 
 async function refreshCachedEntries(apiUrl: string, paths: string[]) {
@@ -41,29 +57,28 @@ function invalidateAndWarm(apiUrl: string, steps: string[]) {
 }
 
 export function startRuntimeCacheSocket(apiUrl: string) {
-  if (socket) return;
-  socket = io(`${socketOrigin(apiUrl)}/enfyra-admin`, {
-    path: '/ws/socket.io',
-    reconnection: true,
-    reconnectionDelay: 2_000,
-    reconnectionDelayMax: 30_000,
-    autoConnect: false,
-  });
-
-  socket.on('$system:reload', (payload: ReloadPayload) => {
-    if (payload?.status === 'done') invalidateAndWarm(apiUrl, payload.steps || []);
-  });
-
-  socket.on('connect_error', () => {
-    // Cache invalidation remains correct through successful mutations and 401/403 self-healing.
-  });
+  if (socket || socketStarting) return;
+  socketStarting = true;
 
   void getValidToken(apiUrl)
     .then((token) => {
-      socket!.auth = { token };
-      socket!.connect();
+      const connection = runtimeCacheSocketConnection(apiUrl, token);
+      const nextSocket = io(connection.url, connection.options);
+      socket = nextSocket;
+      socketStarting = false;
+
+      nextSocket.on('$system:reload', (payload: ReloadPayload) => {
+        if (payload?.status === 'done') invalidateAndWarm(apiUrl, payload.steps || []);
+      });
+
+      nextSocket.on('connect_error', () => {
+        // Cache invalidation remains correct through successful mutations and 401/403 self-healing.
+      });
+
+      nextSocket.connect();
     })
     .catch(() => {
+      socketStarting = false;
       // Tools surface the real authentication failure when they need server data.
     });
 }

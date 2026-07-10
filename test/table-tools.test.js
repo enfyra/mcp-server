@@ -7,6 +7,7 @@ import { fetchAPI } from '../dist/lib/fetch.js';
 import {
   buildColumnDefinition,
   assertIndexesDoNotReferenceUniqueFields,
+  buildPrimaryColumnForDbType,
   computeBatchCleanupOrder,
   fetchTableWithDetails,
   getSupportedColumnTypesFromMetadata,
@@ -613,20 +614,16 @@ test('fetchTableWithDetails reads full columns from metadata instead of enfyra_t
         data: [{
           id: 79,
           name: 'cloud_projects',
-          columns: metadataColumns.slice(0, 10),
-          relations: [],
         }],
       });
     }
-    if (String(url).endsWith('/metadata')) {
+    if (String(url).endsWith('/metadata/cloud_projects')) {
       return jsonResponse({
         data: {
-          tables: [{
-            id: 79,
-            name: 'cloud_projects',
-            columns: metadataColumns,
-            relations: [{ id: 5, propertyName: 'owner' }],
-          }],
+          id: 79,
+          name: 'cloud_projects',
+          columns: metadataColumns,
+          relations: [{ id: 5, propertyName: 'owner' }],
         },
       });
     }
@@ -665,20 +662,16 @@ test('fetchTableWithDetails falls back to metadata table name when metadata id i
         data: [{
           id: 1,
           name: 'enfyra_column',
-          columns: [],
-          relations: [],
         }],
       });
     }
-    if (String(url).endsWith('/metadata')) {
+    if (String(url).endsWith('/metadata/enfyra_column')) {
       return jsonResponse({
         data: {
-          tables: [{
-            id: true,
-            name: 'enfyra_column',
-            columns: [{ id: 3, name: 'type', type: 'enum' }],
-            relations: [],
-          }],
+          id: true,
+          name: 'enfyra_column',
+          columns: [{ id: 3, name: 'type', type: 'enum' }],
+          relations: [],
         },
       });
     }
@@ -867,6 +860,23 @@ test('new column definitions include system-table validation defaults', () => {
   );
 });
 
+test('primary column definition follows metadata dbType without pkField', () => {
+  assert.deepEqual(buildPrimaryColumnForDbType('postgres'), {
+    name: 'id',
+    type: 'int',
+    isPrimary: true,
+    isGenerated: true,
+    isNullable: false,
+  });
+  assert.deepEqual(buildPrimaryColumnForDbType('mongodb'), {
+    name: '_id',
+    type: 'ObjectId',
+    isPrimary: true,
+    isGenerated: true,
+    isNullable: false,
+  });
+});
+
 test('fetchAPI exchanges ENFYRA_API_TOKEN before authenticated requests', async () => {
   const originalFetch = global.fetch;
   const calls = [];
@@ -1027,31 +1037,41 @@ test('get_all_tables applies search and explicit all contract', async () => {
       return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
     }
     if (String(url).endsWith('/metadata')) {
+      return jsonResponse({ dbType: 'postgres', enfyraVersion: '2.2.11' });
+    }
+    if (String(url).includes('/enfyra_table?')) {
       return jsonResponse({
-        data: {
-          tables: [
-            { id: 1, name: 'enfyra_user', alias: 'Users', description: 'System users', columns: [], relations: [] },
-            {
-              id: 10,
-              name: 'enfyra_column',
-              columns: [{ name: 'type', type: 'enum', options: '{"int","varchar","text","boolean","simple-json","float"}' }],
-              relations: [],
-            },
-            {
-              id: 11,
-              name: 'enfyra_relation',
-              columns: [
-                { name: 'type', type: 'enum', options: '{"many-to-one","one-to-many","one-to-one","many-to-many"}' },
-                { name: 'onDelete', type: 'enum', options: '{"CASCADE","SET NULL","RESTRICT"}' },
-              ],
-              relations: [],
-            },
-            { id: 2, name: 'mcp_project', description: 'Test project', columns: [{ id: 1 }], relations: [] },
-            { id: 3, name: 'mcp_issue', description: 'Test issue', columns: [], relations: [{ id: 9 }] },
-          ],
-        },
+        data: [
+          { id: 1, name: 'enfyra_user', alias: 'Users', description: 'System users' },
+          { id: 10, name: 'enfyra_column' },
+          { id: 11, name: 'enfyra_relation' },
+          { id: 12, name: 'enfyra_table' },
+          { id: 2, name: 'mcp_project', description: 'Test project' },
+          { id: 3, name: 'mcp_issue', description: 'Test issue' },
+        ],
       });
     }
+    if (String(url).endsWith('/metadata/enfyra_column')) return jsonResponse({ data: {
+      id: 10,
+      name: 'enfyra_column',
+      columns: [{ name: 'type', type: 'enum', options: '{"int","varchar","text","boolean","simple-json","float"}' }],
+      relations: [],
+    } });
+    if (String(url).endsWith('/metadata/enfyra_relation')) return jsonResponse({ data: {
+      id: 11,
+      name: 'enfyra_relation',
+      columns: [
+        { name: 'type', type: 'enum', options: '{"many-to-one","one-to-many","one-to-one","many-to-many"}' },
+        { name: 'onDelete', type: 'enum', options: '{"CASCADE","SET NULL","RESTRICT"}' },
+      ],
+      relations: [],
+    } });
+    if (String(url).endsWith('/metadata/enfyra_table')) return jsonResponse({ data: {
+      id: 12,
+      name: 'enfyra_table',
+      columns: [{ name: 'name', type: 'varchar' }],
+      relations: [],
+    } });
     return jsonResponse({ message: 'not found' }, 404);
   };
 
@@ -1076,7 +1096,7 @@ test('get_all_tables applies search and explicit all contract', async () => {
     const designResult = await server.get('get_schema_design_context').handler({});
     const designPayload = JSON.parse(designResult.content[0].text);
     assert.deepEqual(designPayload.liveColumnTypes, ['int', 'varchar', 'text', 'boolean', 'simple-json', 'float']);
-    assert.match(designPayload.primaryKeyContext.createTableDefault, /auto-includes an int id primary key/);
+    assert.match(designPayload.primaryKeyContext.createTableDefault, /SQL id\/int primary key/);
     assert.match(JSON.stringify(designPayload.recommendedSequence), /Create independent lookup\/base tables first/);
     assert.match(JSON.stringify(designPayload.relationDefinitionInput.forbiddenPhysicalFields), /foreignKeyColumn/);
   } finally {
@@ -1095,36 +1115,21 @@ test('create_relations resolves table names before schema patch', async () => {
     if (urlText.endsWith('/auth/token/exchange')) {
       return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
     }
-    if (urlText.endsWith('/metadata')) {
-      return jsonResponse({
-        data: {
-          tables: [
-            {
-              id: 9,
-              name: 'mcp_issue',
-              columns: [{ id: 1, name: 'title', type: 'varchar' }],
-              relations: patchedBody?.relations || [],
-            },
-            {
-              id: 4,
-              name: 'enfyra_user',
-              alias: 'Users',
-              columns: [{ id: 2, name: 'email', type: 'varchar' }],
-              relations: [],
-            },
-          ],
-        },
-      });
-    }
     if (urlText.includes('/enfyra_table?')) {
       return jsonResponse({
-        data: [{
+        data: [
+          { id: 9, name: 'mcp_issue' },
+          { id: 4, name: 'enfyra_user', alias: 'Users' },
+        ],
+      });
+    }
+    if (urlText.endsWith('/metadata/mcp_issue')) {
+      return jsonResponse({ data: {
           id: 9,
           name: 'mcp_issue',
           columns: [{ id: 1, name: 'title', type: 'varchar' }],
           relations: patchedBody?.relations || [],
-        }],
-      });
+      } });
     }
     if (urlText.endsWith('/enfyra_table/9') && init.method === 'PATCH') {
       patchedBody = JSON.parse(init.body);
@@ -1164,29 +1169,24 @@ test('create_tables accepts tables alias and defers relation constraints until F
   let nextRelationId = 30;
   let constraintPatch = null;
 
-  const metadataPayload = () => ({
-    data: [
-      {
-        id: 1,
-        name: 'enfyra_column',
-        columns: [{ name: 'type', options: JSON.stringify(['int', 'varchar', 'date']) }],
-      },
-      { id: 4, name: 'enfyra_user', columns: [{ id: 40, name: 'id', isPrimary: true }] },
-      { id: 10, name: 'community_event', columns: [{ id: 100, name: 'id', isPrimary: true }] },
-      ...[...createdTables.values()],
-    ],
-  });
-
   global.fetch = async (url, init = {}) => {
     const urlText = String(url);
     if (urlText.endsWith('/auth/token/exchange')) {
       return jsonResponse({ accessToken: 'access-token', expiresAt: new Date(Date.now() + 600000).toISOString() });
     }
     if (urlText.endsWith('/metadata')) {
-      return jsonResponse(metadataPayload());
+      return jsonResponse({ dbType: 'postgres', enfyraVersion: '2.2.11' });
+    }
+    if (urlText.endsWith('/metadata/enfyra_column')) {
+      return jsonResponse({ data: {
+        id: 1,
+        name: 'enfyra_column',
+        columns: [{ name: 'type', options: JSON.stringify(['int', 'varchar', 'date']) }],
+        relations: [],
+      } });
     }
     if (urlText.includes('/metadata/event_registration')) {
-      return jsonResponse({ data: { table: createdTables.get(99) } });
+      return jsonResponse({ data: createdTables.get(99) });
     }
     if (urlText.endsWith('/enfyra_table') && init.method === 'POST') {
       const body = JSON.parse(init.body);
@@ -1205,7 +1205,12 @@ test('create_tables accepts tables alias and defers relation constraints until F
       return jsonResponse({ data: [table] });
     }
     if (urlText.includes('/enfyra_table?')) {
-      return jsonResponse({ data: [createdTables.get(99)] });
+      return jsonResponse({ data: [
+        { id: 1, name: 'enfyra_column' },
+        { id: 4, name: 'enfyra_user' },
+        { id: 10, name: 'community_event' },
+        ...[...createdTables.values()].map((table) => ({ id: table.id, name: table.name })),
+      ] });
     }
     if (urlText.endsWith('/enfyra_table/99') && init.method === 'PATCH') {
       const body = JSON.parse(init.body);

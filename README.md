@@ -246,6 +246,18 @@ Without a target flag, interactive mode asks which client to configure. Non-inte
 
 For normal apps and demos, enter the app/admin URL such as `http://localhost:3000` or `https://demo.enfyra.io`. Treat the direct Enfyra backend host as private infrastructure unless you are debugging Enfyra core/server internals.
 
+## Metadata Contract
+
+The MCP server uses Enfyra metadata lazily:
+
+- `GET /metadata` returns only `dbType` and `enfyraVersion`.
+- `GET /metadata/{tableName}` returns one permission-projected table schema.
+- `get_all_tables` and normal discovery use a lightweight `enfyra_table` catalog.
+- `get_table_metadata`, `inspect_table`, mutation validation, and schema operations fetch only the table schemas they need.
+- Explicit broad schema searches fan out to per-table metadata with bounded concurrency and reuse the MCP runtime cache.
+
+Use `get_all_tables` for table names, then `get_table_metadata` or `inspect_table` for columns and relations. `get_all_metadata(includeFull=true)` is an explicit broad operation and should not be used as startup discovery.
+
 ## Common Examples
 
 Use `get_enfyra_examples` from the MCP tool list when asking an LLM to generate implementation patterns. It returns focused examples for:

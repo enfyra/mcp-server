@@ -16,11 +16,6 @@ const ENFYRA_API_TOKEN = process.env.ENFYRA_API_TOKEN || '';
 const DISCOVERY_FETCH_TIMEOUT_MS = 12000;
 
 type AnyRecord = Record<string, any>;
-type MetadataSummaryOptions = {
-  search?: string;
-  limit?: number;
-  all?: boolean;
-};
 type MethodPatchBody = {
   buttonColor?: string;
   textColor?: string;
@@ -90,6 +85,13 @@ function assertExtensionReadFields(tableName: string, fields?: string[]) {
 // Import modules
 import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './lib/auth.js';
 import { fetchAPI, validateFilter, validateTableName } from './lib/fetch.js';
+import {
+  fetchMetadataContext,
+  fetchMetadataTables,
+  fetchTableCatalog,
+  fetchTableMetadata,
+  fetchTableMetadataByRef,
+} from './lib/metadata-client.js';
 import { buildMcpServerInstructions, buildGraphqlUrls } from './lib/mcp-instructions.js';
 import { getExamples, listExampleCategories } from './lib/mcp-examples.js';
 import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './lib/tool-routing.js';
@@ -312,46 +314,17 @@ const SCRIPT_SOURCE_FIELDS = [
   'code',
 ];
 
-function normalizeTables(metadata) {
-  const tablesSource = metadata?.data?.tables || metadata?.tables || metadata?.data || [];
-  return Array.isArray(tablesSource)
-    ? tablesSource
-    : Object.values(tablesSource || {});
-}
-
 function getPrimaryColumn(table) {
   return (table?.columns || []).find((column) => column.isPrimary) || null;
 }
 
-function inferPrimaryKeyContext(tables) {
-  const primaryColumns = tables
-    .map((table) => ({ table: table.name, primaryKey: getPrimaryColumn(table)?.name || null }))
-    .filter((item) => item.primaryKey);
-  const counts: Record<string, number> = {};
-  for (const item of primaryColumns) {
-    counts[item.primaryKey] = (counts[item.primaryKey] || 0) + 1;
-  }
-  const dominant = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+function getMetadataDatabaseContext(metadata) {
+  const dbType = metadata?.dbType || metadata?.data?.dbType || null;
   return {
-    dominantPrimaryKey: dominant,
-    counts,
-    inferredBackendFamily: dominant === '_id' ? 'mongodb-like' : dominant === 'id' ? 'sql-like' : 'unknown',
-    exactDatabaseType: 'not exposed by current public/admin API; infer from metadata or add a backend context endpoint for exact mysql/postgres/mongodb',
-    sampleTables: primaryColumns.slice(0, 12),
-  };
-}
-
-function getMetadataDatabaseContext(metadata, tables) {
-  const inferred = inferPrimaryKeyContext(tables);
-  return {
-    dbType: metadata?.dbType || metadata?.data?.dbType || null,
-    pkField: metadata?.pkField || metadata?.data?.pkField || inferred.dominantPrimaryKey,
-    inferredBackendFamily: inferred.inferredBackendFamily,
-    primaryKeyCounts: inferred.counts,
-    source: metadata?.dbType || metadata?.data?.dbType
-      ? 'metadata'
-      : 'inferred from table primary columns',
-    sampleTables: inferred.sampleTables,
+    dbType,
+    backendFamily: dbType === 'mongodb' ? 'mongodb' : dbType ? 'sql' : 'unknown',
+    primaryKeyConvention: dbType === 'mongodb' ? '_id' : dbType ? 'id' : null,
+    source: dbType ? 'GET /metadata' : 'unavailable',
   };
 }
 
@@ -413,33 +386,6 @@ function summarizeRoutes(routesResult) {
     publicMethods: (route.publicMethods || []).map((method) => method.name).filter(Boolean),
     isEnabled: route.isEnabled,
   }));
-}
-
-function summarizeMetadata(metadata, { search, limit, all = false }: MetadataSummaryOptions = {}) {
-  const tables = normalizeTables(metadata);
-  const q = search ? search.toLowerCase() : null;
-  const summarized = tables.map((table) => ({
-    id: table.id ?? table._id,
-    name: table.name,
-    alias: table.alias,
-    primaryKey: getPrimaryColumn(table)?.name || null,
-    columnCount: (table.columns || []).length,
-    relationCount: (table.relations || []).length,
-    routeHint: `Use get_table_metadata({ tableName: "${table.name}" }) for fields and relations.`,
-  }));
-  const matched = q
-    ? summarized.filter((table) => JSON.stringify(table).toLowerCase().includes(q))
-    : summarized;
-  const outputLimit = all ? matched.length : (limit || 30);
-  return {
-    tableCount: tables.length,
-    matchedTableCount: matched.length,
-    returnedTableCount: Math.min(matched.length, outputLimit),
-    complete: all || outputLimit >= matched.length,
-    hardCap: all ? null : outputLimit,
-    search: search || null,
-    tables: matched.slice(0, outputLimit),
-  };
 }
 
 function unwrapData(result) {
@@ -639,14 +585,14 @@ function summarizeMutationResult(result, action, tableName) {
 }
 
 async function getTableSummary(tableName) {
-  const result = await fetchAPI(ENFYRA_API_URL, `/metadata/${tableName}`);
-  const table = result?.data?.table || result?.data || result?.table || result;
-  return summarizeTable(table);
+  return summarizeTable(await fetchTableMetadata(ENFYRA_API_URL, tableName));
 }
 
 async function getPrimaryFieldName(tableName) {
   const table = await getTableSummary(tableName);
-  return table?.primaryKey || 'id';
+  if (table?.primaryKey) return table.primaryKey;
+  const metadata = await fetchMetadataContext(ENFYRA_API_URL);
+  return metadata.dbType === 'mongodb' ? '_id' : 'id';
 }
 
 async function fetchAll(path) {
@@ -690,11 +636,18 @@ function collectPartialErrors(results) {
     .map(([name, result]) => ({ name, error: (result as AnyRecord).error }));
 }
 
-async function getMetadataTables() {
-  const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+async function getMetadataTables(tableRef?: unknown) {
+  const metadata = await fetchMetadataContext(ENFYRA_API_URL);
+  if (tableRef !== undefined && tableRef !== null && tableRef !== '') {
+    return {
+      metadata,
+      tables: [await fetchTableMetadataByRef(ENFYRA_API_URL, tableRef) as AnyRecord],
+    };
+  }
+  const catalog = await fetchTableCatalog(ENFYRA_API_URL);
   return {
     metadata,
-    tables: normalizeTables(metadata),
+    tables: catalog as AnyRecord[],
   };
 }
 
@@ -712,7 +665,7 @@ function resolveFieldOrThrow(table, fieldName, kind = 'column') {
 }
 
 async function prepareGenericMutation(tableName, data) {
-  const { tables } = await getMetadataTables();
+  const { tables } = await getMetadataTables(tableName);
   return prepareRecordMutation({
     fetchAPI,
     apiUrl: ENFYRA_API_URL,
@@ -723,7 +676,7 @@ async function prepareGenericMutation(tableName, data) {
 }
 
 async function prepareGenericBatchMutation(tableName, records) {
-  const { tables } = await getMetadataTables();
+  const { tables } = await getMetadataTables(tableName);
   return prepareRecordBatchMutation({
     fetchAPI,
     apiUrl: ENFYRA_API_URL,
@@ -984,8 +937,8 @@ server.tool(
   async ({ scope }) => jsonContent(buildRequiredKnowledgePayload(scope)),
 );
 
-server.tool('get_all_metadata', 'Get concise metadata summary for all tables. Use get_table_metadata or inspect_table for detail.', {
-  includeFull: z.boolean().optional().default(false).describe('Return full raw metadata. Default false to keep MCP context small.'),
+server.tool('get_all_metadata', 'Get a lightweight table catalog. Use get_table_metadata or inspect_table to fetch one table schema.', {
+  includeFull: z.boolean().optional().default(false).describe('Fetch per-table metadata for the selected catalog entries. Default false keeps discovery lightweight.'),
   search: z.string().optional().describe('Optional table-name/alias substring filter.'),
   limit: z.number().optional().describe('Maximum tables returned after search. Default 30.'),
   all: z.boolean().optional().default(false).describe('Return every matched table summary. Use when a complete table list is required.'),
@@ -993,17 +946,37 @@ server.tool('get_all_metadata', 'Get concise metadata summary for all tables. Us
   if (all && limit !== undefined) {
     throw new Error('get_all_metadata accepts either all=true or limit, not both.');
   }
-  const result = await fetchAPI(ENFYRA_API_URL, '/metadata');
-  const payload = includeFull
-    ? result
-    : {
-        statusCode: result?.statusCode,
-        success: result?.success,
-        ...summarizeMetadata(result, { search, limit, all }),
-        detailHint: all
-          ? 'Complete summary returned. Call get_table_metadata({ tableName }) or inspect_table({ tableName }) for columns, relations, and route context.'
-          : 'Default response is capped and minimal. Pass all=true for a complete summary, or call get_table_metadata({ tableName }) / inspect_table({ tableName }) for detail.',
-      };
+  const [context, catalog] = await Promise.all([
+    fetchMetadataContext(ENFYRA_API_URL),
+    fetchTableCatalog(ENFYRA_API_URL),
+  ]);
+  const q = search?.trim().toLowerCase();
+  const matched = catalog.filter((table) => !q || [table.name, table.alias, table.description]
+    .some((value) => String(value || '').toLowerCase().includes(q)));
+  const outputLimit = all ? matched.length : (limit || 30);
+  const selected = matched.slice(0, outputLimit);
+  const payload = {
+    context,
+    tableCount: catalog.length,
+    matchedTableCount: matched.length,
+    returnedTableCount: selected.length,
+    complete: all || outputLimit >= matched.length,
+    hardCap: all ? null : outputLimit,
+    search: search || null,
+    tables: includeFull
+      ? await fetchMetadataTables(ENFYRA_API_URL, selected)
+      : selected.map((table) => ({
+          id: table.id ?? table._id,
+          name: table.name,
+          alias: table.alias ?? null,
+          description: table.description ?? null,
+          isSingleRecord: table.isSingleRecord ?? null,
+          detailHint: `Use get_table_metadata({ tableName: "${table.name}" }) for columns and relations.`,
+        })),
+    detailHint: includeFull
+      ? 'Full permission-projected metadata was fetched per selected table.'
+      : 'Catalog only. Call get_table_metadata({ tableName }) or inspect_table({ tableName }) for schema detail.',
+  };
   return jsonContent(payload);
 });
 
@@ -1011,13 +984,10 @@ server.tool('get_table_metadata', 'Get concise metadata for a specific table by 
   tableName: z.string().describe('Table name (e.g., "enfyra_user", "enfyra_route")'),
   includeFull: z.boolean().optional().default(false).describe('Return full raw table metadata. Default false to keep MCP context small.'),
 }, async ({ tableName, includeFull }) => {
-  const result = await fetchAPI(ENFYRA_API_URL, `/metadata/${tableName}`);
-  const table = result?.data?.table || result?.data || result?.table || result;
+  const table = await fetchTableMetadata(ENFYRA_API_URL, tableName);
   const payload = includeFull
-    ? result
+    ? { data: table, ...await fetchMetadataContext(ENFYRA_API_URL) }
     : {
-        statusCode: result?.statusCode,
-        success: result?.success,
         table: summarizeTable(table),
         queryHint: `Use query_table({ tableName: "${tableName}", fields: [...] }) for records. query_table without fields returns only the primary key.`,
       };
@@ -1067,17 +1037,22 @@ server.tool(
   {},
   async () => {
     const metadata = await discoveryFetch('/metadata');
+    const tableCatalogResult = await discoveryFetch('/enfyra_table?fields=id,name,alias,description,isSingleRecord&limit=0&sort=name');
     const routesResult = await discoveryFetch('/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*&limit=1000');
     const methodsResult = await discoveryFetch('/enfyra_method?limit=100');
+    const columnMetadata = await discoveryFetch('/metadata/enfyra_column', { fallbackData: null });
+    const relationMetadata = await discoveryFetch('/metadata/enfyra_relation', { fallbackData: null });
+    const tableMetadata = await discoveryFetch('/metadata/enfyra_table', { fallbackData: null });
+    const graphqlMetadata = await discoveryFetch('/metadata/enfyra_graphql', { fallbackData: null });
 
-    const tables = normalizeTables(metadata);
+    const tables = unwrapData(tableCatalogResult);
     const tableNames = tables.map((table) => table?.name).filter(Boolean).sort();
     const routes = summarizeRoutes(routesResult);
     const routeTables = new Set(routes.map((route) => route.mainTable).filter(Boolean));
     const noRouteTables = tableNames.filter((name) => !routeTables.has(name));
-    const relationTable = tables.find((table) => table?.name === 'enfyra_relation');
-    const tableDefinition = tables.find((table) => table?.name === 'enfyra_table');
-    const gqlDefinition = tables.find((table) => table?.name === 'enfyra_graphql');
+    const relationTable = relationMetadata?.data || null;
+    const tableDefinition = tableMetadata?.data || null;
+    const gqlDefinition = graphqlMetadata?.data || null;
     const routeTableList = [...routeTables].sort();
     const noRouteTableList = noRouteTables.sort();
     const sample = (items, max = 40) => ({
@@ -1090,7 +1065,7 @@ server.tool(
     const payload = {
       targetInstance: targetInstance(),
       apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
-      partialErrors: collectPartialErrors({ metadata, routesResult, methodsResult }),
+      partialErrors: collectPartialErrors({ metadata, tableCatalogResult, routesResult, methodsResult, columnMetadata, relationMetadata, tableMetadata, graphqlMetadata }),
       counts: {
         tables: tableNames.length,
         routes: routes.length,
@@ -1117,7 +1092,7 @@ server.tool(
         createTable: 'POST /enfyra_table supports isSingleRecord at create time. MCP create_tables accepts a native array, creates tables/columns sequentially, then creates requested relations after all tables in the batch exist. It does not accept alias at create time; table name drives the default route/schema behavior.',
         updateTable: 'PATCH /enfyra_table/:id is the canonical path for table property changes and column/relation schema changes.',
         columns: 'enfyra_column has no REST route; use create_tables/create_columns/update_columns/delete_columns. Use liveColumnTypes below; do not invent SQL dialect names.',
-        liveColumnTypes: getSupportedColumnTypesFromMetadata(metadata),
+        liveColumnTypes: getSupportedColumnTypesFromMetadata(columnMetadata),
         columnTypeGuidance: 'Use varchar for short strings, text/richtext for long prose, float for price/amount/rating/decimal-like values unless decimal is listed, simple-json for structured objects/arrays only when listed, and relations instead of *_id columns for links.',
         relations: routeTables.has('enfyra_relation')
           ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relations/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
@@ -1152,11 +1127,12 @@ server.tool(
   'discover_runtime_context',
   [
     'Discover live runtime context that affects how an LLM should use Enfyra.',
-    'Reports inferred primary key/backend family, route/cache/admin surfaces, active metadata-backed runtime areas, and what is not exposed by the backend API. Run broad discovery tools sequentially; do not call multiple broad discovery tools in parallel.',
+    'Reports exact database type, the derived primary-key convention, route/cache/admin surfaces, and active metadata-backed runtime areas. Run broad discovery tools sequentially; do not call multiple broad discovery tools in parallel.',
   ].join(' '),
   {},
   async () => {
     const metadata = await discoveryFetch('/metadata');
+    const tableCatalogResult = await discoveryFetch('/enfyra_table?fields=id,name,alias,description,isSingleRecord&limit=0&sort=name');
     const routesResult = await discoveryFetch('/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*,isEnabled&limit=1000');
     const methodsResult = await discoveryFetch('/enfyra_method?limit=100');
     const gqlResult = await discoveryFetch('/enfyra_graphql?limit=1000');
@@ -1166,7 +1142,7 @@ server.tool(
     const settingsResult = await discoveryFetch('/enfyra_setting?limit=1000');
     const meResult = await discoveryFetch('/me', { fallbackData: null });
 
-    const tables = normalizeTables(metadata);
+    const tables = unwrapData(tableCatalogResult);
     const routes = summarizeRoutes(routesResult);
     const routeTables = new Set(routes.map((route) => route.mainTable).filter(Boolean));
     const adminRoutes = routes.filter((route) => route.path?.startsWith('/admin'));
@@ -1183,6 +1159,7 @@ server.tool(
       apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
       partialErrors: collectPartialErrors({
         metadata,
+        tableCatalogResult,
         routesResult,
         methodsResult,
         gqlResult,
@@ -1193,7 +1170,7 @@ server.tool(
         meResult,
       }),
       authenticatedUser: Array.isArray(meResult?.data) ? meResult.data[0] || null : meResult?.data || null,
-      database: getMetadataDatabaseContext(metadata, tables),
+      database: getMetadataDatabaseContext(metadata),
       counts: {
         tables: tables.length,
         routes: routes.length,
@@ -1227,9 +1204,7 @@ server.tool(
         flowWorkerContract: 'Flow jobs require the backend flow worker to be initialized after HTTP listen and websocket gateway init; trigger_flow only confirms enqueue/result from admin endpoint.',
       },
       runtimeGaps: [
-        metadata?.dbType || metadata?.data?.dbType
-          ? null
-          : 'Exact database type is not exposed by current MCP-visible API.',
+        metadata?.dbType || metadata?.data?.dbType ? null : 'Exact database type was unavailable from GET /metadata.',
         'Redis/BullMQ/socket adapter health is not exposed by current MCP-visible API.',
         'MCP can test flow steps and websocket scripts through admin test endpoints, but not prove every production queue/client path without a real end-to-end client.',
       ].filter(Boolean),
@@ -1262,7 +1237,7 @@ server.tool(
       : [];
     const routes = summarizeRoutes(routesResult);
     const table = tableName ? tables.find((item) => item.name === tableName) : null;
-    const primaryKey = table ? getPrimaryColumn(table)?.name || 'id' : 'id';
+    const primaryKey = table ? getPrimaryColumn(table)?.name || null : null;
     const tableRoutes = tableName
       ? routes.filter((route) => route.mainTable === tableName)
       : [];
@@ -1284,7 +1259,7 @@ server.tool(
         meta: 'Request metadata/counts where supported.',
         deep: 'Nested relation fetch object keyed by relation propertyName.',
       },
-      countPattern: 'For counts, query only fields=id with limit=1 and request meta. Use meta=totalCount without a filter, or meta=filterCount when a filter is supplied. MCP count_records wraps this pattern.',
+      countPattern: `For counts, query only fields=${primaryKey || '<primary-key>'} with limit=1 and request meta. Use meta=totalCount without a filter, or meta=filterCount when a filter is supplied. MCP count_records resolves the live table primary key and wraps this pattern.`,
       security: 'Filters, sorts, counts, and aggregate values can leak information even when a field is not selected. In generated public/user-facing APIs, do not filter, sort, count, or aggregate unpublished fields or private relations unless the endpoint intentionally exposes that fact.',
       deep: {
         shape: '{ [relationName]: { fields?, filter?, sort?, limit?, page?, deep? } }',
@@ -2287,7 +2262,7 @@ function withMethodNames(records, methodIdNameMap, field = 'methods') {
   }));
 }
 
-async function collectRestDefinitionState() {
+async function collectRestDefinitionState(tableRef?: unknown) {
   await getValidToken(ENFYRA_API_URL);
   const [
     metadataContext,
@@ -2302,7 +2277,7 @@ async function collectRestDefinitionState() {
     columnRules,
     methodIdNameMap,
   ] = await Promise.all([
-    getMetadataTables(),
+    getMetadataTables(tableRef),
     fetchAll('/enfyra_route?limit=1000'),
     fetchAll('/enfyra_route_handler?limit=1000'),
     fetchAll('/enfyra_pre_hook?limit=1000'),
@@ -2332,6 +2307,7 @@ async function collectRestDefinitionState() {
 
 async function collectFeatureSearchState() {
   const metadata = await discoveryFetch('/metadata');
+  const tableCatalogResult = await discoveryFetch('/enfyra_table?fields=id,name,alias,description,isSingleRecord&limit=0&sort=name');
   const routesResult = await discoveryFetch('/enfyra_route?limit=500');
   const handlersResult = await discoveryFetch('/enfyra_route_handler?limit=500');
   const preHooksResult = await discoveryFetch('/enfyra_pre_hook?limit=500');
@@ -2345,10 +2321,11 @@ async function collectFeatureSearchState() {
   const methodIdNameMap = Object.fromEntries(
     unwrapData(methodsResult).map((method) => [String(getId(method)), method.name]),
   );
+  const tableCatalog = unwrapData(tableCatalogResult);
 
   return {
     metadata,
-    tables: normalizeTables(metadata),
+    tables: await fetchMetadataTables(ENFYRA_API_URL, tableCatalog) as AnyRecord[],
     routes: unwrapData(routesResult),
     handlers: unwrapData(handlersResult),
     preHooks: unwrapData(preHooksResult),
@@ -2361,6 +2338,7 @@ async function collectFeatureSearchState() {
     methodIdNameMap,
     partialErrors: collectPartialErrors({
       metadata,
+      tableCatalogResult,
       routesResult,
       handlersResult,
       preHooksResult,
@@ -2444,7 +2422,7 @@ server.tool(
     tableName: z.string().describe('Table name or alias to inspect'),
   },
   async ({ tableName }) => {
-    const state = await collectRestDefinitionState();
+    const state = await collectRestDefinitionState(tableName);
     const table = state.tables.find((item) => item?.name === tableName || item?.alias === tableName);
     if (!table) {
       throw new Error(`Unknown table "${tableName}". Use get_all_tables({ search, limit }) or get_all_metadata({ search, all: true }) to confirm the table name. If a just-created table is missing, verify the create response/reload event before calling manual reload tools.`);
@@ -2456,7 +2434,7 @@ server.tool(
 
     const payload = {
       table: summarizeTable(table),
-      database: getMetadataDatabaseContext(state.metadata, state.tables),
+      database: getMetadataDatabaseContext(state.metadata),
       rest: {
         routePattern: 'GET/POST /<path>; PATCH/DELETE /<path>/:id; no dynamic GET /<path>/:id.',
         routes: routes.map((route) => enrichRoute(route, state)),
@@ -2502,7 +2480,9 @@ server.tool(
       routeId ? sameId(getId(item), routeId) : item.path === normalizeRestPath(path)
     ));
     if (!route) throw new Error(`Route not found: ${routeId || path}`);
-    const table = state.tables.find((item) => sameId(getId(item), refId(route.mainTable))) || null;
+    const table = route.mainTable
+      ? await fetchTableMetadataByRef(ENFYRA_API_URL, refId(route.mainTable)) as AnyRecord
+      : null;
 
     const payload = {
       apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
@@ -2599,7 +2579,7 @@ server.tool(
     if (!q) throw new Error('query is required.');
     const lower = q.toLowerCase();
     const max = Math.max(1, Math.min(Number(limit || 25), 100));
-    const state = await collectRestDefinitionState();
+    const state = await collectFeatureSearchState();
     const contains = (value) => JSON.stringify(value ?? '').toLowerCase().includes(lower);
     const sourceContains = (record) => getRecordSource(record).sourceCode.toLowerCase().includes(lower);
 
@@ -2815,7 +2795,7 @@ server.tool(
     };
 
     if (mainTableId !== undefined && mainTableId !== null) {
-      const { tables } = await getMetadataTables();
+      const { tables } = await getMetadataTables(mainTableId);
       validateMainTableRoutePath(tables, mainTableId, normalizedPath);
       body.mainTable = { id: mainTableId };
     }

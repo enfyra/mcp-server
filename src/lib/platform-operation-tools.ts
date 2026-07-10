@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
 import { fetchAPI } from './fetch.js';
+import { fetchTableCatalog, fetchTableMetadataByRef, resolveTableCatalogEntry } from './metadata-client.js';
 import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
 import {
   assertDynamicCodeKnowledgeAck,
@@ -1867,21 +1868,6 @@ async function patchExtensionCode(apiUrl, {
   };
 }
 
-function normalizeMetadataTables(metadata) {
-  const tables = metadata?.data?.tables || metadata?.tables || metadata?.data || [];
-  return Array.isArray(tables) ? tables : Object.values(tables || {});
-}
-
-async function getMetadataTables(apiUrl) {
-  return normalizeMetadataTables(await fetchAPI(apiUrl, '/metadata'));
-}
-
-function resolveTable(tables, tableName) {
-  const table = tables.find((item) => item?.name === tableName || item?.alias === tableName || sameId(getId(item), tableName));
-  if (!table) throw new Error(`Table not found: ${tableName}`);
-  return table;
-}
-
 function resolveColumn(table, columnName) {
   const column = (table.columns || []).find((item) => item?.name === columnName || sameId(getId(item), columnName));
   if (!column) throw new Error(`Column not found: ${table.name}.${columnName}`);
@@ -3359,7 +3345,9 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     },
     async ({ tableName, isEnabled, globalRulesAckKey }) => {
       assertGlobalRulesAck(globalRulesAckKey);
-      const table = resolveTable(await getMetadataTables(ENFYRA_API_URL), tableName);
+      const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+      const table = resolveTableCatalogEntry(catalog, tableName);
+      if (!table) throw new Error(`Table not found: ${tableName}`);
       const existing = await findRecord(ENFYRA_API_URL, 'enfyra_graphql', { table: { id: { _eq: getId(table) } } }, 'id,_id,table.id,isEnabled');
       const operation = await createOrPatch(ENFYRA_API_URL, 'enfyra_graphql', existing, {
         table: { id: getId(table) },
@@ -3710,7 +3698,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     },
     async ({ tableName, columnName, ruleType, value, message, description, isEnabled, globalRulesAckKey }) => {
       assertGlobalRulesAck(globalRulesAckKey);
-      const table = resolveTable(await getMetadataTables(ENFYRA_API_URL), tableName);
+      const table = await fetchTableMetadataByRef(ENFYRA_API_URL, tableName);
       const column = resolveColumn(table, columnName);
       const existing = await findRecord(ENFYRA_API_URL, 'enfyra_column_rule', {
         column: { id: { _eq: getId(column) } },
@@ -3755,11 +3743,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       assertGlobalRulesAck(globalRulesAckKey);
       if (!!columnName === !!relationName) throw new Error('Provide exactly one of columnName or relationName.');
       assertOneScope({ roleId, roleName, allowedUserIds });
-      const [tables, role] = await Promise.all([
-        getMetadataTables(ENFYRA_API_URL),
+      const [table, role] = await Promise.all([
+        fetchTableMetadataByRef(ENFYRA_API_URL, tableName),
         resolveRole(ENFYRA_API_URL, { roleId, roleName }),
       ]);
-      const table = resolveTable(tables, tableName);
       const field = columnName ? resolveColumn(table, columnName) : resolveRelation(table, relationName);
       const filter = {
         action: { _eq: action },

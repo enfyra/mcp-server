@@ -134,27 +134,29 @@ test('debugFieldExposure resolves unpublished deep field paths and returns escal
       if (url.endsWith('/auth/token/exchange')) {
         return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 600_000 });
       }
-      if (url.endsWith('/metadata')) {
+      if (url.includes('/enfyra_table?')) {
         return jsonResponse({
           data: [
-            {
-              id: 1,
-              name: 'orders',
-              columns: [{ name: 'id', isPublished: true }],
-              relations: [{ propertyName: 'customer', targetTable: { name: 'users' } }],
-            },
-            {
-              id: 2,
-              name: 'users',
-              columns: [
-                { name: 'email', isPublished: true },
-                { name: 'api_secret', isPublished: false, isEncrypted: true },
-              ],
-              relations: [],
-            },
+            { id: 1, name: 'orders' },
+            { id: 2, name: 'users' },
           ],
         });
       }
+      if (url.endsWith('/metadata/orders')) return jsonResponse({ data: {
+        id: 1,
+        name: 'orders',
+        columns: [{ name: 'id', isPublished: true }],
+        relations: [{ propertyName: 'customer', targetTable: { name: 'users' } }],
+      } });
+      if (url.endsWith('/metadata/users')) return jsonResponse({ data: {
+        id: 2,
+        name: 'users',
+        columns: [
+          { name: 'email', isPublished: true },
+          { name: 'api_secret', isPublished: false, isEncrypted: true },
+        ],
+        relations: [],
+      } });
       return jsonResponse({ data: [] });
     };
     const result = await debugFieldExposure(apiUrl, {

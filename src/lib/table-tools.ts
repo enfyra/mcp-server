@@ -3,6 +3,12 @@
  */
 import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
+import {
+  fetchMetadataContext,
+  fetchTableCatalog,
+  fetchTableMetadata,
+  resolveTableCatalogEntry,
+} from './metadata-client.js';
 import { jsonContent } from './response-format.js';
 import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
 
@@ -111,6 +117,12 @@ const VALID_RELATION_TYPES = new Set(['many-to-one', 'one-to-many', 'one-to-one'
 
 const AUTO_MANAGED_COLUMN_NAMES = new Set(['id', '_id', 'createdAt', 'updatedAt']);
 
+export function buildPrimaryColumnForDbType(dbType: string | null | undefined): ColumnPatch {
+  return dbType === 'mongodb'
+    ? { name: '_id', type: 'ObjectId', isPrimary: true, isGenerated: true, isNullable: false }
+    : { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
+}
+
 const COLUMN_TYPE_ALIAS_HINTS = [
   'Use varchar for short strings; text or richtext for long prose.',
   'Use float for prices, money, percentages, ratings, and decimal-like numbers unless the live instance explicitly lists decimal.',
@@ -119,6 +131,9 @@ const COLUMN_TYPE_ALIAS_HINTS = [
 ];
 
 export function normalizeTablesFromMetadata(metadata) {
+  if (Array.isArray(metadata)) return metadata;
+  if (metadata?.data?.name && Array.isArray(metadata.data.columns)) return [metadata.data];
+  if (metadata?.name && Array.isArray(metadata.columns)) return [metadata];
   const tablesSource = metadata?.data?.tables || metadata?.tables || metadata?.data || [];
   return Array.isArray(tablesSource)
     ? tablesSource
@@ -151,30 +166,25 @@ export function resolveTableIdentifierFromMetadata(metadata, tableRef, label = '
 
 /**
  * Helper: fetch table with full columns and relations.
- * Dynamic enfyra_table relation fields can be paginated/truncated, so schema
- * cascade tools must use /metadata as the complete source of columns/relations.
+ * Schema cascade tools resolve the table catalog entry first, then request the
+ * complete permission-projected schema from /metadata/:name.
  */
-export async function fetchTableWithDetails(ENFYRA_API_URL, tableId) {
-  const filter = encodeURIComponent(JSON.stringify({ id: { _eq: tableId } }));
-  const [tableResult, metadata] = await Promise.all([
-    fetchAPI(ENFYRA_API_URL, `/enfyra_table?filter=${filter}&limit=1&fields=*`),
-    fetchAPI(ENFYRA_API_URL, '/metadata'),
-  ]);
-  const tableData = tableResult?.data?.[0] || tableResult?.[0] || null;
-  const metadataTable =
-    resolveTableFromMetadata(metadata, tableId) ||
-    resolveTableFromMetadataByName(metadata, tableData?.name);
-  if (!metadataTable) {
+export async function fetchTableWithDetails(ENFYRA_API_URL, tableId): Promise<AnyRecord> {
+  const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+  const tableData = resolveTableCatalogEntry(catalog, tableId);
+  if (!tableData) {
     throw new Error(`Full metadata for table ${tableId} was not found; refusing schema cascade patch.`);
   }
+  const metadataTable = await fetchTableMetadata(ENFYRA_API_URL, tableData.name);
   if (!Array.isArray(metadataTable.columns)) {
     throw new Error(`Full metadata for table ${tableId} did not include columns; refusing schema cascade patch.`);
   }
   return {
-    ...(tableData || metadataTable),
+    ...tableData,
+    ...metadataTable,
     columns: metadataTable.columns,
     relations: Array.isArray(metadataTable.relations) ? metadataTable.relations : [],
-  };
+  } as AnyRecord;
 }
 
 /**
@@ -778,14 +788,14 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   async function appendColumnToTable(args) {
     assertGlobalRulesAck(args.globalRulesAckKey);
     return withSchemaQueue(async () => {
-    const [tableData, metadata] = await Promise.all([
+    const [tableData, columnMetadata] = await Promise.all([
       fetchTableWithDetails(ENFYRA_API_URL, args.tableId),
-      fetchAPI(ENFYRA_API_URL, '/metadata'),
+      fetchTableMetadata(ENFYRA_API_URL, 'enfyra_column'),
     ]);
     if (!tableData) {
       throw new Error(`Table with ID ${args.tableId} not found.`);
     }
-    const supportedTypes = getSupportedColumnTypesFromMetadata(metadata);
+    const supportedTypes = getSupportedColumnTypesFromMetadata(columnMetadata);
     const normalized = normalizeColumnTypeForLiveMetadata(args.type, supportedTypes);
     assertColumnNameCanBeCreated(args.name, 'create_columns');
 
@@ -820,9 +830,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     if (targetRef === undefined || targetRef === null || targetRef === '') {
       throw new Error('create_relations requires targetTableId or targetTable. Pass an existing table id, name, or alias.');
     }
-    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
-    const resolvedSourceTableId = resolveTableIdentifierFromMetadata(metadata, sourceTableId, 'sourceTableId');
-    const resolvedTargetTableId = resolveTableIdentifierFromMetadata(metadata, targetRef, 'targetTableId');
+    const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+    const resolvedSourceTableId = resolveTableIdentifierFromMetadata(catalog, sourceTableId, 'sourceTableId');
+    const resolvedTargetTableId = resolveTableIdentifierFromMetadata(catalog, targetRef, 'targetTableId');
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, resolvedSourceTableId);
     if (!tableData) {
       throw new Error(`Table ${sourceTableId} not found.`);
@@ -999,10 +1009,13 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   }
 
 	  async function createOneTable(args) {
-    const idColumn = { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
     const userColumns = arrayValue('columns', args.columns);
-	    const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
-	    const supportedTypes = getSupportedColumnTypesFromMetadata(metadata);
+	    const [metadataContext, columnMetadata] = await Promise.all([
+      fetchMetadataContext(ENFYRA_API_URL),
+      fetchTableMetadata(ENFYRA_API_URL, 'enfyra_column'),
+    ]);
+	    const supportedTypes = getSupportedColumnTypesFromMetadata(columnMetadata);
+    const idColumn = buildPrimaryColumnForDbType(metadataContext.dbType);
 	    const { columns: userColumnsWithoutAuto, skippedAutoColumns } = stripAutoManagedColumns(userColumns);
 	    const { columns: normalizedUserColumns, normalizations } = normalizeColumnsForLiveMetadata(userColumnsWithoutAuto, supportedTypes);
 	    const deferredRelations = arrayValue('relations', args.relations).map(normalizeRelationForTablePatch);
@@ -1147,7 +1160,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
   }
 
   async function deleteOneTable({ tableId, tableName, confirm }) {
-    const resolvedTableId = tableId ?? resolveTableIdentifierFromMetadata(await fetchAPI(ENFYRA_API_URL, '/metadata'), tableName, 'delete_tables item tableName');
+    const resolvedTableId = tableId ?? resolveTableIdentifierFromMetadata(await fetchTableCatalog(ENFYRA_API_URL), tableName, 'delete_tables item tableName');
     const tableData = await fetchTableWithDetails(ENFYRA_API_URL, resolvedTableId);
     if (!confirm) {
       return {
@@ -1228,18 +1241,18 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       if (all && limit !== undefined) {
         throw new Error('get_all_tables accepts either all=true or limit, not both.');
       }
-      const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
+      const catalog = await fetchTableCatalog(ENFYRA_API_URL);
       const needle = search?.trim().toLowerCase();
-      const tables = normalizeTablesFromMetadata(metadata)
+      const tables = catalog
         .map((table) => ({
           id: getId(table),
           name: table.name ?? null,
           alias: table.alias ?? null,
           description: table.description ?? null,
           isSingleRecord: table.isSingleRecord ?? null,
-          columnCount: Array.isArray(table.columns) ? table.columns.length : null,
-          relationCount: Array.isArray(table.relations) ? table.relations.length : null,
-          routeBacked: Boolean(table.route || table.routeId || table.path),
+          columnCount: null,
+          relationCount: null,
+          routeBacked: null,
         }))
         .filter((table) => {
           if (!needle) return true;
@@ -1250,7 +1263,7 @@ export function registerTableTools(server, ENFYRA_API_URL) {
       const returnedTables = all ? tables : tables.slice(0, effectiveLimit);
       return jsonContent({
         action: 'get_all_tables',
-        totalTableCount: normalizeTablesFromMetadata(metadata).length,
+        totalTableCount: catalog.length,
         matchedTableCount: tables.length,
         returnedTableCount: returnedTables.length,
 	        all: Boolean(all),
@@ -1272,19 +1285,20 @@ export function registerTableTools(server, ENFYRA_API_URL) {
     ].join(' '),
     {},
     async () => {
-      const metadata = await fetchAPI(ENFYRA_API_URL, '/metadata');
-      const liveColumnTypes = getSupportedColumnTypesFromMetadata(metadata);
-      const relationTypes = metadataColumnOptions(metadata, 'enfyra_relation', 'type');
-      const onDeleteOptions = metadataColumnOptions(metadata, 'enfyra_relation', 'onDelete');
-      const tableAttributes = metadataColumnNames(metadata, 'enfyra_table');
-      const columnAttributes = metadataColumnNames(metadata, 'enfyra_column');
-      const relationAttributes = metadataColumnNames(metadata, 'enfyra_relation');
-      const tables = normalizeTablesFromMetadata(metadata);
-      const primaryColumns = tables
-        .map((table) => (table?.columns || []).find((column) => column?.isPrimary || column?.name === 'id' || column?.name === '_id'))
-        .filter(Boolean);
-      const primaryColumnNames = [...new Set(primaryColumns.map((column) => column.name).filter(Boolean))];
-      const primaryColumnTypes = [...new Set(primaryColumns.map((column) => column.type).filter(Boolean))];
+      const [metadataContext, tableMetadata, columnMetadata, relationMetadata] = await Promise.all([
+        fetchMetadataContext(ENFYRA_API_URL),
+        fetchTableMetadata(ENFYRA_API_URL, 'enfyra_table'),
+        fetchTableMetadata(ENFYRA_API_URL, 'enfyra_column'),
+        fetchTableMetadata(ENFYRA_API_URL, 'enfyra_relation'),
+      ]);
+      const liveColumnTypes = getSupportedColumnTypesFromMetadata(columnMetadata);
+      const relationTypes = metadataColumnOptions(relationMetadata, 'enfyra_relation', 'type');
+      const onDeleteOptions = metadataColumnOptions(relationMetadata, 'enfyra_relation', 'onDelete');
+      const tableAttributes = metadataColumnNames(tableMetadata, 'enfyra_table');
+      const columnAttributes = metadataColumnNames(columnMetadata, 'enfyra_column');
+      const relationAttributes = metadataColumnNames(relationMetadata, 'enfyra_relation');
+      const primaryColumnNames = [metadataContext.dbType === 'mongodb' ? '_id' : 'id'];
+      const primaryColumnTypes = [metadataContext.dbType === 'mongodb' ? 'ObjectId' : 'int'];
 
       return jsonContent({
         action: 'schema_design_context',
@@ -1293,7 +1307,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
         primaryKeyContext: {
           observedPrimaryColumnNames: primaryColumnNames,
           observedPrimaryColumnTypes: primaryColumnTypes,
-          createTableDefault: 'This MCP create_tables currently auto-includes an int id primary key for the default SQL path. If live metadata uses _id/ObjectId, stop and verify backend support before bulk schema creation.',
+          createTableDefault: metadataContext.dbType === 'mongodb'
+            ? 'create_tables auto-includes the Mongo _id/ObjectId primary key.'
+            : 'create_tables auto-includes the SQL id/int primary key.',
         },
         createTableInput: {
           directFields: ['name', 'description', 'isSingleRecord'],
@@ -1301,7 +1317,9 @@ export function registerTableTools(server, ENFYRA_API_URL) {
           constraintFields: ['indexes', 'uniques'],
           notAcceptedAtCreate: ['alias', 'graphqlEnabled'],
           autoManagedColumns: ['id', 'createdAt', 'updatedAt'],
-          idColumn: 'create_tables auto-includes an int id primary key; do not include your own id unless the user asks for custom primary-key behavior.',
+          idColumn: metadataContext.dbType === 'mongodb'
+            ? 'create_tables auto-includes _id/ObjectId; do not include your own primary key.'
+            : 'create_tables auto-includes id/int; do not include your own primary key.',
           reservedColumnRule: 'Do not declare id, _id, createdAt, or updatedAt in create_tables/create_columns. create_tables strips them before save and reports skippedAutoColumns; create_columns rejects them.',
         },
         columnDefinitionInput: {

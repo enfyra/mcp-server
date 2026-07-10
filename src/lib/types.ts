@@ -16,3 +16,17 @@ export interface ToolResult {
 }
 
 export type UnknownRecord = Record<string, unknown>;
+
+export interface MetadataContext {
+  dbType: "postgres" | "mysql" | "mongodb" | "mariadb" | "sqlite" | null;
+  enfyraVersion: string | null;
+}
+
+export interface MetadataTableCatalogEntry {
+  id?: unknown;
+  _id?: unknown;
+  name: string;
+  alias?: string | null;
+  description?: string | null;
+  isSingleRecord?: boolean | null;
+}
