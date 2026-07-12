@@ -911,6 +911,18 @@ function toPascalIdentifier(value, fallback = 'Items') {
   return raw || fallback;
 }
 
+function buildExtensionSort(sort: unknown): string | undefined {
+  if (!Array.isArray(sort) || sort.length === 0) return undefined;
+  const fields = sort.map((entry) => {
+    const field = String((entry as AnyRecord)?.field || '').trim();
+    if (!field) throw new Error('Each extension sort entry requires a field.');
+    return String((entry as AnyRecord)?.direction || 'asc').toLowerCase() === 'desc'
+      ? `-${field}`
+      : field;
+  });
+  return fields.join(',');
+}
+
 export function buildExtensionApiUsageSnippet(input: AnyRecord = {}) {
   const resource = String(input.resource || input.name || 'items');
   const pascal = toPascalIdentifier(resource, 'Items');
@@ -943,14 +955,30 @@ export function buildExtensionApiUsageSnippet(input: AnyRecord = {}) {
   const errorName = input.errorName || `${resource}Error`;
   const executeName = input.executeName || (method === 'GET' ? `load${pascal}` : `${normalizedOperation.replace(/(^|_)([a-z])/g, (_m, _p, ch) => ch.toUpperCase()).replace(/^./, (ch) => ch.toLowerCase())}${pascal}Api`);
   const refreshName = input.refreshName || `refresh${pascal}`;
+  const sort = buildExtensionSort(input.sort);
+  const rawQuery = input.query && typeof input.query === 'object' && !Array.isArray(input.query)
+    ? input.query
+    : null;
+  if (rawQuery?.sort !== undefined && !sort) {
+    throw new Error('Pass extension sort through the structured sort input, not query.sort.');
+  }
+  const structuredQuery = rawQuery || sort
+    ? { ...(rawQuery || {}), ...(sort ? { sort } : {}) }
+    : null;
+  if (structuredQuery && input.queryExpression) {
+    throw new Error('Pass either query or queryExpression to build_extension_api_usage, not both. Use structured query plus sort for Enfyra REST ordering.');
+  }
+  const queryName = input.queryName || `${resource}Query`;
+  const queryExpression = structuredQuery ? queryName : input.queryExpression;
   const options: string[] = [];
   if (method !== 'GET') options.push(`method: ${quoteJsString(method)}`);
-  if (input.queryExpression) options.push(`query: ${input.queryExpression}`);
+  if (queryExpression) options.push(`query: ${queryExpression}`);
   if (input.bodyExpression) options.push(`body: ${input.bodyExpression}`);
   if (input.errorContext) options.push(`errorContext: ${quoteJsString(input.errorContext)}`);
   if (input.onErrorExpression) options.push(`onError: ${input.onErrorExpression}`);
   const optionsLiteral = options.length ? `, {\n  ${options.join(',\n  ')}\n}` : '';
   const lines = [
+    ...(structuredQuery ? [`const ${queryName} = computed(() => (${JSON.stringify(structuredQuery, null, 2)}));`, ''] : []),
     `const { data: ${responseName}, pending: ${pendingName}, error: ${errorName}, execute: ${executeName}, refresh: ${refreshName} } = useApi(${quoteJsString(path)}${optionsLiteral});`,
   ];
   if (method === 'GET') {
@@ -1028,6 +1056,7 @@ export function buildExtensionApiUsageSnippet(input: AnyRecord = {}) {
       'useApi returns refs plus execute/refresh; it does not auto-run.',
       'The useApi path is the base route string or a () => string getter; do not pass computed refs and do not put :id placeholders in the path.',
       'Pass query/body as objects or computed objects, not JSON.stringify strings.',
+      'For Enfyra REST ordering, use structured sort entries with field and direction; the generated query always emits one comma-separated sort string such as "-isPinned,-updatedAt", never sort arrays or field:DESC tokens.',
       'Read normal list rows from data.value?.data or from the direct execute() response.',
       'For mutations, call execute({ body }), execute({ id, body }), execute({ id }), or execute({ ids }) from a user action.',
     ],
@@ -1641,9 +1670,25 @@ function readTemplateTagName(template, start) {
   return index > nameStart ? template.slice(nameStart, index) : null;
 }
 
+function findInvalidExtensionSortSyntax(code) {
+  const source = String(code || '');
+  if (/\bsort\s*:\s*\[[\s\S]*?\]/u.test(source)) {
+    return 'sort arrays create repeated query parameters.';
+  }
+  if (/\bsort\s*:\s*(['"`])[^'"`]*:\s*(?:asc|desc)\1/iu.test(source)) {
+    return 'SQL-style field:ASC/field:DESC tokens are not valid Enfyra REST sort syntax.';
+  }
+  return null;
+}
+
 export function validateExtensionCodeLocally(code) {
   if (/\bresolveComponent\s*\(/.test(String(code || ''))) {
     throw new Error('Invalid extension component resolution: do not call resolveComponent() in Enfyra extensions. Use auto-injected components such as <UButton> directly in the template so the app/compiler resolves them correctly.');
+  }
+
+  const invalidSortSyntax = findInvalidExtensionSortSyntax(code);
+  if (invalidSortSyntax) {
+    throw new Error(`Invalid extension sort contract: ${invalidSortSyntax} Use build_extension_api_usage with structured sort entries; Enfyra REST requires one comma-separated string such as "-isPinned,-updatedAt".`);
   }
 
   const violations = [];
@@ -3123,7 +3168,13 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       operation: z.enum(['list', 'find_one', 'create', 'update', 'delete', 'batch_update', 'batch_delete']).default('list').describe('API usage pattern to generate. Reads use the base route with query objects; mutations append ids through execute options.'),
       resource: z.string().default('items').describe('Resource variable base name, e.g. notes, projects, messages.'),
       path: z.string().optional().describe('Base API route path such as /notes. Do not include /:id; the builder strips a trailing /:id if provided.'),
-      queryExpression: z.string().optional().describe('Raw Vue expression for query object/computed. Do not JSON.stringify.'),
+      query: z.record(z.any()).optional().describe('Static Enfyra query object. Use this with sort for filter/page/limit reads; do not JSON.stringify it or put sort arrays inside it.'),
+      queryExpression: z.string().optional().describe('Raw Vue expression for reactive query state. Do not JSON.stringify and do not use it to construct sort values; use structured sort instead.'),
+      queryName: z.string().optional().describe('Variable name for the generated computed query when query is provided.'),
+      sort: z.array(z.object({
+        field: z.string().min(1).describe('Metadata field or supported aggregate sort expression.'),
+        direction: z.enum(['asc', 'desc']).default('asc').describe('Enfyra sort direction.'),
+      })).optional().describe('Structured sort order. The builder emits one Enfyra REST sort string, for example [{ field: "isPinned", direction: "desc" }, { field: "updatedAt", direction: "desc" }] becomes "-isPinned,-updatedAt".'),
       bodyExpression: z.string().optional().describe('Raw Vue expression for default body object/computed when useful. Do not JSON.stringify.'),
       errorContext: z.string().optional().describe('Safe error context label for useApi error reporting.'),
       responseName: z.string().optional().describe('Optional data ref variable name.'),

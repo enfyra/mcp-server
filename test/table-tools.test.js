@@ -64,6 +64,14 @@ test('extension local validation rejects manual component resolution mistakes', 
     { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.throws(
+    () => validateExtensionCodeLocally('<script setup>const query = { sort: ["isPinned:DESC", "updatedAt:DESC"] }</script>'),
+    /Invalid extension sort contract/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<script setup>const query = { sort: "isPinned:DESC" }</script>'),
+    /Invalid extension sort contract/,
+  );
+  assert.throws(
     () => validateExtensionCodeLocally([
       '<template><div /></template>',
       '<script setup>',
@@ -282,6 +290,22 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(apiUsage.snippet, /execute: loadNotes/);
   assert.match(apiUsage.snippet, /query: notesQuery/);
   assert.match(apiUsage.snippet, /onMounted\(\(\) => \{ loadNotes\(\); \}\)/);
+
+  const sortedApiUsage = buildExtensionApiUsageSnippet({
+    resource: 'notes',
+    path: '/notes',
+    query: {
+      filter: { isArchived: { _eq: false } },
+      limit: 100,
+    },
+    sort: [
+      { field: 'isPinned', direction: 'desc' },
+      { field: 'updatedAt', direction: 'desc' },
+    ],
+  });
+  assert.match(sortedApiUsage.snippet, /const notesQuery = computed/);
+  assert.match(sortedApiUsage.snippet, /"sort": "-isPinned,-updatedAt"/);
+  assert.doesNotMatch(sortedApiUsage.snippet, /isPinned:DESC|sort: \[/);
 
   const updateApiUsage = buildExtensionApiUsageSnippet({
     operation: 'update',
