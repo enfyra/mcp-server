@@ -50,6 +50,7 @@ const GUIDED_TOOL_NAMES = new Set([
   'get_extension_theme_contract',
   'get_theme_class_reference',
   'build_extension_ui',
+  'build_extension_api_usage',
   'extension_workflow',
   'update_extension_code',
   'patch_extension_code',

@@ -22,6 +22,7 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('api_endpoint_workflow', 'guided'), true);
   assert.equal(isToolVisibleInToolset('patch_extension_code', 'guided'), true);
   assert.equal(isToolVisibleInToolset('build_extension_ui', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('build_extension_api_usage', 'guided'), true);
   assert.equal(isToolVisibleInToolset('build_extension_drawer', 'guided'), false);
   assert.equal(isToolVisibleInToolset('build_extension_modal', 'guided'), false);
   assert.equal(isToolVisibleInToolset('build_extension_page_shell', 'guided'), false);

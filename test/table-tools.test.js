@@ -283,6 +283,26 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(apiUsage.snippet, /query: notesQuery/);
   assert.match(apiUsage.snippet, /onMounted\(\(\) => \{ loadNotes\(\); \}\)/);
 
+  const updateApiUsage = buildExtensionApiUsageSnippet({
+    operation: 'update',
+    resource: 'notes',
+    path: '/notes/:id',
+    recordName: 'note',
+  });
+  assert.match(updateApiUsage.snippet, /useApi\('\/notes', \{/);
+  assert.match(updateApiUsage.snippet, /method: 'PATCH'/);
+  assert.match(updateApiUsage.snippet, /await updateNotesApi\(\{ id: note\.id, body \}\)/);
+  assert.doesNotMatch(updateApiUsage.snippet, /:id/);
+
+  const deleteApiUsage = buildExtensionApiUsageSnippet({
+    operation: 'delete',
+    resource: 'notes',
+    path: '/notes',
+    recordName: 'note',
+  });
+  assert.match(deleteApiUsage.snippet, /method: 'DELETE'/);
+  assert.match(deleteApiUsage.snippet, /await deleteNotesApi\(\{ id: note\.id \}\)/);
+
   const notifyUsage = buildExtensionNotifySnippet({
     kind: 'success',
     title: 'Saved',

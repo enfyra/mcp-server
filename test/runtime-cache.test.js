@@ -8,7 +8,10 @@ import {
   getRuntimeCacheTelemetry,
   setRuntimeCache,
 } from '../dist/lib/runtime-cache.js';
-import { runtimeCacheSocketConnection } from '../dist/lib/runtime-cache-socket.js';
+import {
+  applyRuntimeCacheSocketToken,
+  runtimeCacheSocketConnection,
+} from '../dist/lib/runtime-cache-socket.js';
 
 test('runtime cache reports hit rate and timestamped reload recovery without recording paths', () => {
   clearRuntimeCache();
@@ -39,8 +42,23 @@ test('runtime cache socket uses the authenticated Nuxt bridge namespace', () => 
 
   assert.equal(connection.url, 'http://localhost:3000/ws/enfyra-admin');
   assert.equal(connection.options.path, '/ws/socket.io');
+  assert.equal(connection.options.reconnection, false);
   assert.deepEqual(connection.options.auth, { token: 'access-token' });
   assert.deepEqual(connection.options.extraHeaders, {
     Authorization: 'Bearer access-token',
+  });
+});
+
+test('runtime cache socket replaces both handshake credentials before a manual reconnect', () => {
+  const socket = {
+    auth: { token: 'expired-token' },
+    io: { opts: { extraHeaders: { Authorization: 'Bearer expired-token' } } },
+  };
+
+  applyRuntimeCacheSocketToken(socket, 'fresh-token');
+
+  assert.deepEqual(socket.auth, { token: 'fresh-token' });
+  assert.deepEqual(socket.io.opts.extraHeaders, {
+    Authorization: 'Bearer fresh-token',
   });
 });

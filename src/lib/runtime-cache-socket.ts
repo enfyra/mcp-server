@@ -11,6 +11,11 @@ type ReloadPayload = {
 let socket: Socket | null = null;
 let socketStarting = false;
 let warmTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectAttempt = 0;
+
+const RECONNECT_DELAY_MS = 2_000;
+const RECONNECT_DELAY_MAX_MS = 30_000;
 
 function socketOrigin(apiUrl: string) {
   return apiUrl.replace(/\/api\/?$/, '');
@@ -21,13 +26,21 @@ export function runtimeCacheSocketConnection(apiUrl: string, token: string) {
     url: `${socketOrigin(apiUrl)}/ws/enfyra-admin`,
     options: {
       path: '/ws/socket.io',
-      reconnection: true,
-      reconnectionDelay: 2_000,
-      reconnectionDelayMax: 30_000,
+      reconnection: false,
       autoConnect: false,
       auth: { token },
       extraHeaders: { Authorization: `Bearer ${token}` },
     },
+  };
+}
+
+export function applyRuntimeCacheSocketToken(socket: Pick<Socket, 'auth' | 'io'>, token: string) {
+  socket.auth = { token };
+  const headers = socket.io.opts.extraHeaders || {};
+  delete headers.authorization;
+  socket.io.opts.extraHeaders = {
+    ...headers,
+    Authorization: `Bearer ${token}`,
   };
 }
 
@@ -58,27 +71,66 @@ function invalidateAndWarm(apiUrl: string, steps: string[]) {
 
 export function startRuntimeCacheSocket(apiUrl: string) {
   if (socket || socketStarting) return;
+  void connectRuntimeCacheSocket(apiUrl);
+}
+
+function reconnectDelay() {
+  const delay = Math.min(
+    RECONNECT_DELAY_MS * 2 ** reconnectAttempt,
+    RECONNECT_DELAY_MAX_MS,
+  );
+  reconnectAttempt += 1;
+  return delay;
+}
+
+function scheduleRuntimeCacheSocketReconnect(apiUrl: string) {
+  if (reconnectTimer || socketStarting) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    void connectRuntimeCacheSocket(apiUrl);
+  }, reconnectDelay());
+}
+
+function bindRuntimeCacheSocketEvents(nextSocket: Socket, apiUrl: string) {
+  nextSocket.on('$system:reload', (payload: ReloadPayload) => {
+    if (payload?.status === 'done') invalidateAndWarm(apiUrl, payload.steps || []);
+  });
+
+  nextSocket.on('connect', () => {
+    reconnectAttempt = 0;
+  });
+
+  nextSocket.on('disconnect', () => {
+    scheduleRuntimeCacheSocketReconnect(apiUrl);
+  });
+
+  nextSocket.on('connect_error', () => {
+    scheduleRuntimeCacheSocketReconnect(apiUrl);
+  });
+}
+
+async function connectRuntimeCacheSocket(apiUrl: string) {
+  if (socketStarting) return;
   socketStarting = true;
 
-  void getValidToken(apiUrl)
-    .then((token) => {
+  try {
+    const token = await getValidToken(apiUrl);
+    if (socket) {
+      applyRuntimeCacheSocketToken(socket, token);
+      socket.connect();
+    } else {
       const connection = runtimeCacheSocketConnection(apiUrl, token);
       const nextSocket = io(connection.url, connection.options);
       socket = nextSocket;
-      socketStarting = false;
-
-      nextSocket.on('$system:reload', (payload: ReloadPayload) => {
-        if (payload?.status === 'done') invalidateAndWarm(apiUrl, payload.steps || []);
-      });
-
-      nextSocket.on('connect_error', () => {
-        // Cache invalidation remains correct through successful mutations and 401/403 self-healing.
-      });
-
+      bindRuntimeCacheSocketEvents(nextSocket, apiUrl);
       nextSocket.connect();
-    })
-    .catch(() => {
-      socketStarting = false;
-      // Tools surface the real authentication failure when they need server data.
-    });
+    }
+  } catch {
+    // Tools surface the real authentication failure when they need server data.
+    socketStarting = false;
+    scheduleRuntimeCacheSocketReconnect(apiUrl);
+    return;
+  }
+
+  socketStarting = false;
 }

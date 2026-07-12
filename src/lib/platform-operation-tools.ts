@@ -914,12 +914,34 @@ function toPascalIdentifier(value, fallback = 'Items') {
 export function buildExtensionApiUsageSnippet(input: AnyRecord = {}) {
   const resource = String(input.resource || input.name || 'items');
   const pascal = toPascalIdentifier(resource, 'Items');
-  const path = input.path || `/${resource}`;
-  const method = String(input.method || 'GET').toUpperCase();
+  const operation = String(input.operation || input.mode || input.intent || '').toLowerCase() || String(input.method || 'GET').toLowerCase();
+  const normalizedOperation = ({
+    get: 'list',
+    read: 'list',
+    load: 'list',
+    post: 'create',
+    patch: 'update',
+    put: 'update',
+    del: 'delete',
+    remove: 'delete',
+    destroy: 'delete',
+  } as Record<string, string>)[operation] || operation;
+  const defaultMethodByOperation: Record<string, string> = {
+    list: 'GET',
+    find_one: 'GET',
+    create: 'POST',
+    update: 'PATCH',
+    delete: 'DELETE',
+    batch_update: 'PATCH',
+    batch_delete: 'DELETE',
+  };
+  const method = String(input.method || defaultMethodByOperation[normalizedOperation] || 'GET').toUpperCase();
+  const rawPath = String(input.path || `/${resource}`);
+  const path = rawPath.replace(/\/:id\/?$/, '');
   const responseName = input.responseName || `${resource}Response`;
   const pendingName = input.pendingName || `${resource}Pending`;
   const errorName = input.errorName || `${resource}Error`;
-  const executeName = input.executeName || (method === 'GET' ? `load${pascal}` : `${method.toLowerCase()}${pascal}`);
+  const executeName = input.executeName || (method === 'GET' ? `load${pascal}` : `${normalizedOperation.replace(/(^|_)([a-z])/g, (_m, _p, ch) => ch.toUpperCase()).replace(/^./, (ch) => ch.toLowerCase())}${pascal}Api`);
   const refreshName = input.refreshName || `refresh${pascal}`;
   const options: string[] = [];
   if (method !== 'GET') options.push(`method: ${quoteJsString(method)}`);
@@ -937,6 +959,56 @@ export function buildExtensionApiUsageSnippet(input: AnyRecord = {}) {
     if (input.autoLoad !== false) {
       lines.push(`onMounted(() => { ${executeName}(); });`);
     }
+  } else if (normalizedOperation === 'create') {
+    const handlerName = input.handlerName || `create${pascal.replace(/s$/, '')}`;
+    const payloadName = input.payloadName || 'payload';
+    lines.push(...[
+      '',
+      `async function ${handlerName}(${payloadName}) {`,
+      `  const response = await ${executeName}({ body: ${payloadName} });`,
+      '  if (!response) return null;',
+      '  return response;',
+      '}',
+    ]);
+  } else if (normalizedOperation === 'update') {
+    const handlerName = input.handlerName || `update${pascal.replace(/s$/, '')}`;
+    const recordName = input.recordName || 'record';
+    const bodyName = input.bodyName || 'body';
+    const idExpression = input.idExpression || `${recordName}.id`;
+    const bodyArg = bodyName === 'body' ? 'body' : `body: ${bodyName}`;
+    lines.push(...[
+      '',
+      `async function ${handlerName}(${recordName}, ${bodyName}) {`,
+      `  const response = await ${executeName}({ id: ${idExpression}, ${bodyArg} });`,
+      '  if (!response) return null;',
+      '  return response;',
+      '}',
+    ]);
+  } else if (normalizedOperation === 'delete') {
+    const handlerName = input.handlerName || `delete${pascal.replace(/s$/, '')}`;
+    const recordName = input.recordName || 'record';
+    const idExpression = input.idExpression || `${recordName}.id`;
+    lines.push(...[
+      '',
+      `async function ${handlerName}(${recordName}) {`,
+      `  const response = await ${executeName}({ id: ${idExpression} });`,
+      '  if (!response) return null;',
+      '  return response;',
+      '}',
+    ]);
+  } else if (normalizedOperation === 'batch_update' || normalizedOperation === 'batch_delete') {
+    const handlerName = input.handlerName || `${normalizedOperation === 'batch_update' ? 'update' : 'delete'}${pascal}Batch`;
+    const idsName = input.idsName || 'ids';
+    const bodyName = input.bodyName || 'body';
+    const args = normalizedOperation === 'batch_update' ? `{ ids: ${idsName}, body: ${bodyName} }` : `{ ids: ${idsName} }`;
+    lines.push(...[
+      '',
+      `async function ${handlerName}(${normalizedOperation === 'batch_update' ? `${idsName}, ${bodyName}` : idsName}) {`,
+      `  const response = await ${executeName}(${args});`,
+      '  if (!response) return null;',
+      '  return response;',
+      '}',
+    ]);
   } else {
     const handlerName = input.handlerName || `${method.toLowerCase()}${pascal}Record`;
     lines.push(...[
@@ -950,9 +1022,11 @@ export function buildExtensionApiUsageSnippet(input: AnyRecord = {}) {
   }
   return {
     action: 'extension_api_usage_built',
+    operation: normalizedOperation,
     snippet: lines.join('\n'),
     contract: [
       'useApi returns refs plus execute/refresh; it does not auto-run.',
+      'The useApi path is the base route string or a () => string getter; do not pass computed refs and do not put :id placeholders in the path.',
       'Pass query/body as objects or computed objects, not JSON.stringify strings.',
       'Read normal list rows from data.value?.data or from the direct execute() response.',
       'For mutations, call execute({ body }), execute({ id, body }), execute({ id }), or execute({ ids }) from a user action.',
@@ -3035,6 +3109,42 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     async ({ kind, input, extensionKnowledgeAckKey }) => {
       assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
       return jsonText(buildExtensionUiSnippet(kind, input));
+    },
+  );
+
+  server.tool(
+    'build_extension_api_usage',
+    [
+      'Generate a contract-safe useApi snippet for Enfyra admin extensions.',
+      'Use this instead of writing useApi calls from memory so route paths, execute({ id, body }), query/body objects, and mutation handlers follow the app composable contract.',
+      'The tool returns code only; apply it with patch_extension_code or update_extension_code and then validate/save normally.',
+    ].join(' '),
+    {
+      operation: z.enum(['list', 'find_one', 'create', 'update', 'delete', 'batch_update', 'batch_delete']).default('list').describe('API usage pattern to generate. Reads use the base route with query objects; mutations append ids through execute options.'),
+      resource: z.string().default('items').describe('Resource variable base name, e.g. notes, projects, messages.'),
+      path: z.string().optional().describe('Base API route path such as /notes. Do not include /:id; the builder strips a trailing /:id if provided.'),
+      queryExpression: z.string().optional().describe('Raw Vue expression for query object/computed. Do not JSON.stringify.'),
+      bodyExpression: z.string().optional().describe('Raw Vue expression for default body object/computed when useful. Do not JSON.stringify.'),
+      errorContext: z.string().optional().describe('Safe error context label for useApi error reporting.'),
+      responseName: z.string().optional().describe('Optional data ref variable name.'),
+      pendingName: z.string().optional().describe('Optional pending ref variable name.'),
+      errorName: z.string().optional().describe('Optional error ref variable name.'),
+      executeName: z.string().optional().describe('Optional execute alias name.'),
+      refreshName: z.string().optional().describe('Optional refresh alias name.'),
+      rowsName: z.string().optional().describe('Optional computed rows variable for list/find_one operations.'),
+      handlerName: z.string().optional().describe('Optional generated handler function name for mutations.'),
+      recordName: z.string().optional().describe('Record parameter name for update/delete handlers.'),
+      payloadName: z.string().optional().describe('Payload parameter name for create handlers.'),
+      bodyName: z.string().optional().describe('Body parameter name for update/batch_update handlers.'),
+      idsName: z.string().optional().describe('Ids parameter name for batch handlers.'),
+      idExpression: z.string().optional().describe('Raw id expression for update/delete handlers. Defaults to record.id.'),
+      autoLoad: z.boolean().optional().default(true).describe('For reads, generate onMounted(() => execute()).'),
+      onErrorExpression: z.string().optional().describe('Raw onError handler expression when custom handling is needed.'),
+      extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
+    },
+    async ({ extensionKnowledgeAckKey, ...input }) => {
+      assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
+      return jsonText(buildExtensionApiUsageSnippet(input));
     },
   );
 
