@@ -473,7 +473,6 @@ export function buildExtensionDrawerSnippet(input) {
     `direction="${input.direction || 'right'}"`,
   ];
   if (input.nested) attrs.push('nested');
-  if (input.handleOnly) attrs.push('handle-only');
 
   const cancelAction = input.cancelAction === false
     ? null
@@ -705,6 +704,7 @@ export function buildExtensionResourceListSnippet(input) {
     snippet,
     contract: [
       'Use CommonResourceListFrame and CommonResourceListItem for operational lists instead of ad hoc cards.',
+      'CommonResourceListFrame supports extension default slots. It renders rows when loading is false and hasItems is true; inspect the source artifact, hasItems/items expressions, and API response shape before replacing it.',
       'Keep first-load skeleton, empty state, and pagination owned by the frame.',
       'Use explicit bounded list data and natural pagination/search outside this snippet when the domain list can grow.',
     ],
@@ -1082,6 +1082,51 @@ export function buildExtensionNotifySnippet(input: AnyRecord = {}) {
   };
 }
 
+export function buildExtensionConfirmSnippet(input: AnyRecord = {}) {
+  const resource = String(input.resource || 'items');
+  const singular = resource.replace(/s$/i, '') || 'item';
+  const pascal = toPascalIdentifier(resource, 'Items');
+  const recordName = input.recordName || singular;
+  const handlerName = input.handlerName || `confirmDelete${toPascalIdentifier(singular, 'Item')}`;
+  const executeName = input.executeName || `delete${pascal}Api`;
+  const refreshName = input.refreshName || `refresh${pascal}`;
+  const idExpression = input.idExpression || `${recordName}.id`;
+  const title = input.title || `Delete ${singular}`;
+  const contentExpression = input.contentExpression || `\`Delete "\${${recordName}.title || 'this ${singular}'}"?\``;
+  const confirmText = input.confirmText || 'Delete';
+  const cancelText = input.cancelText || 'Cancel';
+  const mutationExpression = input.mutationExpression || `${executeName}({ id: ${idExpression} })`;
+  const refresh = input.refresh === false ? null : input.refreshExpression || refreshName;
+
+  return {
+    action: 'extension_confirm_workflow_built',
+    snippet: [
+      'const { confirm } = useConfirm();',
+      '',
+      `async function ${handlerName}(${recordName}) {`,
+      '  const confirmed = await confirm({',
+      `    title: ${quoteJsString(title)},`,
+      `    content: ${contentExpression},`,
+      `    confirmText: ${quoteJsString(confirmText)},`,
+      `    cancelText: ${quoteJsString(cancelText)},`,
+      '  });',
+      '  if (!confirmed) return null;',
+      '',
+      `  const response = await ${mutationExpression};`,
+      '  if (!response) return null;',
+      ...(refresh ? ['', `  await ${refresh}();`] : []),
+      '  return response;',
+      '}',
+    ].join('\n'),
+    contract: [
+      'useConfirm() opens the eApp GlobalConfirm/CommonModal and resolves true only after the user accepts.',
+      'Run the destructive mutation only after confirmed is true, then refresh the affected resource list when needed.',
+      'Never use window.confirm, window.alert, alert, or prompt in an extension.',
+      'Use CommonModal directly only when the confirmation needs form fields, richer detail, or a custom destructive workflow that useConfirm cannot express.',
+    ],
+  };
+}
+
 export function reviewExtensionUiContract(code) {
   const source = String(code || '');
   const issues: Array<{ severity: 'error' | 'warning'; rule: string; message: string; suggestion: string }> = [];
@@ -1139,6 +1184,9 @@ function collectExtensionRuntimeIssues(code) {
   }
   if (/\buseToast\s*\(/.test(source)) {
     push('error', 'use-toast-directly', 'Dynamic extensions should not call useToast() directly.', 'Use useNotify() and call success/error/warning/info(title, description?).');
+  }
+  if (/\b(?:window|globalThis)\.(?:confirm|alert|prompt)\s*\(/.test(source) || /(^|[^.\w])(?:alert|prompt)\s*\(/m.test(source)) {
+    push('error', 'browser-dialog', 'Dynamic extensions must not use browser alert/confirm/prompt dialogs.', 'For ordinary destructive confirmation call build_extension_ui kind=confirm and use useConfirm(); use CommonModal only for richer confirmation content.');
   }
   if (/\buseNotify\s*\(\s*\)\s*\.add\s*\(/.test(source) || /\b\w+\s*\.add\s*\(\s*\{\s*title\s*:/.test(source)) {
     push('error', 'use-notify-add', 'useNotify() does not accept Nuxt toast object payloads through add().', 'Call notify.success/error/warning/info(title, description?) instead.');
@@ -1386,6 +1434,9 @@ export function buildExtensionUiSnippet(kind: string, input: AnyRecord = {}) {
     case 'notify':
       result = buildExtensionNotifySnippet(input);
       break;
+    case 'confirm':
+      result = buildExtensionConfirmSnippet(input);
+      break;
     case 'runtime_review':
       if (!input?.code) {
         throw new Error('build_extension_ui kind=runtime_review requires input.code.');
@@ -1488,7 +1539,7 @@ function getExtensionThemeContract() {
     shellComponentContracts: {
       CommonDrawer: [
         'Use build_extension_ui kind=drawer for generated drawer/editing snippets.',
-        'The builder owns slots, managed footer actions, full-width fields, native button types, and loading/error/body structure.',
+        'The builder owns slots, managed footer actions, full-width fields, native button types, and loading/error/body structure. CommonDrawer disables drag dismissal globally; do not add handle-only, drag handlers, or swipe-to-close behavior.',
       ],
       CommonModal: [
         'Use build_extension_ui kind=modal for generated modal/confirmation snippets.',
@@ -3125,7 +3176,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     [
       'Lazy gateway for Enfyra admin extension UI builders.',
       'Use this after get_enfyra_required_knowledge(scope="extension") when a high-contract extension UI snippet is needed.',
-      'It keeps guided startup small by dispatching drawer, modal, page_shell, permission_gate, empty_state, resource_list, form_editor, widget, menu_notification, account_panel_item, tabs, upload_modal, api_usage, notify, runtime_review, theme_classes, theme_review, or review internally instead of exposing every builder tool up front.',
+      'It keeps guided startup small by dispatching drawer, modal, page_shell, permission_gate, empty_state, resource_list, form_editor, widget, menu_notification, account_panel_item, tabs, upload_modal, api_usage, notify, confirm, runtime_review, theme_classes, theme_review, or review internally instead of exposing every builder tool up front.',
     ].join(' '),
     {
       kind: z.enum([
@@ -3143,12 +3194,13 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
         'upload_modal',
         'api_usage',
         'notify',
+        'confirm',
         'runtime_review',
         'theme_classes',
         'theme_review',
         'review',
       ]).describe('Which extension UI contract builder/reviewer to run.'),
-      input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=api_usage, pass { path, resource, method? }. For kind=notify, pass { kind, title, description? }. For kind=theme_classes, pass { intent }. For kind=runtime_review/theme_review/review, pass { code }.'),
+      input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=api_usage, pass { path, resource, method? }; for kind=confirm, pass { resource, executeName?, refreshName?, recordName?, idExpression? }; for kind=notify, pass { kind, title, description? }. For kind=theme_classes, pass { intent }. For kind=runtime_review/theme_review/review, pass { code }.'),
       extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
     },
     async ({ kind, input, extensionKnowledgeAckKey }) => {
@@ -3212,7 +3264,6 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       titleExpression: z.string().optional().describe('Raw Vue expression for a dynamic title.'),
       direction: z.enum(['right', 'left', 'top', 'bottom']).optional().default('right').describe('Drawer direction.'),
       nested: z.boolean().optional().default(false).describe('Set true when rendering a drawer inside another modal/drawer.'),
-      handleOnly: z.boolean().optional().default(false).describe('Set true only when the drawer should use handle-only behavior.'),
       body: z.string().describe('Vue template body content for #body. UInput/UTextarea/select controls are normalized to w-full; native buttons get type="button".'),
       cancelAction: z.union([extensionFooterActionSchema, z.literal(false)]).optional().describe('Cancel action object. Omit for a default Cancel that closes the model; false disables cancelAction.'),
       primaryAction: extensionFooterActionSchema.optional().describe('Primary action. Editing/create drawers should wire Save/Create here.'),

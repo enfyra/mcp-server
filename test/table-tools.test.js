@@ -181,6 +181,7 @@ test('extension component builders enforce drawer and modal contracts', async ()
     buildExtensionDrawerSnippet,
     buildExtensionEmptyStateSnippet,
     buildExtensionApiUsageSnippet,
+    buildExtensionConfirmSnippet,
     buildExtensionFormEditorSnippet,
     buildExtensionNotifySnippet,
     buildExtensionUiSnippet,
@@ -222,9 +223,11 @@ test('extension component builders enforce drawer and modal contracts', async ()
       disabled: 'deleting',
       onClick: 'confirmDelete',
     },
+    handleOnly: true,
   });
 
   assert.match(drawer.snippet, /<CommonDrawer/);
+  assert.doesNotMatch(drawer.snippet, /handle-only/);
   assert.match(drawer.snippet, /<template #header>/);
   assert.match(drawer.snippet, /:primary-action="\{ label: mode === 'create' \? 'Create note' : 'Save note'/);
   assert.match(drawer.snippet, /:danger-action="\{ label: 'Delete'/);
@@ -335,9 +338,24 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(notifyUsage.snippet, /const notify = useNotify\(\)/);
   assert.match(notifyUsage.snippet, /await notify\.success\('Saved', 'Changes were applied\.'\)/);
 
+  const confirmUsage = buildExtensionConfirmSnippet({
+    resource: 'notes',
+    executeName: 'deleteNoteApi',
+    refreshName: 'refreshNotes',
+    recordName: 'note',
+  });
+  assert.match(confirmUsage.snippet, /const \{ confirm \} = useConfirm\(\)/);
+  assert.match(confirmUsage.snippet, /const confirmed = await confirm/);
+  assert.match(confirmUsage.snippet, /await deleteNoteApi\(\{ id: note\.id \}\)/);
+  assert.match(confirmUsage.snippet, /await refreshNotes\(\)/);
+
   const runtimeReview = reviewExtensionRuntimeContract('<script setup>const notify = useNotify(); notify.add({ title: "Saved" })</script><template><div /></template>');
   assert.equal(runtimeReview.valid, false);
   assert.match(JSON.stringify(runtimeReview.issues), /use-notify-add/);
+
+  const browserDialogReview = reviewExtensionRuntimeContract('<script setup>window.confirm("Delete?")</script><template><div /></template>');
+  assert.equal(browserDialogReview.valid, false);
+  assert.match(JSON.stringify(browserDialogReview.issues), /browser-dialog/);
 
   const lazyApiUsage = buildExtensionUiSnippet('api_usage', {
     resource: 'notes',
@@ -354,6 +372,14 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.equal(lazyNotify.gateway, 'build_extension_ui');
   assert.equal(lazyNotify.kind, 'notify');
   assert.match(lazyNotify.snippet, /await notify\.error\('Save failed'\)/);
+
+  const lazyConfirm = buildExtensionUiSnippet('confirm', {
+    resource: 'notes',
+    executeName: 'deleteNoteApi',
+  });
+  assert.equal(lazyConfirm.gateway, 'build_extension_ui');
+  assert.equal(lazyConfirm.kind, 'confirm');
+  assert.match(lazyConfirm.snippet, /useConfirm\(\)/);
 
   const lazyRuntimeReview = buildExtensionUiSnippet('runtime_review', {
     code: '<script setup>const api = useApi("/notes", { query: JSON.stringify({ page: 1 }) })</script><template><div /></template>',
