@@ -33,21 +33,51 @@ export function buildDynamicRepositoryUsage(input: {
       ? `#secure.${tableName}`
       : `#${tableName}`;
   const fields = fieldList(input.fields);
+  const selectedFields = input.access === 'trusted_explicit'
+    ? fields
+    : 'requestedFields?.length ? requestedFields : ' + fields;
+  const outputExpansion = input.access === 'trusted_explicit'
+    ? {
+      deep: 'undefined',
+      meta: 'undefined',
+      aggregate: 'undefined',
+      debugMode: 'undefined',
+    }
+    : {
+      deep: '@QUERY.deep',
+      meta: '@QUERY.meta',
+      aggregate: '@QUERY.aggregate',
+      debugMode: '@QUERY.debugMode',
+    };
   const idField = requireIdentifier(input.idField || 'id', 'idField');
   const idExpression = input.idSource === 'body' ? '@BODY.id' : '@PARAMS.id';
   let code: string;
 
   if (input.operation === 'list') {
-    code = `const result = await ${repository}.find({
-  fields: @QUERY.fields?.length ? @QUERY.fields : ${fields},
+    const fieldNormalization = input.access === 'trusted_explicit'
+      ? ''
+      : `const requestedFields = (() => {
+  const rawFields = @QUERY.fields
+  if (Array.isArray(rawFields)) return rawFields
+  if (typeof rawFields !== 'string') return undefined
+  try {
+    const parsedFields = JSON.parse(rawFields)
+    if (Array.isArray(parsedFields)) return parsedFields
+  } catch {}
+  return rawFields.split(',').map((field) => field.trim()).filter(Boolean)
+})()
+
+`;
+    code = `${fieldNormalization}const result = await ${repository}.find({
+  fields: ${selectedFields},
   filter: @QUERY.filter || {},
-  deep: @QUERY.deep,
+  deep: ${outputExpansion.deep},
   sort: @QUERY.sort,
   page: @QUERY.page,
   limit: Math.min(Number(@QUERY.limit) || 50, 100),
-  meta: @QUERY.meta,
-  aggregate: @QUERY.aggregate,
-  debugMode: @QUERY.debugMode
+  meta: ${outputExpansion.meta},
+  aggregate: ${outputExpansion.aggregate},
+  debugMode: ${outputExpansion.debugMode}
 })
 
 return result`;

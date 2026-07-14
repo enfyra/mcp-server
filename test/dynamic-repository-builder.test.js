@@ -32,6 +32,42 @@ test('dynamic repository builder labels trusted explicit access as a permission 
   assert.match(result.securityBoundary, /bypasses field permissions/i);
 });
 
+test('trusted list builder never lets callers override the exact field projection', () => {
+  const result = buildDynamicRepositoryUsage({
+    access: 'trusted_explicit',
+    operation: 'list',
+    tableName: 'audit_log',
+    fields: ['id', 'eventType'],
+  });
+
+  assert.match(result.code, /fields: \["id", "eventType"\]/);
+  assert.doesNotMatch(result.code, /@QUERY\.fields/);
+});
+
+test('secure list builder normalizes JSON-encoded REST field projections before repository access', () => {
+  const result = buildDynamicRepositoryUsage({
+    access: 'secure_explicit',
+    operation: 'list',
+    tableName: 'project',
+    fields: ['id', 'name'],
+  });
+
+  assert.match(result.code, /const requestedFields = \(\(\) =>/);
+  assert.match(result.code, /JSON\.parse\(rawFields\)/);
+  assert.match(result.code, /fields: requestedFields\?\.length \? requestedFields : \["id", "name"\]/);
+});
+
+test('trusted list builder does not forward caller-controlled output expansion', () => {
+  const result = buildDynamicRepositoryUsage({
+    access: 'trusted_explicit',
+    operation: 'list',
+    tableName: 'audit_log',
+    fields: ['id', 'eventType'],
+  });
+
+  assert.doesNotMatch(result.code, /@QUERY\.(deep|meta|aggregate|debugMode)/);
+});
+
 test('dynamic repository builder rejects invalid macro table names', () => {
   assert.throws(
     () => buildDynamicRepositoryUsage({ access: 'secure_explicit', operation: 'list', tableName: 'bad-name' }),

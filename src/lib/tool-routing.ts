@@ -198,7 +198,7 @@ export const TOOL_WORKFLOWS = [
     keywords: ['record', 'crud', 'query', 'count', 'filter', 'aggregate', 'deep', 'sort', 'pagination'],
     firstTools: ['inspect_table', 'discover_query_capabilities'],
     inspectTools: ['inspect_table', 'get_table_metadata', 'discover_query_capabilities'],
-    knowledgeTools: ['get_enfyra_required_knowledge for writes'],
+    knowledgeTools: ['get_enfyra_required_knowledge'],
     writeTools: ['create_records', 'update_records', 'delete_records'],
     verifyTools: ['find_one_record', 'query_table', 'count_records', 'debug_field_exposure'],
     avoidTools: [
@@ -434,7 +434,7 @@ export const TOOL_WORKFLOWS = [
     keywords: ['graphql', 'gql', 'schema endpoint'],
     firstTools: ['discover_enfyra_system', 'inspect_table'],
     inspectTools: ['discover_enfyra_system', 'inspect_table'],
-    knowledgeTools: ['get_enfyra_required_knowledge for writes'],
+    knowledgeTools: ['get_enfyra_required_knowledge'],
     writeTools: ['set_table_graphql', 'update_tables'],
     verifyTools: ['test_graphql', 'discover_enfyra_system'],
     avoidTools: [
@@ -466,7 +466,7 @@ export const TOOL_WORKFLOWS = [
     keywords: ['file upload', 'upload progress', 'storage config', 'storage provider', 'folder', 'file permission', 'asset'],
     firstTools: ['search_runtime_zone', 'get_enfyra_examples'],
     inspectTools: ['search_runtime_zone(mode=search, zone=storage_file)', 'search_runtime_zone(mode=inspect)', 'inspect_table', 'query_table'],
-    knowledgeTools: ['get_enfyra_required_knowledge for writes', 'get_enfyra_examples(category=files)'],
+    knowledgeTools: ['get_enfyra_required_knowledge', 'get_enfyra_examples(category=files)'],
     writeTools: ['create_records', 'update_records', 'delete_records'],
     verifyTools: ['search_runtime_zone', 'query_table'],
     avoidTools: [
@@ -497,7 +497,7 @@ export const TOOL_WORKFLOWS = [
     keywords: ['user role', 'oauth provider', 'oauth config', 'oauth account', 'login flow', 'session refresh', 'identity access'],
     firstTools: ['search_runtime_zone', 'get_enfyra_examples'],
     inspectTools: ['search_runtime_zone(mode=search, zone=auth_security)', 'search_runtime_zone(mode=inspect)', 'query_table', 'get_permission_profile'],
-    knowledgeTools: ['get_enfyra_required_knowledge for writes', 'get_enfyra_examples(category=oauth-setup|ssr-app-auth)'],
+    knowledgeTools: ['get_enfyra_required_knowledge', 'get_enfyra_examples(category=oauth-setup|ssr-app-auth)'],
     writeTools: ['create_records', 'update_records', 'delete_records', 'ensure_route_access'],
     verifyTools: ['query_table', 'get_permission_profile', 'test_rest_endpoint'],
     avoidTools: [
@@ -528,7 +528,7 @@ export const TOOL_WORKFLOWS = [
     keywords: ['cors', 'allowed origin', 'platform setting', 'enfyra_setting', 'enfyra_cors_origin'],
     firstTools: ['inspect_table', 'query_table'],
     inspectTools: ['inspect_table', 'query_table', 'discover_runtime_context'],
-    knowledgeTools: ['get_enfyra_required_knowledge for writes'],
+    knowledgeTools: ['get_enfyra_required_knowledge'],
     writeTools: ['create_records', 'update_records', 'delete_records'],
     verifyTools: ['query_table', 'discover_runtime_context'],
     avoidTools: [
@@ -588,7 +588,7 @@ export const TOOL_WORKFLOWS = [
     keywords: ['cache', 'reload', 'stale', 'refresh metadata', 'reload routes'],
     firstTools: ['inspect_table', 'inspect_route', 'get_enfyra_api_context'],
     inspectTools: ['inspect_table', 'inspect_route', 'get_enfyra_api_context'],
-    knowledgeTools: ['get_enfyra_required_knowledge for manual reloads'],
+    knowledgeTools: ['get_enfyra_required_knowledge'],
     writeTools: [],
     verifyTools: ['inspect_table', 'inspect_route', 'discover_enfyra_system'],
     avoidTools: [

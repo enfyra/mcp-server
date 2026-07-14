@@ -12,6 +12,7 @@ const GUIDED_TOOL_NAMES = new Set([
   'discover_script_contexts',
   'build_dynamic_repository_usage',
   'get_enfyra_api_context',
+  'get_current_user',
   'get_permission_profile',
 
   'search_admin_extensions',

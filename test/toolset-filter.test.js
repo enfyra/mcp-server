@@ -1,11 +1,38 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   installToolsetFilter,
   isToolVisibleInToolset,
   normalizeMcpToolset,
   summarizeToolsetForInstructions,
 } from '../dist/lib/toolset-filter.js';
+import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from '../dist/lib/tool-routing.js';
+
+const TOOL_REGISTRATION_SOURCES = [
+  '../src/mcp-server-entry.ts',
+  '../src/lib/dynamic-repository-builder.ts',
+  '../src/lib/platform-operation-tools.ts',
+  '../src/lib/runtime-zone-tools.ts',
+  '../src/lib/table-tools.ts',
+];
+
+function registeredToolNames() {
+  const tools = new Set();
+  for (const sourcePath of TOOL_REGISTRATION_SOURCES) {
+    const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
+    for (const match of source.matchAll(/server\.tool\(\s*['"]([a-z0-9_]+)['"]/g)) tools.add(match[1]);
+  }
+  return tools;
+}
+
+function splitWorkflowToolNames(value) {
+  if (value === 'full toolset reload tools') return [];
+  return value
+    .split(/\s+or\s+|\s*\/\s*/g)
+    .map((tool) => tool.trim().replace(/\(.*/, ''))
+    .filter(Boolean);
+}
 
 test('normalizes MCP toolset mode to guided by default', () => {
   assert.equal(normalizeMcpToolset(undefined), 'guided');
@@ -78,4 +105,38 @@ test('toolset instruction summary names guided/full behavior', () => {
   assert.match(summarizeToolsetForInstructions('guided'), /guided/);
   assert.match(summarizeToolsetForInstructions('guided'), /ENFYRA_MCP_TOOLSET=full/);
   assert.match(summarizeToolsetForInstructions('full'), /full/);
+});
+
+test('guided workflow primary paths never direct callers to hidden tools', () => {
+  for (const surface of WORKFLOW_SURFACES) {
+    const result = discoverWorkflowRoutes({ surface, detail: 'plan', limit: 1 });
+    const primaryPath = result.workflows[0].primaryPath;
+    for (const step of primaryPath) {
+      if (step.tool === 'full toolset reload tools') continue;
+      const toolNames = step.tool.split(/\s+or\s+|\s*\/\s*/g).map((tool) => tool.trim());
+      for (const toolName of toolNames) {
+        assert.equal(
+          isToolVisibleInToolset(toolName, 'guided'),
+          true,
+          `${surface} primary path directs guided callers to hidden tool ${toolName}`,
+        );
+      }
+    }
+  }
+});
+
+test('workflow routes only name registered MCP tools', () => {
+  const registered = registeredToolNames();
+  for (const surface of WORKFLOW_SURFACES) {
+    const workflow = discoverWorkflowRoutes({ surface, detail: 'plan', limit: 1 }).workflows[0];
+    const namedTools = [
+      ...workflow.primaryPath.flatMap((step) => splitWorkflowToolNames(step.tool)),
+      ...workflow.advancedTools.flatMap(splitWorkflowToolNames),
+      ...workflow.verifyPath.flatMap((step) => splitWorkflowToolNames(step.tool)),
+      ...Object.values(workflow.legacyToolSets).flat().flatMap(splitWorkflowToolNames),
+    ];
+    for (const toolName of namedTools) {
+      assert.ok(registered.has(toolName), `${surface} references unregistered tool ${toolName}`);
+    }
+  }
 });

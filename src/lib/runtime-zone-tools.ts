@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
-import { fetchMetadataTables, fetchTableCatalog, fetchTableMetadataByRef } from './metadata-client.js';
+import { fetchMetadataTables, fetchTableCatalog, fetchTableMetadata, fetchTableMetadataByRef } from './metadata-client.js';
 import { jsonContent } from './response-format.js';
 import { writeSourceArtifact } from './source-artifacts.js';
 import { inspectExtensionLocation, searchExtensions } from './extension-search-tools.js';
@@ -54,7 +54,7 @@ const ZONE_TABLES: Record<Exclude<RuntimeZone, 'admin_ui' | 'schema_data'>, Zone
   ],
   storage_file: [
     { tableName: 'enfyra_storage_config', fields: 'id,_id,name,provider,bucket,baseUrl,description,isDefault,isEnabled', labelFields: ['name', 'provider', 'bucket', 'baseUrl', 'description'] },
-    { tableName: 'enfyra_folder', fields: 'id,_id,name,path,description,parent.id,parent.name,isPublic,createdAt,updatedAt', labelFields: ['name', 'path', 'description'], pathFields: ['path'] },
+    { tableName: 'enfyra_folder', fields: 'id,_id,name,slug,path,description,parent.id,parent.name,isPublic,createdAt,updatedAt', labelFields: ['name', 'slug', 'path', 'description'], pathFields: ['path'] },
     { tableName: 'enfyra_file', fields: 'id,_id,fileName,originalName,mimeType,path,url,isPublic,folder.id,folder.name,storage.id,storage.name,createdAt,updatedAt', labelFields: ['fileName', 'originalName', 'mimeType', 'path', 'url', 'folder.name', 'storage.name'], pathFields: ['path', 'url'] },
     { tableName: 'enfyra_file_permission', fields: 'id,_id,file.id,file.fileName,role.name,allowedUsers.id,methods.name,description,isEnabled', labelFields: ['file.fileName', 'role.name', 'description'] },
   ],
@@ -205,8 +205,20 @@ function sourceMatches(source: string, query: string, snippetChars: number) {
   };
 }
 
+async function resolveZoneFields(apiUrl: string, table: ZoneTable) {
+  const metadata = await fetchTableMetadata(apiUrl, table.tableName).catch(() => null);
+  if (!metadata) return table.fields;
+  const available = new Set([
+    ...asArray(metadata.columns).map((column) => String(column?.name ?? '')).filter(Boolean),
+    ...asArray(metadata.relations).map((relation) => String(relation?.propertyName ?? '')).filter(Boolean),
+  ]);
+  const fields = table.fields.split(',').filter((field) => available.has(field.split('.')[0]));
+  return fields.length ? fields.join(',') : table.fields;
+}
+
 async function fetchZoneRecords(apiUrl: string, table: ZoneTable) {
-  const result = await fetchAPI(apiUrl, `/${table.tableName}?limit=0&fields=${encodeURIComponent(table.fields)}`).catch((error: any) => ({ error }));
+  const fields = await resolveZoneFields(apiUrl, table);
+  const result = await fetchAPI(apiUrl, `/${table.tableName}?limit=0&fields=${encodeURIComponent(fields)}`).catch((error: any) => ({ error }));
   if (result?.error) return { records: [], error: result.error.message || String(result.error) };
   return { records: unwrapData(result), error: null };
 }

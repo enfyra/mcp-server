@@ -2663,9 +2663,9 @@ server.tool(
   {
     method: z.string().optional().default('GET').describe('HTTP method name. Must exist in enfyra_method.name for Enfyra route-backed calls.'),
     path: z.string().describe('Enfyra API path, e.g. /enfyra_route?limit=1'),
-    query: z.string().optional().describe('Optional query params JSON object, merged onto path query string'),
-    body: z.string().optional().describe('Optional JSON request body string'),
-    headers: z.string().optional().describe('Optional headers JSON object'),
+    query: z.string().optional().describe('Optional JSON-encoded query object string, e.g. {"limit":1,"filter":{"status":{"_eq":"ready"}}}; merged onto the path query string.'),
+    body: z.string().optional().describe('Optional JSON request body string, e.g. {"title":"Example"}.'),
+    headers: z.string().optional().describe('Optional JSON-encoded headers object string.'),
     useAuth: z.boolean().optional().default(true).describe('Attach MCP admin Bearer token. Set false to test public access.'),
   },
   async ({ method, path, query, body, headers, useAuth }) => {

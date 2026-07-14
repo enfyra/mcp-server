@@ -125,6 +125,45 @@ test('searchAdminExtensions keeps weak agents on the focused admin UI locator pa
   }
 });
 
+test('searchRuntimeZone uses live metadata for zone projections and indexes folder slugs', async () => {
+  const restore = installFetchMock();
+  try {
+    initAuth(apiUrl, 'efy_pat_test');
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith('/auth/token/exchange')) {
+        return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 600_000 });
+      }
+      if (url.endsWith('/metadata/enfyra_folder')) {
+        return jsonResponse({ data: { columns: [{ name: 'id' }, { name: 'name' }, { name: 'slug' }, { name: 'description' }], relations: [] } });
+      }
+      if (url.endsWith('/metadata/enfyra_oauth_config')) {
+        return jsonResponse({ data: { columns: [{ name: 'id' }, { name: 'provider' }, { name: 'redirectUri' }, { name: 'sourceCode' }, { name: 'appCallbackUrl' }, { name: 'autoSetCookies' }, { name: 'scriptLanguage' }, { name: 'isEnabled' }, { name: 'description' }], relations: [] } });
+      }
+      if (url.includes('/metadata/')) return jsonResponse({ data: { columns: [{ name: 'id' }], relations: [] } });
+      if (url.includes('/enfyra_folder?')) {
+        assert.match(url, /fields=id%2Cname%2Cslug%2Cdescription/);
+        return jsonResponse({ data: [{ id: 'folder-1', name: 'Fixture', slug: 'luna-storage-fixture', description: 'safe fixture' }] });
+      }
+      if (url.includes('/enfyra_oauth_config?')) {
+        assert.doesNotMatch(url, /_id/);
+        return jsonResponse({ data: [{ id: 1, provider: 'github', description: 'OAuth test' }] });
+      }
+      return jsonResponse({ data: [] });
+    };
+
+    const storage = await searchRuntimeZone(apiUrl, { zone: 'storage_file', query: 'luna-storage-fixture' });
+    assert.equal(storage.results[0].tableName, 'enfyra_folder');
+    assert.equal(storage.results[0].id, 'folder-1');
+
+    const auth = await searchRuntimeZone(apiUrl, { zone: 'auth_security', query: 'github' });
+    assert.equal(auth.results[0].tableName, 'enfyra_oauth_config');
+    assert.equal(auth.readErrors.some((entry) => entry.tableName === 'enfyra_oauth_config'), false);
+  } finally {
+    restore();
+  }
+});
+
 test('debugFieldExposure resolves unpublished deep field paths and returns escalation guidance', async () => {
   const restore = installFetchMock();
   try {
