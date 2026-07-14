@@ -9,6 +9,6 @@ AGENTS.md
 .mcp.json
 .cursor/
 .zcode/
-.codex/config.toml
+.codex
 package-lock.json
 benchmark/
