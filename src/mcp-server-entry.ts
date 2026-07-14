@@ -75,7 +75,7 @@ function assertExtensionReadFields(tableName: string, fields?: string[]) {
   if (!requestsSourceCode) return;
   throw new Error([
     'enfyra_extension stores editable Vue SFC extension source in `code`, not `sourceCode`.',
-    '`sourceCode` belongs to dynamic server script records such as handlers, hooks, flow steps, websocket handlers, GraphQL resolvers, and bootstrap scripts.',
+    '`sourceCode` belongs to dynamic server script records such as handlers, hooks, flow steps, websocket handlers, OAuth provider provisioning, and bootstrap scripts.',
     'For admin UI lookup, use search_admin_extensions(mode="search") then search_admin_extensions(mode="inspect").',
     'For focused extension edits, use patch_extension_code or update_extension_code.',
     'If you intentionally read raw extension records, request fields such as ["id","name","type","version","code"].',
@@ -98,6 +98,7 @@ import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './lib/tool-routing.js
 import { getSupportedColumnTypesFromMetadata, registerTableTools } from './lib/table-tools.js';
 import { registerPlatformOperationTools, validateExtensionCode } from './lib/platform-operation-tools.js';
 import { registerRuntimeZoneTools } from './lib/runtime-zone-tools.js';
+import { registerDynamicRepositoryBuilder } from './lib/dynamic-repository-builder.js';
 import { parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
 import {
   assertDynamicCodeKnowledgeAck,
@@ -302,7 +303,7 @@ const SCRIPT_BACKED_TABLES = [
   'enfyra_flow_step',
   'enfyra_websocket_event',
   'enfyra_websocket',
-  'enfyra_graphql',
+  'enfyra_oauth_config',
   'enfyra_bootstrap_script',
 ] as const;
 const SCRIPT_BACKED_TABLE_SET = new Set(SCRIPT_BACKED_TABLES);
@@ -870,16 +871,14 @@ function scriptRecordLabel(tableName, record) {
   const route = record.route?.path || null;
   const flow = record.flow?.name || null;
   const gateway = record.gateway?.path || null;
-  const gqlTable = record.table?.name || null;
   return {
     tableName,
     id: getId(record),
-    key: record.key || record.name || record.eventName || null,
+    key: record.key || record.name || record.eventName || record.provider || null,
     route,
     method,
     flow,
     gateway,
-    gqlTable,
   };
 }
 
@@ -892,7 +891,7 @@ function scriptTraceFields(tableName) {
     enfyra_flow_step: `${common},flow.id,flow.name`,
     enfyra_websocket_event: `${common},gateway.id,gateway.path`,
     enfyra_websocket: `${common},path`,
-    enfyra_graphql: `${common},table.id,table.name`,
+    enfyra_oauth_config: `${common},provider,redirectUri,appCallbackUrl,autoSetCookies,isEnabled`,
     enfyra_bootstrap_script: common,
   };
   return byTable[tableName] || '*';
@@ -1415,6 +1414,11 @@ server.tool(
           data: ['@BODY event payload', '@DATA event payload', '@REQ websocket request metadata', '@API request metadata', '@USER if authenticated', '@HELPERS', '@FETCH', '@SOCKET reply/join/leave/disconnect/emit helpers/roomSize'],
           resultBehavior: 'Client ack receives queued state first; handler result is emitted asynchronously as ws:result/ws:error with requestId.',
         },
+        oauthUserProvisioning: {
+          runs: 'Before a new OAuth identity creates its enfyra_user row.',
+          data: ['@REPOS.main scoped to enfyra_user', '@HELPERS', '@FETCH', '@STORAGE', '@CACHE'],
+          resultBehavior: 'Return a plain object of additional user fields. Provider identity fields are merged afterward and take precedence. The script has no authenticated @USER and should not return a user response.',
+        },
         graphqlResolver: {
           runs: 'Generated GraphQL resolver delegates to dynamic repo/query services.',
           data: ['GraphQL request context', 'Bearer auth user', 'dynamic repositories'],
@@ -1428,7 +1432,7 @@ server.tool(
       },
       helpers: {
         repos: {
-          scopes: '$repos.main is the secure repository for the route main table and preserves normal route query behavior. For explicit table access in custom handlers, prefer #table_name or @REPOS.<table> and treat it as a trusted/internal repository: select exact fields, enforce authorization, and return a shaped payload. Do not use @REPOS.secure.<table>; MCP save guards reject it because it is not callable on all current runtimes.',
+          scopes: '$repos.main is the secure repository for the route main table and preserves normal route query behavior. For explicit user-facing table access, use #secure.table_name or @REPOS.secure.table_name so field permissions remain enforced. Reserve #table_name or @REPOS.table_name for trusted internal operations that intentionally bypass field permissions.',
           security: 'Trusted repos can bypass normal exposure boundaries, including unpublished columns and private relations. If trusted access is necessary, always request explicit fields, enforce route access plus owner/tenant/member checks, and project/sanitize the result before returning it.',
           sensitiveQuerySurface: 'Filters, sort helpers, counts, and aggregate values on unpublished fields or private relations can leak information even when the value is not selected. Do not expose aggregate, _max, _min, _count, or predicate-oracle behavior over hidden fields in generated user-facing endpoints.',
           mutationReturnShape: '$repos.<table>.create({ data }) and $repos.<table>.update({ id, data }) return a collection-shaped result: { data: [...], count? }. data is always an array for create/update, even for one created/updated record. If a script needs the single record object, it must read result.data[0] or result.data?.[0] ?? null.',
@@ -1770,7 +1774,7 @@ server.tool(
   'get_script_source',
   [
     'Fetch the full editable source for one script-backed metadata record without preview truncation.',
-    'Use this before reviewing or patching long handlers, hooks, flow steps, websocket scripts, GraphQL scripts, or bootstrap scripts.',
+    'Use this before reviewing or patching long handlers, hooks, flow steps, websocket scripts, OAuth provisioning scripts, or bootstrap scripts.',
   ].join(' '),
   {
     tableName: z.enum(SCRIPT_BACKED_TABLES).describe('Script-backed table to read'),
@@ -1870,7 +1874,7 @@ server.tool(
   'update_script_source',
   [
     'Update sourceCode on a script-backed record without forcing the caller to JSON-escape long code.',
-    'Use this for enfyra_flow_step, enfyra_route_handler, enfyra_pre_hook, enfyra_post_hook, enfyra_websocket_event, enfyra_websocket, enfyra_graphql, and enfyra_bootstrap_script.',
+    'Use this for enfyra_flow_step, enfyra_route_handler, enfyra_pre_hook, enfyra_post_hook, enfyra_websocket_event, enfyra_websocket, enfyra_oauth_config, and enfyra_bootstrap_script.',
     'The tool validates sourceCode through /admin/script/validate before saving and never accepts compiledCode.',
   ].join(' '),
   {
@@ -1881,7 +1885,7 @@ server.tool(
       'enfyra_flow_step',
       'enfyra_websocket_event',
       'enfyra_websocket',
-      'enfyra_graphql',
+      'enfyra_oauth_config',
       'enfyra_bootstrap_script',
     ]).describe('Script-backed table to update'),
     id: z.string().describe('Record ID to update'),
@@ -2164,11 +2168,11 @@ server.tool(
   'run_admin_test',
   [
     'Run an Enfyra admin test without saving metadata. Wraps POST /admin/test/run.',
-    'Kinds: flow_step, websocket_event, websocket_connection. Use this to validate flow/websocket script behavior before creating records.',
+    'Kinds: script, flow_step, websocket_event, websocket_connection. Use this to validate dynamic script, flow, or websocket behavior before creating records.',
   ].join(' '),
   {
-    kind: z.enum(['flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
-    body: z.string().describe('JSON body for the test. Include type/config for flow_step or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
+    kind: z.enum(['script', 'flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
+    body: z.string().describe('JSON body for the test. Include script and optional context for script; type/config for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
   },
   async ({ kind, body }) => {
     const parsed = body ? JSON.parse(body) : {};
@@ -2714,6 +2718,59 @@ server.tool(
   },
 );
 
+server.tool(
+  'test_graphql',
+  [
+    'Execute a real GraphQL operation against the configured Enfyra /graphql endpoint.',
+    'Use this after set_table_graphql or when verifying generated query/mutation behavior. GraphQL errors are returned as structured response data even when HTTP status is 200.',
+  ].join(' '),
+  {
+    query: z.string().describe('GraphQL query or mutation document.'),
+    variables: z.record(z.any()).optional().describe('GraphQL variables as a native JSON object.'),
+    operationName: z.string().optional().describe('Optional operation name when the document contains multiple operations.'),
+    useAuth: z.boolean().optional().default(true).describe('Attach the MCP admin Bearer token. Set false to verify anonymous GraphQL behavior.'),
+  },
+  async ({ query, variables, operationName, useAuth }) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (useAuth) headers.Authorization = `Bearer ${await getValidToken(ENFYRA_API_URL)}`;
+    const started = Date.now();
+    const response = await fetch(`${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        query,
+        ...(variables ? { variables } : {}),
+        ...(operationName ? { operationName } : {}),
+      }),
+    });
+    const contentType = response.headers.get('content-type') || '';
+    const responseText = await response.text();
+    let responseBody: any = responseText;
+    if (contentType.includes('application/json') && responseText) responseBody = JSON.parse(responseText);
+    const errors = Array.isArray(responseBody?.errors) ? responseBody.errors : [];
+    return jsonContent({
+      action: 'graphql_tested',
+      request: {
+        endpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`,
+        operationName: operationName || null,
+        authenticated: !!useAuth,
+        variableNames: Object.keys(variables || {}),
+      },
+      response: {
+        ok: response.ok && errors.length === 0,
+        httpOk: response.ok,
+        status: response.status,
+        statusText: response.statusText,
+        durationMs: Date.now() - started,
+        errorCount: errors.length,
+        data: responseBody?.data ?? null,
+        errors,
+        raw: responseBody && typeof responseBody === 'object' ? undefined : responseBody,
+      },
+    });
+  },
+);
+
 server.tool('get_all_routes', 'List route definitions with minimal fields. Complete route lists must pass either limit or all=true. If search is provided without limit, the tool returns a bounded lookup window of 10 matches. Call inspect_route for handlers/hooks/permissions detail.', {
   includeDisabled: z.boolean().optional().default(false).describe('Include disabled routes'),
   search: z.string().optional().describe('Optional path or table substring filter. Use this before creating a route to check duplicates.'),
@@ -2834,7 +2891,7 @@ server.tool(
     'Attach to the route the user cares about (`get_all_routes`): typically a path from `create_route`, not a spurious table created only for handlers.',
     'Use sourceCode, not logic/name. Enfyra compiles sourceCode into compiledCode; do not send compiledCode.',
     'Handler code runs inside a sandbox with $ctx. Use macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503, @SOCKET, @PKGS, @LOGS, @SHARE.',
-    'Call discover_script_contexts first. For explicit table repos use #table_name or @REPOS.table_name with exact fields and auth checks; do not use @REPOS.secure.<table> because MCP rejects that non-portable accessor before save.',
+    'Call discover_script_contexts first. For explicit user-facing table repos use #secure.table_name or @REPOS.secure.table_name; use #table_name/@REPOS.table_name only for intentional trusted internal access.',
     'Or use $ctx directly: $ctx.$body, $ctx.$repos.main.find(), $ctx.$helpers.$bcrypt.hash(), etc.',
     'require("pkg") works for installed Server packages. console.log() writes to $share.$logs.',
   ].join(' '),
@@ -2844,7 +2901,7 @@ server.tool(
       .describe('Single enfyra_method.name to create. Prefer this for one handler.'),
     methods: z.array(z.string()).optional()
       .describe('Batch create multiple handlers. Use only when the same sourceCode applies to every method.'),
-    sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
+    sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic. Use @REPOS.main for the route main table or #secure.table_name/@REPOS.secure.table_name for explicit user-facing access; trusted repos require intentional bypass and explicit authorization.'),
     scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
     timeout: z.number().optional().describe('Timeout in ms (default: system DEFAULT_HANDLER_TIMEOUT, usually 30000)'),
     globalRulesAckKey: globalRulesAckParam(z),
@@ -3191,6 +3248,7 @@ server.tool(
 registerTableTools(server, ENFYRA_API_URL);
 registerPlatformOperationTools(server, ENFYRA_API_URL);
 registerRuntimeZoneTools(server, ENFYRA_API_URL);
+registerDynamicRepositoryBuilder(server);
 
 // ============================================================================
 // CACHE & SYSTEM TOOLS

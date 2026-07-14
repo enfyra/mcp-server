@@ -36,6 +36,7 @@ export function buildMcpServerInstructions(apiBaseUrl, options: McpInstructionOp
     '- For a fully specified, non-destructive request, do not add a plan-only pass: after the required narrow reads and acknowledgement, call the operation/workflow tool once with its atomic or `applyAll` path. Use plan-only/apply-one-step only for ambiguity, external approval, or meaningful production risk.',
     '- Destructive operations remain preview-first and require explicit approval. Verify through the narrow verifier only when the write tool did not already validate or smoke-test atomically.',
     '- Keep security decisions explicit: route access is not owner/tenant authorization. For sensitive reads, preserve the client query shape and merge row scope only into `@QUERY.filter`.',
+    '- For dynamic repository code, call `build_dynamic_repository_usage` to choose secure-main, secure-explicit, or intentional trusted-explicit access instead of composing repository macros from memory.',
     '- For a domain-specific rule, use `get_enfyra_required_knowledge`, `discover_script_contexts`, `discover_query_capabilities`, `get_schema_design_context`, `get_extension_theme_contract`, or a single example category—not this startup message.',
   ].join('\n');
 }

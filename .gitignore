@@ -8,6 +8,7 @@ CLAUDE.md
 AGENTS.md
 .mcp.json
 .cursor/
+.zcode/
 .codex/config.toml
 package-lock.json
 benchmark/

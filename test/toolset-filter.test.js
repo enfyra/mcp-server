@@ -40,10 +40,14 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('ensure_route_rate_limit', 'guided'), true);
   assert.equal(isToolVisibleInToolset('flow_workflow', 'guided'), true);
   assert.equal(isToolVisibleInToolset('plan_flow_steps', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('test_graphql', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('build_dynamic_repository_usage', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('create_handler', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('create_post_hook', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('list_methods', 'guided'), true);
   assert.equal(isToolVisibleInToolset('ensure_script_flow_step', 'guided'), false);
   assert.equal(isToolVisibleInToolset('ensure_manual_flow', 'guided'), false);
   assert.equal(isToolVisibleInToolset('create_route', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('create_handler', 'guided'), false);
   assert.equal(isToolVisibleInToolset('reload_all', 'guided'), false);
   assert.equal(isToolVisibleInToolset('get_log_content', 'guided'), false);
 });

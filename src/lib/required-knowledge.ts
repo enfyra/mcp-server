@@ -1,8 +1,8 @@
 export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONES::SCHEMA-DESIGN-CONTEXT::RECORD-BATCH::20260704H';
-export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-THROW-CONTRACT::RAW-NUMERIC::SEMANTIC-NAMED::20260704A';
+export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SECURE-EXPLICIT::20260714A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260708A';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-08.global-rules-v9-app-composable-contracts';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-07-14.secure-repositories-graphql-metadata';
 
 export function globalRulesAckParam(z) {
   return z.string().describe('Required global-rules acknowledgement key from get_enfyra_required_knowledge. Call that tool, read the global Enfyra MCP rules, then pass globalRulesAckKey exactly.');
@@ -83,11 +83,11 @@ const GLOBAL_RULES_SECTIONS = [
       'Use search_runtime_zone with zone=api_runtime for routes, handlers, pre-hooks, post-hooks, guards, guard rules, and route permissions.',
       'Use search_runtime_zone with zone=flow_runtime for flows and flow steps.',
       'Use search_runtime_zone with zone=websocket_runtime for websocket gateways and events.',
-      'Use search_runtime_zone with zone=graphql_runtime for GraphQL exposure and resolver source.',
+      'Use search_runtime_zone with zone=graphql_runtime for table GraphQL exposure metadata.',
       'Use search_runtime_zone with zone=schema_data for tables, columns, relations, field permissions, and column rules.',
       'Use search_runtime_zone with zone=package_runtime for installed app/server packages.',
       'Use search_runtime_zone with zone=storage_file for storage configs, folders, files, public asset state, and file permissions.',
-      'Use search_runtime_zone with zone=auth_security for roles, route permissions, field permissions, guards, OAuth configs, and access surfaces.',
+      'Use search_runtime_zone with zone=auth_security for users, roles, route/field permissions, guards, OAuth configs, linked OAuth accounts, and access surfaces.',
       'After search_runtime_zone mode=search, call search_runtime_zone mode=inspect with the returned nextInspect.input before editing source or metadata.',
       'Use zone-specific write tools after inspection; do not mutate DB-backed runtime artifacts with generic CRUD when a business operation tool exists.',
     ],
@@ -152,9 +152,9 @@ const DYNAMIC_CODE_SECTIONS = [
     id: 'secure-vs-trusted-repositories',
     rules: [
       '@REPOS.main is the secure repository for the current route main table and preserves normal route query behavior.',
-      '@REPOS.secure.<table> is not portable across current Enfyra runtimes and MCP save tools reject it before saving sourceCode.',
-      'For explicit-table custom handlers, use #table_name or @REPOS.<table> with exact fields, relation filters, explicit authorization checks, and shaped/sanitized output.',
-      '@REPOS.<table> is the trusted internal repository. It may read/write hidden fields, so never return raw rows or broad projections.',
+      'For an explicit table in user-facing dynamic code, use #secure.table_name or @REPOS.secure.table_name so field-permission enforcement remains enabled.',
+      'Use #table_name or @REPOS.table_name only for trusted internal operations that intentionally need to bypass field permissions.',
+      'Trusted repositories may read/write hidden fields, so require explicit fields, relation filters, authorization checks, and shaped/sanitized output.',
       'Never return raw trusted-repository records to users. Project or sanitize output before returning it.',
     ],
   },
@@ -180,13 +180,15 @@ const DYNAMIC_CODE_SECTIONS = [
     rules: [
       'Use sourceCode and scriptLanguage; never send compiledCode.',
       'Prefer macros such as @BODY, @QUERY, @PARAMS, @USER, @REQ, @RES, @REPOS, @HELPERS, @STORAGE, @SOCKET, and @THROW* when available.',
+      'Call build_dynamic_repository_usage for list, find-one, create, update, or delete code instead of composing secure/trusted repository syntax and result shapes from memory.',
+      'An enfyra_oauth_config sourceCode script runs before a new OAuth user insert, has no authenticated @USER, and must return a plain object of additional user fields. Provider identity fields are merged afterward and take precedence.',
       'Repository reads use filter, not where.',
       'For dynamic file upload progress, clients send x-enfyra-upload-id on authenticated multipart requests and listen for $system:upload:progress; @STORAGE.$upload and blob-replacing @STORAGE.$update do not accept onProgress.',
-      'Inside dynamic scripts, prefer #table_name.find with limit:1 and explicit fields for one-record lookups. If a primary-key id filter fails in a runtime, fetch a small bounded candidate set by a unique business field or use the canonical route/main-table context; do not keep retrying @REPOS.<table>.find id filter shapes.',
+      'Inside user-facing dynamic scripts, prefer #secure.table_name.find with limit:1 and explicit fields for one-record lookups. If a primary-key id filter fails in a runtime, fetch a small bounded candidate set by a unique business field or use the canonical route/main-table context; do not keep retrying repository id filter shapes.',
       'Relation filters use relation propertyName values, not physical FK-shaped names. Use { incident: { id: { _eq: id } } }, not { incidentId: { _eq: id } }.',
-      'Do not use @REPOS.secure.<table> or @REPOS.secure["table"] in generated sourceCode; use @REPOS.main when the route has a main table or #table_name/@REPOS.table_name with explicit fields and auth checks.',
+      'Use @REPOS.main for the route main table and #secure.table_name or @REPOS.secure.table_name for explicit user-facing table access. Reserve #table_name/@REPOS.table_name for trusted internal work that intentionally bypasses field permissions.',
       'When using repository find({ deep }) in handlers/hooks/flows, include each deep relation name in top-level fields, then choose nested fields under deep.<relation>.fields.',
-      'Repository calls are async. Always await #table.find/create/update/delete/exists and @REPOS.table.find/create/update/delete/exists; reads return { data: [...], meta? }.',
+      'Repository calls are async. Always await secure and trusted repository find/create/update/delete/exists calls; reads return { data: [...], meta? }.',
       'Create/update repository calls return collection-shaped data arrays; read result.data?.[0] for a single row.',
       'For intentional HTTP errors, numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message).',
       'When numeric helpers include details, pass an object or array such as @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut.',
@@ -211,6 +213,7 @@ const EXTENSION_SECTIONS = [
       'Extension roots render inside the Enfyra admin app shell. Do not add root-level page padding such as p-4 sm:p-6 xl:p-8.',
       'Page extensions should be full-bleed by default and responsive from the first version.',
       'Do not wrap whole pages in decorative cards; use cards only for repeated items, modals, or genuinely framed tools.',
+      'Register dynamic page header actions inside onMounted after setup refs and handlers exist. Use the page_shell builder instead of writing immediate registry callbacks from memory.',
       'Use NuxtLink or Nuxt UI components with :to for visible navigation links; reserve navigateTo for imperative side effects.',
       'Admin extension links for record management should point to /data/<table>, not public website paths stored on records.',
     ],
@@ -222,10 +225,12 @@ const EXTENSION_SECTIONS = [
       'Editable extension source is enfyra_extension.code. Do not request or write enfyra_extension.sourceCode.',
       'Do not call resolveComponent() in extension SFCs. Use auto-injected components such as <UButton>, <UBadge>, <PermissionGate>, and <Widget> directly in the template so the app/compiler resolves them correctly.',
       'Load app packages with getPackages(["package-name"]) inside extension runtime code.',
-      'For generated high-contract UI in guided mode, call build_extension_ui with the matching kind after reading this acknowledgement; it lazy-dispatches drawer, modal, page shell, permission gate, empty state, resource list, form editor, widget, menu notification, account panel item, tabs, upload modal, notify, confirm, runtime review, theme classes, theme review, or full review contracts without loading every builder tool at startup.',
+      'For generated high-contract UI in guided mode, call build_extension_ui with the matching kind after reading this acknowledgement; it lazy-dispatches drawer, modal, page shell, permission gate, empty state, resource list, resource grid, form editor, widget, menu notification, account panel item, tabs, upload modal, notify, confirm, runtime review, theme classes, theme review, or full review contracts without loading every builder tool at startup.',
       'For extension useApi code, call build_extension_api_usage with operation=list, find_one, create, update, delete, batch_update, or batch_delete. Do not write useApi path/id/body shapes from memory.',
       'For an ordinary destructive action, call build_extension_ui kind=confirm. It generates useConfirm() -> accepted mutation -> refresh; do not use window.confirm, window.alert, alert, or prompt. Use CommonModal directly only for richer confirmation content or form fields.',
       'CommonResourceListFrame is supported in extension runtime and renders its default slot when loading is false and hasItems is true. Do not remove it to speculate about swallowed slots; inspect the source artifact, hasItems/items expressions, and API response shape first.',
+      'Use build_extension_ui kind=resource_grid for workboards, catalogs, dashboards, and card collections. It owns eapp-page-constrained-wide, CommonResourceListFrame variant="plain", one/two/three-column responsive breakpoints, semantic card surfaces, and list loading/empty behavior; use resource_list for dense operational rows.',
+      'Dynamic extension templates expose the app empty-state component as <EmptyState>, not <CommonEmptyState>. Prefer the empty_state, resource_list, or resource_grid builder instead of writing either tag from memory.',
       'For theme choices, call build_extension_ui kind=theme_classes with an intent such as neutral_surface, primary_identity, primary_soft_icon_tile, status_success, primary_action, secondary_action, divider, or text instead of inventing classes from memory.',
       'Use build_extension_ui kind=runtime_review, theme_review, or review before saving generated snippets that include useApi, useNotify, theme classes, drawers, modals, fields, lists, tabs, upload modals, shell registry code, or native buttons.',
       'For same-version edits to an existing extension, inspect the extension first and use the generated /tmp/enfyra-mcp-sources artifact when snippets are not enough. Edit that artifact and apply its contents with update_extension_code, or use patch_extension_code for a focused exact patch. Do not regenerate the full Vue SFC for a small bug fix, styling adjustment, or contract correction unless the user explicitly asks for a rewrite or version-changing redesign.',
@@ -240,7 +245,7 @@ const EXTENSION_SECTIONS = [
       'Do not write useApi shapes from memory. Call build_extension_api_usage for known-good list/find_one/create/update/delete/batch snippets.',
       'Do not write useNotify shapes from memory. Call build_extension_ui kind=notify for known-good notification snippets.',
       'Call build_extension_ui kind=runtime_review or kind=review before saving extension code that includes useApi, useNotify, getPackages, or package loading.',
-      'Extension validation rejects static imports, useToast/useNotify.add misuse, and JSON.stringify useApi options.',
+      'Extension validation rejects static imports, useToast/useNotify.add misuse, JSON.stringify useApi options, unused execute aliases, incorrect modal v-model bindings, unavailable runtime aliases, and script-block callbacks that reassign const refs instead of mutating ref.value. Template expressions remain Vue-auto-unwrapped.',
     ],
   },
 ];
@@ -248,7 +253,7 @@ const EXTENSION_SECTIONS = [
 const SCOPED_PURPOSES: Record<KnowledgeScope, string> = {
   full: 'Read this before mutating Enfyra metadata, schema, routes, permissions, menus, packages, cache state, dynamic server code, or extension UI through MCP.',
   schema: 'Read this before mutating Enfyra metadata, schema, table data, routes, permissions, guards, or cache state through MCP.',
-  'dynamic-code': 'Read this before writing or mutating dynamic server code (handlers, hooks, flow steps, websocket events, GraphQL resolvers, bootstrap scripts) through MCP.',
+  'dynamic-code': 'Read this before writing or mutating dynamic server code (handlers, hooks, flow steps, websocket events, OAuth user provisioning, bootstrap scripts) through MCP.',
   extension: 'Read this before writing or mutating Enfyra admin extension UI, menus, or shell registrations through MCP.',
   flow: 'Read this before creating or mutating Enfyra flows and flow steps through MCP.',
 };

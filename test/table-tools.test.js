@@ -112,6 +112,26 @@ test('extension local validation rejects manual component resolution mistakes', 
     () => validateExtensionCodeLocally('<script setup>const api = useApi("/notes", { query: JSON.stringify({ filter: { id: { _eq: 1 } } }) })</script><template><div /></template>'),
     /Invalid extension runtime contract/,
   );
+  assert.throws(
+    () => validateExtensionCodeLocally('<script setup>const { execute: loadNotes } = useApi("/notes")</script><template><div /></template>'),
+    /execute alias loadNotes is never used/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<template><UModal v-model="open"><template #body>Body</template></UModal></template>'),
+    /must bind v-model:open/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<template><CommonEmptyState title="No notes" /></template>'),
+    /not registered in the dynamic extension runtime/,
+  );
+  assert.throws(
+    () => validateExtensionCodeLocally('<script setup>const modalOpen = ref(false); const action = { onClick: () => (modalOpen = true) }</script><template><div /></template>'),
+    /Assign modalOpen\.value/,
+  );
+  assert.deepEqual(
+    validateExtensionCodeLocally('<script setup>const modalOpen = ref(false); const action = { onClick: () => (modalOpen.value = true) }; const { execute: loadNotes } = useApi("/notes"); onMounted(() => loadNotes())</script><template><CommonModal v-model:open="modalOpen" :cancel-action="{ label: \'Cancel\', onClick: () => (modalOpen = false) }"><template #body><EmptyState title="No notes" /></template></CommonModal></template>'),
+    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
+  );
   assert.deepEqual(
     validateExtensionCodeLocally('<script setup>const notes = await useApi("/notes")</script><template><div /></template>'),
     { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
@@ -190,6 +210,7 @@ test('extension component builders enforce drawer and modal contracts', async ()
     buildExtensionModalSnippet,
     buildExtensionPageShellSnippet,
     buildExtensionPermissionGateSnippet,
+    buildExtensionResourceGridSnippet,
     buildExtensionResourceListSnippet,
     buildExtensionTabsSnippet,
     buildExtensionUploadModalSnippet,
@@ -425,6 +446,14 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(pageShell.snippet, /usePageHeaderRegistry/);
   assert.match(pageShell.snippet, /useHeaderActionRegistry/);
   assert.match(pageShell.snippet, /registerHeaderActions/);
+  assert.match(pageShell.snippet, /onMounted\(\(\) => \{\n  registerHeaderActions\(/);
+  assert.throws(
+    () => buildExtensionPageShellSnippet({
+      title: 'Bad action',
+      headerActions: [{ id: 'open', label: 'Open', onClick: '() => (modalOpen = true)' }],
+    }),
+    /modalOpen\.value/,
+  );
 
   const gate = buildExtensionPermissionGateSnippet({
     route: '/notes',
@@ -439,7 +468,8 @@ test('extension component builders enforce drawer and modal contracts', async ()
     description: 'Create the first note.',
     icon: 'lucide:sticky-note',
   });
-  assert.match(empty.snippet, /<CommonEmptyState/);
+  assert.equal(empty.component, 'EmptyState');
+  assert.match(empty.snippet, /<EmptyState/);
   assert.match(empty.snippet, /variant="naked"/);
 
   const list = buildExtensionResourceListSnippet({
@@ -453,6 +483,19 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(list.snippet, /<CommonResourceListFrame/);
   assert.match(list.snippet, /<CommonResourceListItem/);
   assert.match(list.snippet, /v-for="note in notes"/);
+
+  const grid = buildExtensionResourceGridSnippet({
+    itemsExpression: 'notes',
+    itemName: 'note',
+    cardBody: '<h2>{{ note.title }}</h2><UButton @click="openEdit(note)">Edit</UButton>',
+    emptyTitle: 'No notes yet',
+  });
+  assert.equal(grid.component, 'CommonResourceListFrame');
+  assert.match(grid.snippet, /eapp-page-constrained-wide/);
+  assert.match(grid.snippet, /variant="plain"/);
+  assert.match(grid.snippet, /grid gap-4 md:grid-cols-2 xl:grid-cols-3/);
+  assert.match(grid.snippet, /v-for="note in notes"/);
+  assert.match(grid.snippet, /<UButton @click="openEdit\(note\)">/);
 
   const formEditor = buildExtensionFormEditorSnippet({
     tableName: 'notes',
@@ -514,14 +557,12 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(upload.companionSnippet, /useFileUploadProgress/);
 });
 
-test('dynamic script guard rejects non-portable secure repo accessor', () => {
-  assert.throws(
-    () => validatePortableScriptSource('const row = await @REPOS.secure.orders.find({ filter: {} })'),
-    /must not use @REPOS\.secure\.<table>/,
+test('dynamic script guard accepts secure explicit-table repositories', () => {
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('const row = await @REPOS.secure.orders.find({ fields: ["id"], filter: {} })'),
   );
-  assert.throws(
-    () => validatePortableScriptSource('const row = await @REPOS.secure["orders"].find({ filter: {} })'),
-    /must not use @REPOS\.secure\.<table>/,
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('const row = await #secure.orders.find({ fields: ["id"], filter: {} })'),
   );
   assert.doesNotThrow(
     () => validatePortableScriptSource('const row = await #orders.find({ fields: ["id"], filter: {} })'),
@@ -576,6 +617,9 @@ test('dynamic script guard locks numeric throw helper details contract', () => {
 test('workflow routing gives progressive tool plans and negative boundaries', () => {
   assert.ok(WORKFLOW_SURFACES.includes('extension'));
   assert.ok(WORKFLOW_SURFACES.includes('api-endpoint'));
+  assert.ok(WORKFLOW_SURFACES.includes('storage-file'));
+  assert.ok(WORKFLOW_SURFACES.includes('identity-access'));
+  assert.ok(WORKFLOW_SURFACES.includes('platform-config'));
   assert.ok(listWorkflowSurfaces().length >= 10);
 
   const extension = discoverWorkflowRoutes({
@@ -1870,6 +1914,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_permission_gate['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_empty_state['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_resource_list['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]build_extension_resource_grid['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_form_editor['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_widget['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]build_extension_menu_notification['"]/);
@@ -1935,8 +1980,9 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /Generate a contract-safe CommonModal\/UModal Vue snippet/);
   assert.match(platformTools, /Generate page-header and shell-header-action script setup code/);
   assert.match(platformTools, /Generate a PermissionGate wrapper snippet/);
-  assert.match(platformTools, /Generate a CommonEmptyState snippet/);
+  assert.match(platformTools, /Generate an EmptyState snippet/);
   assert.match(platformTools, /Generate a CommonResourceListFrame\/CommonResourceListItem snippet/);
+  assert.match(platformTools, /Generate a constrained responsive CommonResourceListFrame card grid/);
   assert.match(platformTools, /Generate a FormEditor\/FormEditorLazy snippet/);
   assert.match(platformTools, /Generate a Widget snippet/);
   assert.match(platformTools, /Generate useMenuNotificationRegistry registration code/);
@@ -2039,6 +2085,40 @@ test('test_flow_step uses unified admin test runner', () => {
   assert.doesNotMatch(entry, /fetchAPI\(ENFYRA_API_URL,\s*'\/admin\/flow\/test-step'/);
 });
 
+test('GraphQL uses generated resolvers instead of script-backed source records', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const runtimeZones = readFileSync(new URL('../src/lib/runtime-zone-tools.ts', import.meta.url), 'utf8');
+  const mutationGuards = readFileSync(new URL('../src/lib/mutation-guards.ts', import.meta.url), 'utf8');
+
+  const scriptTableBlock = entry.slice(
+    entry.indexOf('const SCRIPT_BACKED_TABLES'),
+    entry.indexOf('const SCRIPT_SOURCE_FIELDS'),
+  );
+  assert.doesNotMatch(scriptTableBlock, /enfyra_graphql/);
+  assert.doesNotMatch(mutationGuards.slice(0, mutationGuards.indexOf('export function parseRecordData')), /enfyra_graphql/);
+  assert.match(runtimeZones, /enfyra_graphql[^\n]+metadata/);
+  assert.doesNotMatch(runtimeZones, /enfyra_graphql[^\n]+sourceCode/);
+  assert.match(entry, /server\.tool\(\s*['"]test_graphql['"]/);
+});
+
+test('OAuth provider provisioning source is treated as a script-backed identity surface', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const guards = readFileSync(new URL('../src/lib/mutation-guards.ts', import.meta.url), 'utf8');
+  const zones = readFileSync(new URL('../src/lib/runtime-zone-tools.ts', import.meta.url), 'utf8');
+
+  assert.match(entry, /SCRIPT_BACKED_TABLES[\s\S]*'enfyra_oauth_config'/);
+  assert.match(guards, /SCRIPT_TABLES[\s\S]*'enfyra_oauth_config'/);
+  assert.match(entry, /oauthUserProvisioning/);
+  assert.match(zones, /enfyra_oauth_config[^\n]*sourceCode[^\n]*appCallbackUrl/);
+  assert.match(zones, /enfyra_user/);
+  assert.match(zones, /enfyra_oauth_account/);
+});
+
+test('run_admin_test exposes the backend generic script test kind', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  assert.match(entry, /kind: z\.enum\(\['script', 'flow_step', 'websocket_event', 'websocket_connection'\]/);
+});
+
 test('mcp log search matches dashed and dotted app log filenames', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   assert.match(entry, /\^app\[\.-\]/);
@@ -2137,9 +2217,9 @@ test('dynamic script guidance documents repository deep projection contract', ()
   assert.match(examples, /do not keep retrying @REPOS\.<table>\.find id filter shapes/);
   assert.match(examples, /top-level fields controls which parent properties appear/);
   assert.match(routing, /fields\+deep projection contract for script repository reads/);
-  assert.match(entry, /do not use @REPOS\.secure\.<table>/);
-  assert.match(platformTools, /@REPOS\.secure\.<table> is rejected as non-portable/);
-  assert.doesNotMatch(examples, /@REPOS\.secure\.chat_/);
+  assert.match(entry, /#secure\.table_name or @REPOS\.secure\.table_name/);
+  assert.match(platformTools, /#secure\.table_name or @REPOS\.secure\.table_name/);
+  assert.match(requiredKnowledge, /Reserve #table_name\/@REPOS\.table_name for trusted internal work/);
 });
 
 test('guidance rejects sql-like filter operators', () => {
@@ -2173,7 +2253,7 @@ test('list query tools require explicit limit or all intent except bounded locat
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const schemaSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-schema-data/SKILL.md', import.meta.url), 'utf8');
 
   assert.match(entry, /query_table requires either limit or all=true/);
   assert.match(entry, /get_all_routes requires either limit or all=true/);
@@ -2183,7 +2263,7 @@ test('list query tools require explicit limit or all intent except bounded locat
   assert.match(entry, /all: z\.boolean\(\)\.optional\(\)\.default\(false\)\.describe\('Return all matching rows by sending REST limit=0/);
   assert.match(instructions, /domain-specific rule/);
   assert.match(examples, /pass all: true instead of choosing an arbitrary page size such as 30 or 50/);
-  assert.match(readme, /Locator searches on `get_all_routes` and `get_all_tables` may omit `limit`/);
+  assert.match(schemaSkill, /Locator searches on `get_all_routes` and `get_all_tables` may omit `limit`/);
 });
 
 test('delete_tables accepts tableName or tableId and schema rules mention full-batch preflight', () => {
@@ -2251,8 +2331,8 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
   const payloadText = JSON.stringify(payload);
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260704H$/);
-  assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-THROW-CONTRACT/);
-  assert.equal(payload.version, '2026-07-08.global-rules-v9-app-composable-contracts');
+  assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
+  assert.equal(payload.version, '2026-07-14.secure-repositories-graphql-metadata');
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);
@@ -2319,24 +2399,25 @@ test('query examples distinguish relation fields from deep relation query option
 test('query guidance documents fields exclusion mode', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const schemaSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-schema-data/SKILL.md', import.meta.url), 'utf8');
   assert.match(examples, /fields=-compiledCode/);
   assert.match(examples, /fields=id,-compiledCode returns all readable fields except compiledCode/);
   assert.match(examples, /Dotted exclusions and deep relation fields use the same exclude-mode rule/);
   assert.match(instructions, /discover_query_capabilities/);
-  assert.match(readme, /`fields=-compiledCode` returns all readable fields except `compiledCode`/);
-  assert.match(readme, /`fields=-owner\.avatar`/);
+  assert.match(schemaSkill, /`fields=-compiledCode` excludes that field/);
+  assert.match(schemaSkill, /`fields=-owner\.avatar`/);
 });
 
 test('operator guidance avoids speculative warnings and physical FK generated code', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
-  const readme = readFileSync(new URL('../README.md', import.meta.url), 'utf8');
+  const dynamicSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-dynamic-code/SKILL.md', import.meta.url), 'utf8');
+  const schemaSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-schema-data/SKILL.md', import.meta.url), 'utf8');
   assert.match(instructions, /domain-specific rule/);
   assert.match(examples, /conversationId is accepted only as the room\/business identifier; persistence uses relation properties conversation and sender/);
   assert.match(examples, /Do not ask the client for senderId\. The sender relation is derived from @USER\.id/);
-  assert.match(readme, /`compiledCode` is generated from `sourceCode` and may differ textually/);
-  assert.match(readme, /use relation property names such as `conversation`, `sender`, and `member`/);
+  assert.match(dynamicSkill, /`compiledCode` is generated from source and may differ textually/);
+  assert.match(schemaSkill, /relation property names, not `relationId` fields/);
 });
 
 test('schema examples guide live types and relation mutation without stale update_table relation payloads', () => {

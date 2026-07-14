@@ -9,6 +9,9 @@ export const WORKFLOW_SURFACES = [
   'flow',
   'websocket',
   'graphql',
+  'storage-file',
+  'identity-access',
+  'platform-config',
   'package',
   'cache',
   'logs-debug',
@@ -239,14 +242,14 @@ export const TOOL_WORKFLOWS = [
     key: 'dynamic-script',
     title: 'Dynamic server code: handlers, hooks, scripts, or source patches',
     useWhen: [
-      'Writing or reviewing handler, hook, flow step, websocket, GraphQL, or bootstrap sourceCode.',
+      'Writing or reviewing handler, hook, flow step, websocket, or bootstrap sourceCode.',
       'Editing an existing script-backed metadata record.',
       'Debugging macro, repository, or validation behavior.',
     ],
     keywords: ['sourcecode', 'script', 'hook', 'pre hook', 'post hook', 'compiledcode', 'macro', 'repos', 'bootstrap'],
-    firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'search_runtime_zone'],
-    inspectTools: ['search_runtime_zone(mode=search, zone=api_runtime|flow_runtime|websocket_runtime|graphql_runtime)', 'search_runtime_zone(mode=inspect)', 'trace_metadata_usage', 'get_script_source', 'discover_script_contexts'],
-    knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts'],
+    firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'build_dynamic_repository_usage', 'search_runtime_zone'],
+    inspectTools: ['search_runtime_zone(mode=search, zone=api_runtime|flow_runtime|websocket_runtime)', 'search_runtime_zone(mode=inspect)', 'trace_metadata_usage', 'get_script_source', 'discover_script_contexts'],
+    knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'build_dynamic_repository_usage'],
     writeTools: ['patch_script_source', 'update_script_source', 'create_handler', 'create_pre_hook', 'create_post_hook', 'api_endpoint_workflow'],
     verifyTools: ['validate_dynamic_script', 'run_admin_test', 'test_rest_endpoint', 'test_flow_step'],
     avoidTools: [
@@ -267,6 +270,7 @@ export const TOOL_WORKFLOWS = [
     exampleCategories: ['handlers-hooks'],
     nextStepTemplate: [
       'Discover script context macros for the surface.',
+      'Generate repository access with build_dynamic_repository_usage instead of composing secure/trusted syntax from memory.',
       'Read existing source through trace_metadata_usage/get_script_source when patching.',
       'Validate source before save unless the chosen write tool already validates.',
       'Verify behavior with the route/test runner that matches the script surface.',
@@ -432,7 +436,7 @@ export const TOOL_WORKFLOWS = [
     inspectTools: ['discover_enfyra_system', 'inspect_table'],
     knowledgeTools: ['get_enfyra_required_knowledge for writes'],
     writeTools: ['set_table_graphql', 'update_tables'],
-    verifyTools: ['discover_enfyra_system'],
+    verifyTools: ['test_graphql', 'discover_enfyra_system'],
     avoidTools: [
       {
         tool: 'public_route_methods',
@@ -442,11 +446,105 @@ export const TOOL_WORKFLOWS = [
       },
     ],
     requiredAck: ['globalRulesAckKey for writes'],
-    exampleCategories: ['queries-deep'],
+    exampleCategories: ['graphql'],
     nextStepTemplate: [
       'Inspect the table and GraphQL enablement state.',
       'Use set_table_graphql for enablement changes.',
+      'Run test_graphql with an authenticated query and inspect GraphQL errors as data.',
       'Remember GraphQL table data requires Bearer auth even when REST is public.',
+    ],
+    recommendedScope: 'schema',
+  },
+  {
+    key: 'storage-file',
+    title: 'Files, folders, storage configuration, and file permissions',
+    useWhen: [
+      'Inspecting or configuring storage providers and folders.',
+      'Managing file metadata, public state, or file permissions.',
+      'Building browser upload behavior and progress handling.',
+    ],
+    keywords: ['file upload', 'upload progress', 'storage config', 'storage provider', 'folder', 'file permission', 'asset'],
+    firstTools: ['search_runtime_zone', 'get_enfyra_examples'],
+    inspectTools: ['search_runtime_zone(mode=search, zone=storage_file)', 'search_runtime_zone(mode=inspect)', 'inspect_table', 'query_table'],
+    knowledgeTools: ['get_enfyra_required_knowledge for writes', 'get_enfyra_examples(category=files)'],
+    writeTools: ['create_records', 'update_records', 'delete_records'],
+    verifyTools: ['search_runtime_zone', 'query_table'],
+    avoidTools: [
+      {
+        tool: 'create_records on enfyra_file for binary upload',
+        when: 'uploading file bytes from a browser or dynamic script',
+        useInstead: 'multipart /enfyra/enfyra_file or @STORAGE helpers',
+        reason: 'File metadata CRUD does not provide object upload, rollback, or progress behavior.',
+      },
+    ],
+    requiredAck: ['globalRulesAckKey for metadata writes'],
+    exampleCategories: ['files'],
+    nextStepTemplate: [
+      'Search storage_file runtime state, then inspect the selected record/table.',
+      'Use the files examples for browser proxy, multipart, progress, and @STORAGE contracts.',
+      'Use generic record tools only for metadata/configuration rows, never as a binary upload substitute.',
+    ],
+    recommendedScope: 'schema',
+  },
+  {
+    key: 'identity-access',
+    title: 'Users, roles, OAuth configuration, and application identity access',
+    useWhen: [
+      'Inspecting or managing Enfyra users and roles.',
+      'Configuring OAuth providers or OAuth account metadata.',
+      'Designing application login, session, refresh, and role access behavior.',
+    ],
+    keywords: ['user role', 'oauth provider', 'oauth config', 'oauth account', 'login flow', 'session refresh', 'identity access'],
+    firstTools: ['search_runtime_zone', 'get_enfyra_examples'],
+    inspectTools: ['search_runtime_zone(mode=search, zone=auth_security)', 'search_runtime_zone(mode=inspect)', 'query_table', 'get_permission_profile'],
+    knowledgeTools: ['get_enfyra_required_knowledge for writes', 'get_enfyra_examples(category=oauth-setup|ssr-app-auth)'],
+    writeTools: ['create_records', 'update_records', 'delete_records', 'ensure_route_access'],
+    verifyTools: ['query_table', 'get_permission_profile', 'test_rest_endpoint'],
+    avoidTools: [
+      {
+        tool: 'custom login/logout/me routes',
+        when: 'a browser app can use the Enfyra same-origin proxy and cookies',
+        useInstead: 'the built-in /login, /me, /logout, refresh, and OAuth routes through /enfyra',
+        reason: 'Custom token-cookie routes duplicate the supported identity lifecycle and are easier to get wrong.',
+      },
+    ],
+    requiredAck: ['globalRulesAckKey for identity metadata writes'],
+    exampleCategories: ['ssr-app-auth', 'oauth-setup'],
+    nextStepTemplate: [
+      'Separate MCP token context from application user/role/OAuth configuration.',
+      'Inspect auth_security runtime records and the live table contract before writes.',
+      'Verify built-in auth behavior through the app-origin proxy or the narrow REST endpoint.',
+    ],
+    recommendedScope: 'schema',
+  },
+  {
+    key: 'platform-config',
+    title: 'Platform settings and CORS origins',
+    useWhen: [
+      'Inspecting or changing enfyra_setting values.',
+      'Adding, updating, or removing allowed CORS origins.',
+      'Checking runtime platform configuration before application integration.',
+    ],
+    keywords: ['cors', 'allowed origin', 'platform setting', 'enfyra_setting', 'enfyra_cors_origin'],
+    firstTools: ['inspect_table', 'query_table'],
+    inspectTools: ['inspect_table', 'query_table', 'discover_runtime_context'],
+    knowledgeTools: ['get_enfyra_required_knowledge for writes'],
+    writeTools: ['create_records', 'update_records', 'delete_records'],
+    verifyTools: ['query_table', 'discover_runtime_context'],
+    avoidTools: [
+      {
+        tool: 'inventing setting keys or CORS fields',
+        when: 'live metadata has not been inspected',
+        useInstead: 'inspect_table for enfyra_setting or enfyra_cors_origin',
+        reason: 'Platform configuration is metadata-backed and field names must come from the current Enfyra version.',
+      },
+    ],
+    requiredAck: ['globalRulesAckKey for writes'],
+    exampleCategories: [],
+    nextStepTemplate: [
+      'Inspect the exact configuration table and current row first.',
+      'Apply a focused generic record mutation with acknowledgement.',
+      'Re-read the same row and verify application behavior before manual reloads.',
     ],
     recommendedScope: 'schema',
   },
@@ -627,10 +725,11 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
       return [
         step(1, 'get_enfyra_required_knowledge', 'Read dynamic-code contracts and collect acknowledgement keys.'),
         step(2, 'discover_script_contexts', 'Load macros, repository trust paths, per-surface helpers, and the fields+deep projection contract for script repository reads.'),
-        step(3, 'search_runtime_zone', 'Locate the script-backed runtime artifact in api_runtime, flow_runtime, websocket_runtime, or graphql_runtime.'),
-        step(4, 'get_script_source', 'Read editable sourceCode and hash for the selected record.'),
-        step(5, 'patch_script_source or update_script_source', 'Patch or replace source with validation and hash checks.'),
-        step(6, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify through the runtime path that owns the script.'),
+        step(3, 'build_dynamic_repository_usage', 'Generate secure or intentional trusted repository access when the script reads or writes table data.'),
+        step(4, 'search_runtime_zone', 'Locate the script-backed runtime artifact in api_runtime, flow_runtime, or websocket_runtime.'),
+        step(5, 'get_script_source', 'Read editable sourceCode and hash for the selected record.'),
+        step(6, 'patch_script_source or update_script_source', 'Patch or replace source with validation and hash checks.'),
+        step(7, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify through the runtime path that owns the script.'),
       ];
     case 'route-access':
     case 'guards-permissions-rules':
@@ -659,9 +758,32 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
     case 'graphql':
       return [
         step(1, 'discover_enfyra_system', 'Read GraphQL endpoint/auth/table enablement context.'),
-        step(2, 'inspect_table', 'Inspect the table before enabling GraphQL or writing resolver source.'),
-        step(3, 'set_table_graphql or search_runtime_zone', 'Enable table GraphQL or locate resolver source with zone=graphql_runtime.'),
-        step(4, 'discover_enfyra_system', 'Verify GraphQL state and endpoint hints.'),
+        step(2, 'inspect_table', 'Inspect the table before enabling GraphQL.'),
+        step(3, 'set_table_graphql', 'Enable or disable generated GraphQL exposure for the table.'),
+        step(4, 'test_graphql', 'Execute an authenticated GraphQL operation and inspect data/errors.'),
+      ];
+    case 'storage-file':
+      return [
+        step(1, 'search_runtime_zone', 'Search storage configs, folders, files, and file permissions with zone=storage_file.'),
+        step(2, 'search_runtime_zone', 'Inspect the selected storage_file result using nextInspect.input.'),
+        step(3, 'get_enfyra_examples', 'Load category=files when browser multipart, proxy, progress, or @STORAGE behavior is involved.'),
+        step(4, 'create_records / update_records / delete_records', 'Mutate metadata/configuration rows only after reading required knowledge; do not use record CRUD to upload bytes.'),
+        step(5, 'search_runtime_zone or query_table', 'Verify the saved metadata and public/permission state.'),
+      ];
+    case 'identity-access':
+      return [
+        step(1, 'search_runtime_zone', 'Search users, roles, permissions, guards, and OAuth config with zone=auth_security.'),
+        step(2, 'get_enfyra_examples', 'Load oauth-setup or ssr-app-auth only when that identity path is involved.'),
+        step(3, 'inspect_table or query_table', 'Inspect the exact user, role, OAuth, or permission contract.'),
+        step(4, 'create_records / update_records / delete_records / ensure_route_access', 'Apply the narrow identity metadata or access operation after required knowledge.'),
+        step(5, 'query_table / get_permission_profile / test_rest_endpoint', 'Verify the closest identity/access behavior.'),
+      ];
+    case 'platform-config':
+      return [
+        step(1, 'inspect_table', 'Inspect enfyra_setting or enfyra_cors_origin before choosing fields or keys.'),
+        step(2, 'query_table', 'Read the current focused configuration rows.'),
+        step(3, 'create_records / update_records / delete_records', 'Apply one focused metadata-backed configuration change after required knowledge.'),
+        step(4, 'query_table', 'Re-read the changed row and verify the saved value.'),
       ];
     case 'package':
       return [
@@ -708,7 +830,7 @@ function advancedToolsFor(workflow: ToolWorkflow) {
 }
 
 function escapeHatchesFor(workflow: ToolWorkflow) {
-  const escape = new Set(['create_records', 'update_records', 'delete_records', 'create_route', 'create_handler', 'create_pre_hook', 'create_post_hook', 'reload_all', 'reload_metadata', 'reload_routes', 'reload_graphql', 'get_all_metadata', 'get_table_metadata']);
+  const escape = new Set(['create_records', 'update_records', 'delete_records', 'create_route', 'reload_all', 'reload_metadata', 'reload_routes', 'reload_graphql', 'get_all_metadata', 'get_table_metadata']);
   return [...new Set([...workflow.writeTools, ...workflow.verifyTools, ...workflow.inspectTools])]
     .filter((tool) => escape.has(tool));
 }

@@ -1,48 +1,45 @@
-# Enfyra MCP Performance And Debug Mode
+---
+name: enfyra-mcp-performance
+description: Diagnose or improve Enfyra MCP and generated-app performance, including tool-list/context token cost, lazy metadata reads, response compression, query/index shape, counts versus existence checks, RLS filters, websocket latency, runtime cache behavior, and performance-sensitive examples. Use for benchmark work, slow MCP interactions, excessive context, or hot Enfyra query/realtime paths.
+---
 
-Use this skill when designing, reviewing, or debugging Enfyra apps through MCP where performance, read/write shape, indexes, websocket latency, RLS filters, or query correctness matter.
+# Enfyra MCP Performance
 
-## Rules
-- Verify capability with live metadata before claiming performance behavior. Use `inspect_table`, `inspect_route`, `discover_query_capabilities`, and `discover_runtime_context` first.
-- Treat metadata as lazy. Use `GET /metadata` only for `dbType` and `enfyraVersion`, use `GET /metadata/:name` for one schema, and use the lightweight `enfyra_table` catalog for table discovery. Only explicit broad schema search may fetch multiple table schemas, with bounded concurrency and runtime-cache reuse.
-- Prefer indexed relation filters over scalar mirror columns. Relation property names can be used in `indexes` and `uniques`; Enfyra resolves them to physical FK columns.
-- For hot read paths, design indexes with the most selective/user-scoped field first. Examples: `["member","is_read","conversation"]` for unread lookup and `["conversation","member","is_read"]` for mark-read updates.
-- Use existence checks for UI dots and badges unless the user explicitly needs exact counts. Avoid count queries on every conversation row.
-- Use `meta=filterCount` or MCP `count_records` only when count is the product requirement.
-- For RLS hooks, mutate `@QUERY.filter` and preserve existing user filters with `_and`. `@QUERY.filter` is already `{}` when omitted.
-- For dynamic scripts, keep runtime values in their original type. Do not wrap ids or payload values in `String(...)`, `Number(...)`, or `Boolean(...)`.
-- For websocket apps, connect browsers through the Enfyra app/Nuxt bridge, not the hidden backend. Event handlers should be script-owned and use `@SOCKET` explicitly.
-- Authenticated websocket gateways load `user_definition` once and expose it as `@USER`; do not ask clients to send their own `senderId`.
-- Enfyra automatically joins authenticated sockets to `user_<userId>` after the connection script succeeds. App scripts should use this for `emitToUser` and should not re-join that room manually.
+## Start with Evidence
 
-## Debug Workflow
-1. Inspect the table schema, relations, indexes, and route permissions before changing code.
-2. Reproduce with the smallest real request or Socket.IO event. Prefer `test_rest_endpoint` or `run_admin_test` when available.
-3. If the problem is performance, state the exact query shape and expected index. Add or update `indexes` on `table_definition` through `create_table` or `update_table`.
-4. Reload metadata/cache after schema or script changes when the tool does not do it automatically.
-5. Retest the exact route/event and compare behavior before/after. Do not invent benchmark numbers.
+1. Identify whether cost is MCP context, MCP output, backend query, script execution, websocket lifecycle, or app fetching.
+2. Inspect the exact tool/query/route/event and live metadata before proposing an optimization.
+3. Record the current request shape and deterministic metric. Do not invent benchmark numbers.
+4. Change the narrowest owner and repeat the same measurement.
 
-## Chat App Review Checklist
-- Confirm REST and Socket.IO both go through the app origin. REST uses the app proxy prefix; Socket.IO uses `/ws/<namespace>` and `path: "/ws/socket.io"` when the app bridge exposes that path.
-- Confirm browser code never stores or forwards custom JWT cookies when the Enfyra app/proxy already manages cookies.
-- Confirm `chat:join` queries `chat_conversation` visible to `@USER`, then joins `conversation:<id>`. Do not join rooms from raw membership member ids.
-- Confirm `chat:message` uses `@SOCKET.broadcastToRoom("conversation:" + conversationId, ...)` and persists with `@REPOS` inside the event script. Do not add a flow just to save chat messages.
-- Confirm new DM UX creates no empty conversation. A draft opens first; the first message calls a creation event that creates the conversation and message together.
-- Confirm route-level RLS is server-side: pre-hooks merge membership filters into `@QUERY.filter` with `_and`; the client must not fetch all conversations then filter locally.
-- Confirm conversation titles are computed from visible memberships from the current user's perspective. DM title should be the other person, not the current user.
-- Confirm message history uses cursor pagination, newest messages first from the API then reversed for display; loading older messages preserves scroll.
-- Confirm disconnect state disables chat input and shows a visible retry banner immediately.
-- Confirm typing state is room-scoped, user-aware, and remains active while the input has text, even if the user pauses typing.
+## MCP Context and Output
 
-## Chat Read/Unread Pattern
-- Use a join table, e.g. `chat_message_read`, with:
-  - `message` relation to `chat_message`
-  - `conversation` relation to `chat_conversation`
-  - `member` relation to `user_definition`
-  - `is_read` boolean
-  - `read_at` date nullable
-- Add unique `["message","member"]`.
-- Add indexes `["member","is_read","conversation"]` and `["conversation","member","is_read"]`.
-- On message create, create read rows for conversation members. Sender rows start as read; other member rows start unread.
-- On conversation open/read, update unread rows for `@USER` in that conversation to read.
-- UI unread dots should check whether an unread row exists; count only when requested.
+- Measure serialized `tools/list` count, characters, and tokenizer estimate for both guided and full toolsets.
+- Keep guided tools limited to normal completion paths; use workflow routing and lazy builders instead of loading many specialized schemas.
+- Keep startup instructions compact. Load domain knowledge and examples only when the workflow needs them.
+- Use columnar formatting only when smaller than raw JSON and retain compression statistics.
+- Write long source values to tmp artifacts instead of returning them inline.
+- Cache only reload-domain control-plane GETs; normal table data remains uncached.
+
+## Query and Index Shape
+
+- Verify live table relations, indexes, permissions, and query behavior first.
+- Prefer indexed relation filters over scalar mirror columns.
+- Put the most selective/user-scoped field first for the actual hot query shape.
+- Use existence checks for attention dots unless the product needs an exact count.
+- Use `meta=filterCount` or MCP `count_records` when exact count is required.
+- Preserve caller query shape when merging RLS filters into `@QUERY.filter`.
+- Keep runtime ids and payload values in their original types; do not add speculative coercion.
+
+## Realtime
+
+- Browser sockets connect through the Enfyra app bridge, not the hidden backend.
+- Keep event behavior in websocket handlers and use `@SOCKET` explicitly.
+- Authenticated sockets receive `@USER` and automatically join `user_<userId>` after successful connection handling.
+- Avoid a flow hop for latency-sensitive persistence unless the workflow genuinely requires background execution.
+
+For chat-specific review and unread/index patterns, read [references/realtime-chat.md](references/realtime-chat.md) only when the task involves chat or conversation messaging.
+
+## Verification
+
+Run `yarn typecheck` and `yarn test`. For tool-surface changes, benchmark both guided and full `tools/list`. For backend performance claims, retest the exact route/event and state the observed evidence only.

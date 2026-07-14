@@ -10,6 +10,7 @@ const GUIDED_TOOL_NAMES = new Set([
   'discover_runtime_context',
   'discover_query_capabilities',
   'discover_script_contexts',
+  'build_dynamic_repository_usage',
   'get_enfyra_api_context',
   'get_permission_profile',
 
@@ -61,7 +62,9 @@ const GUIDED_TOOL_NAMES = new Set([
   'ensure_widget_extension',
 
   'api_endpoint_workflow',
+  'create_handler',
   'create_pre_hook',
+  'create_post_hook',
   'test_rest_endpoint',
   'run_admin_test',
   'test_flow_step',
@@ -76,6 +79,7 @@ const GUIDED_TOOL_NAMES = new Set([
   'private_route_methods',
 
   'set_table_graphql',
+  'test_graphql',
   'ensure_column_rule',
   'ensure_field_permission',
   'ensure_route_rate_limit',
@@ -91,6 +95,10 @@ const GUIDED_TOOL_NAMES = new Set([
   'tail_log',
   'search_npm',
   'install_package',
+  'list_methods',
+  'create_method',
+  'update_method',
+  'delete_method',
 ]);
 
 export function normalizeMcpToolset(value: unknown): McpToolset {

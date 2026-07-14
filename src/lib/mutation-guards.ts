@@ -5,7 +5,7 @@ const SCRIPT_TABLES = new Set([
   'enfyra_flow_step',
   'enfyra_websocket_event',
   'enfyra_websocket',
-  'enfyra_graphql',
+  'enfyra_oauth_config',
   'enfyra_bootstrap_script',
 ]);
 
@@ -16,7 +16,7 @@ const CODE_ALIAS_FORBIDDEN_TABLES = new Set([
   'enfyra_flow_step',
   'enfyra_websocket_event',
   'enfyra_websocket',
-  'enfyra_graphql',
+  'enfyra_oauth_config',
   'enfyra_bootstrap_script',
 ]);
 
@@ -103,22 +103,12 @@ export function rejectUnsafeScriptPayload(tableName, payload) {
 
 export function validatePortableScriptSource(sourceCode) {
   if (typeof sourceCode !== 'string') return;
-  const secureDotPattern = /@REPOS\.secure\.[A-Za-z_][A-Za-z0-9_]*/;
-  const secureBracketPattern = /@REPOS\.secure\s*\[/;
-  if (secureDotPattern.test(sourceCode) || secureBracketPattern.test(sourceCode)) {
-    throw new Error(
-      'Portable dynamic scripts must not use @REPOS.secure.<table> or @REPOS.secure["table"]. ' +
-      'That accessor is not callable on all Enfyra runtimes and causes handler/runtime retries. ' +
-      'Use @REPOS.main for the route main table when one exists, or use #table_name / @REPOS.table_name with explicit fields, relation filters, authorization checks, and sanitized return data.'
-    );
-  }
-
   validateAwaitedRepositoryCalls(sourceCode);
   validateNumericThrowDetails(sourceCode);
 }
 
 function validateAwaitedRepositoryCalls(sourceCode) {
-  const repoCallPattern = /(?:#[A-Za-z_][A-Za-z0-9_]*|@REPOS\.(?!secure\b)[A-Za-z_][A-Za-z0-9_]*|@REPOS\.main)\s*\.\s*(find|create|update|delete|exists)\s*\(/g;
+  const repoCallPattern = /(?:#secure\.[A-Za-z_][A-Za-z0-9_]*|#[A-Za-z_][A-Za-z0-9_]*|@REPOS\.secure\.[A-Za-z_][A-Za-z0-9_]*|@REPOS\.(?!secure\b)[A-Za-z_][A-Za-z0-9_]*)\s*\.\s*(find|create|update|delete|exists)\s*\(/g;
   let match;
   while ((match = repoCallPattern.exec(sourceCode)) !== null) {
     const lineStart = sourceCode.lastIndexOf('\n', match.index) + 1;

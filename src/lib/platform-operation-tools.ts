@@ -577,6 +577,10 @@ function attrStaticOrBound(name, value, expression) {
 }
 
 function buildHeaderActionLiteral(action) {
+  const bareAssignment = String(action.onClick || '').match(/^\s*\(\s*\)\s*=>\s*\(?\s*([A-Za-z_$][\w$]*)\s*=(?!=)/);
+  if (bareAssignment) {
+    throw new Error(`Invalid header action onClick: assign ${bareAssignment[1]}.value inside script callbacks, or pass a handler name. Template ref auto-unwrapping does not apply in registry callbacks.`);
+  }
   const entries = [
     action.id ? `id: ${quoteJsString(action.id)}` : null,
     action.label ? `label: ${quoteJsString(action.label)}` : null,
@@ -609,14 +613,14 @@ export function buildExtensionPageShellSnippet(input) {
   ];
   if (actions.length) {
     lines.push('const { register: registerHeaderActions } = useHeaderActionRegistry();');
-    lines.push(`registerHeaderActions([\n${actions.map((action) => `  ${buildHeaderActionLiteral(action)}`).join(',\n')}\n]);`);
+    lines.push(`onMounted(() => {\n  registerHeaderActions([\n${actions.map((action) => `    ${buildHeaderActionLiteral(action)}`).join(',\n')}\n  ]);\n});`);
   }
   return {
     action: 'extension_page_shell_built',
     snippet: lines.join('\n'),
     contract: [
       'Use usePageHeaderRegistry so the app shell renders the page header.',
-      'Use useHeaderActionRegistry for toolbar actions instead of rendering duplicate page headers or local top bars.',
+      'Use useHeaderActionRegistry for toolbar actions instead of rendering duplicate page headers or local top bars; register dynamic extension actions in onMounted after setup state exists.',
       'Use primary solid only for the main scope action; secondary actions default to neutral outline.',
     ],
   };
@@ -657,10 +661,10 @@ export function buildExtensionEmptyStateSnippet(input) {
     : '';
   return {
     action: 'extension_empty_state_built',
-    component: 'CommonEmptyState',
-    snippet: `<CommonEmptyState\n  title="${String(input.title || 'No items found').replace(/"/g, '&quot;')}"\n  description="${String(input.description || '').replace(/"/g, '&quot;')}"\n  icon="${input.icon || 'lucide:inbox'}"\n  size="${input.size || 'sm'}"\n  variant="${input.variant || 'naked'}"${action}\n/>`,
+    component: 'EmptyState',
+    snippet: `<EmptyState\n  title="${String(input.title || 'No items found').replace(/"/g, '&quot;')}"\n  description="${String(input.description || '').replace(/"/g, '&quot;')}"\n  icon="${input.icon || 'lucide:inbox'}"\n  size="${input.size || 'sm'}"\n  variant="${input.variant || 'naked'}"${action}\n/>`,
     contract: [
-      'Use CommonEmptyState for app-matched empty states.',
+      'Dynamic extensions expose the app empty-state component as EmptyState.',
       'Use variant="naked" inside framed panels/lists and outline/subtle for standalone framed empty surfaces.',
     ],
   };
@@ -707,6 +711,52 @@ export function buildExtensionResourceListSnippet(input) {
       'CommonResourceListFrame supports extension default slots. It renders rows when loading is false and hasItems is true; inspect the source artifact, hasItems/items expressions, and API response shape before replacing it.',
       'Keep first-load skeleton, empty state, and pagination owned by the frame.',
       'Use explicit bounded list data and natural pagination/search outside this snippet when the domain list can grow.',
+    ],
+  };
+}
+
+export function buildExtensionResourceGridSnippet(input) {
+  const itemsExpression = input.itemsExpression || 'items';
+  const itemName = input.itemName || 'item';
+  const keyExpression = input.keyExpression || `${itemName}.id`;
+  const defaultBody = [
+    `<h2 class="font-semibold eapp-text-primary">{{ ${itemName}.title || 'Untitled' }}</h2>`,
+    `<p v-if="${itemName}.description" class="text-sm eapp-text-secondary line-clamp-2">{{ ${itemName}.description }}</p>`,
+  ].join('\n');
+  const normalized = normalizeVueBodySnippet(input.cardBody || defaultBody);
+  const frame = [
+    '<CommonResourceListFrame',
+    '  variant="plain"',
+    `  :loading="${input.loadingExpression || 'pending'}"`,
+    `  :has-items="${itemsExpression}.length > 0"`,
+    `  :total="${input.totalExpression || `${itemsExpression}.length`}"`,
+    `  :items-per-page="${input.itemsPerPageExpression || '0'}"`,
+    `  empty-title="${String(input.emptyTitle || 'No items found').replace(/"/g, '&quot;')}"`,
+    `  empty-description="${String(input.emptyDescription || '').replace(/"/g, '&quot;')}"`,
+    `  empty-icon="${input.emptyIcon || 'lucide:inbox'}"`,
+    '>',
+    '  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">',
+    `    <UCard v-for="${itemName} in ${itemsExpression}" :key="${keyExpression}" class="h-full eapp-surface-card eapp-radius-panel border eapp-divider">`,
+    '      <div class="flex h-full flex-col gap-4">',
+    indentLines(normalized.code, 8),
+    '      </div>',
+    '    </UCard>',
+    '  </div>',
+    '</CommonResourceListFrame>',
+  ].join('\n');
+  const constrained = input.constrained === false
+    ? frame
+    : ['<section class="eapp-page-constrained-wide space-y-4">', indentLines(frame, 2), '</section>'].join('\n');
+  return {
+    action: 'extension_resource_grid_built',
+    component: 'CommonResourceListFrame',
+    snippet: constrained,
+    normalizedBodyChanges: normalized.changes,
+    contract: [
+      'Use this card grid for dashboard/workboard/catalog collections; use resource_list for dense operational rows.',
+      'The default desktop layout uses three columns only at xl because the admin sidebar consumes viewport width.',
+      'Keep the page constrained unless the workflow intentionally owns a canvas or other full-bleed surface.',
+      'Keep card actions inside cardBody and align them with flex layout rather than floating them at the viewport edge.',
     ],
   };
 }
@@ -1194,6 +1244,34 @@ function collectExtensionRuntimeIssues(code) {
   if (/\b(?:query|body|filter|deep|aggregate)\s*:\s*JSON\.stringify\s*\(/.test(source)) {
     push('error', 'use-api-json-stringify-options', 'useApi query/body/filter/deep/aggregate options must be plain objects or computed objects, not JSON strings.', 'Pass the object directly to useApi or execute().');
   }
+  if (/<(?:CommonModal|UModal)\b[^>]*\bv-model\s*=/.test(source)) {
+    push('error', 'modal-open-model', 'CommonModal/UModal must bind v-model:open, not the default v-model contract.', 'Call build_extension_ui kind=modal and preserve its v-model:open binding.');
+  }
+  if (/<CommonEmptyState\b/.test(source)) {
+    push('error', 'unavailable-common-empty-state', 'CommonEmptyState is not registered in the dynamic extension runtime.', 'Use the injected EmptyState alias or build_extension_ui kind=empty_state/resource_list/resource_grid.');
+  }
+  const scriptBlocks = [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]);
+  const scriptSource = scriptBlocks.length ? scriptBlocks.join('\n') : (/<template\b/i.test(source) ? '' : source);
+  const refNames = new Set(
+    [...scriptSource.matchAll(/\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:ref|shallowRef)\s*\(/g)].map((match) => match[1]),
+  );
+  const bareRefActionPattern = /\bonClick\s*:\s*\(\s*\)\s*=>\s*\(?\s*([A-Za-z_$][\w$]*)\s*=(?!=)/g;
+  let bareRefActionMatch;
+  while ((bareRefActionMatch = bareRefActionPattern.exec(scriptSource))) {
+    const refName = bareRefActionMatch[1];
+    if (refNames.has(refName)) {
+      push('error', 'script-ref-assignment', `Script callback tries to reassign const ref ${refName}.`, `Assign ${refName}.value or call a handler; template ref auto-unwrapping does not apply inside registry/action callbacks.`);
+    }
+  }
+  const executeAliasPattern = /\bexecute\s*:\s*([A-Za-z_$][\w$]*)/g;
+  let executeAliasMatch;
+  while ((executeAliasMatch = executeAliasPattern.exec(source))) {
+    const executeAlias = executeAliasMatch[1];
+    const references = source.match(new RegExp(`\\b${escapeRegExp(executeAlias)}\\b`, 'g'))?.length || 0;
+    if (references === 1) {
+      push('error', 'use-api-unused-execute', `useApi execute alias ${executeAlias} is never used.`, `Call or reference ${executeAlias} from onMounted, a watcher, or a user action; for read builders keep autoLoad enabled.`);
+    }
+  }
   if (/\buseApi\s*\(/.test(source) && !/\bexecute\s*:/.test(source) && !/\brefresh\s*:/.test(source) && !/\.\s*(?:execute|refresh)\s*\(/.test(source)) {
     push('warning', 'use-api-no-execute-alias', 'useApi() appears without an execute/refresh alias or call.', 'Call useApi() as a top-level setup composable, then call or await execute()/refresh() from onMounted, watchers, or user actions when the request should run.');
   }
@@ -1410,6 +1488,9 @@ export function buildExtensionUiSnippet(kind: string, input: AnyRecord = {}) {
     case 'resource_list':
       result = buildExtensionResourceListSnippet(input);
       break;
+    case 'resource_grid':
+      result = buildExtensionResourceGridSnippet(input);
+      break;
     case 'form_editor':
       result = buildExtensionFormEditorSnippet(input);
       break;
@@ -1489,6 +1570,7 @@ function getExtensionThemeContract() {
       'The extension is already mounted inside the Enfyra app shell. Do not add a duplicate page header, centered page wrapper, or root-level page padding.',
       'Page extensions should be full-bleed, responsive, and split large operations into focused pages or UTabs.',
       'Use usePageHeaderRegistry for the shell title and useHeaderActionRegistry/useSubHeaderActionRegistry for page actions.',
+      'Register dynamic extension header actions inside onMounted after setup refs and handlers exist; build_extension_ui kind=page_shell generates this lifecycle shape.',
       'Use build_extension_ui kind=menu_notification for sidebar menu notification registration snippets.',
       'For shell menu notifications, first decide the signal source. Use a count only when the source already owns an exact count, such as a notification summary endpoint or bounded unread-notification query. Use a dot when a realtime event only proves that something new exists. Do not poll a domain list such as messages, tickets, orders, or jobs solely to decorate the menu; the destination page owns domain fetching.',
       'Use build_extension_ui kind=account_panel_item for account panel row registration snippets.',
@@ -1525,8 +1607,10 @@ function getExtensionThemeContract() {
       'Use auto-injected components directly in the template with PascalCase names. Do not call resolveComponent() to manually resolve Nuxt UI/eApp components inside extension SFCs; it can compile but render unresolved lowercase DOM tags such as <ubutton>.',
       'Buttons should have stable geometry: hover may change color, border, or shadow but must not move the button or resize its content. Disabled buttons keep disabled cursor/visual state.',
       'Inputs and textareas should not add hover movement or decorative hover states; focus, invalid, disabled, and loading states must be explicit.',
-      'For drawers, modals, page shell headers/actions, permission gates, empty states, resource lists, form editors, widgets, menu/account panel registries, tabs, upload modals, api_usage, notify, and runtime/theming reviews, call build_extension_ui with the matching kind after extension acknowledgement before patching raw Vue.',
+      'For drawers, modals, page shell headers/actions, permission gates, empty states, resource lists, resource grids, form editors, widgets, menu/account panel registries, tabs, upload modals, api_usage, notify, and runtime/theming reviews, call build_extension_ui with the matching kind after extension acknowledgement before patching raw Vue.',
       'Use build_extension_ui kind=theme_classes for theme classes by intent, and kind=runtime_review, theme_review, or review before saving generated snippets that include composables, theme classes, high-contract UI, or native buttons.',
+      'Use build_extension_ui kind=resource_grid for workboards, dashboards, catalogs, and responsive card collections instead of placing UCard children directly into a full-width list frame.',
+      'Use the EmptyState runtime alias returned by build_extension_ui kind=empty_state; CommonEmptyState is not registered as a dynamic extension tag.',
       'Extension validation rejects UInput, UTextarea, USelect, USelectMenu, UInputMenu, UInputNumber, UInputTags, UInputTime, and UInputDate without class="w-full" unless marked data-compact or data-inline.',
       'Use UBadge or token-backed badge spans for status. Keep badges legible in both themes with tokenized background, text, and border.',
     ],
@@ -3057,7 +3141,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     loading: z.string().optional().describe('Raw Vue expression/ref name for loading state.'),
     disabled: z.string().optional().describe('Raw Vue expression/ref name for disabled state.'),
     to: z.string().optional().describe('Route path for visible navigation actions.'),
-    onClick: z.string().optional().describe('Raw Vue expression or function reference for click behavior.'),
+    onClick: z.string().optional().describe('Script callback expression or handler reference. Prefer a handler name; bare ref assignments must use ref.value, e.g. () => (modalOpen.value = true).'),
     order: z.number().optional().describe('Sort order in the shell header action area.'),
     side: z.enum(['left', 'right']).optional().describe('Optional shell side.'),
   });
@@ -3066,7 +3150,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     'validate_dynamic_script',
     [
       'Validate Enfyra dynamic script code before saving it to any script-backed metadata record.',
-      'Use this before create/update of handlers, hooks, flow steps, websocket scripts, GraphQL scripts, or bootstrap scripts when the user is iterating on code.',
+      'Use this before create/update of handlers, hooks, flow steps, websocket scripts, OAuth provisioning scripts, or bootstrap scripts when the user is iterating on code.',
       'This calls the same server compiler contract used by Enfyra, but does not save anything.',
     ].join(' '),
     {
@@ -3176,7 +3260,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     [
       'Lazy gateway for Enfyra admin extension UI builders.',
       'Use this after get_enfyra_required_knowledge(scope="extension") when a high-contract extension UI snippet is needed.',
-      'It keeps guided startup small by dispatching drawer, modal, page_shell, permission_gate, empty_state, resource_list, form_editor, widget, menu_notification, account_panel_item, tabs, upload_modal, api_usage, notify, confirm, runtime_review, theme_classes, theme_review, or review internally instead of exposing every builder tool up front.',
+      'It keeps guided startup small by dispatching drawer, modal, page_shell, permission_gate, empty_state, resource_list, resource_grid, form_editor, widget, menu_notification, account_panel_item, tabs, upload_modal, api_usage, notify, confirm, runtime_review, theme_classes, theme_review, or review internally instead of exposing every builder tool up front.',
     ].join(' '),
     {
       kind: z.enum([
@@ -3186,6 +3270,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
         'permission_gate',
         'empty_state',
         'resource_list',
+        'resource_grid',
         'form_editor',
         'widget',
         'menu_notification',
@@ -3343,7 +3428,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
   server.tool(
     'build_extension_empty_state',
     [
-      'Generate a CommonEmptyState snippet for Enfyra admin extensions.',
+      'Generate an EmptyState snippet for Enfyra admin extensions.',
       'Use this for app-matched empty/error/no-results states instead of hand-rolled blank panels.',
     ].join(' '),
     {
@@ -3383,6 +3468,29 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       emptyIcon: z.string().optional().describe('Empty icon.'),
     },
     async (input) => jsonText(buildExtensionResourceListSnippet(input)),
+  );
+
+  server.tool(
+    'build_extension_resource_grid',
+    [
+      'Generate a constrained responsive CommonResourceListFrame card grid for Enfyra admin extensions.',
+      'Use this for workboards, catalogs, dashboards, and other card collections so generated pages do not become full-width horizontal strips.',
+      'The tool owns the page constraint, plain list-frame chrome, md/two-column and xl/three-column breakpoints, semantic card surface, loading/empty frame, and stable card height.',
+    ].join(' '),
+    {
+      itemsExpression: z.string().optional().default('items').describe('Vue expression for the card array, e.g. notes.'),
+      itemName: z.string().optional().default('item').describe('Loop variable name.'),
+      keyExpression: z.string().optional().describe('Vue expression for :key. Defaults to item.id.'),
+      cardBody: z.string().optional().describe('Card body Vue template. Defaults to semantic title/description. Fields and native buttons are normalized.'),
+      loadingExpression: z.string().optional().default('pending').describe('Vue expression for frame loading.'),
+      totalExpression: z.string().optional().describe('Vue expression for total cards.'),
+      itemsPerPageExpression: z.string().optional().describe('Vue expression for items per page; use 0 to hide pagination.'),
+      emptyTitle: z.string().optional().describe('Empty state title.'),
+      emptyDescription: z.string().optional().describe('Empty state description.'),
+      emptyIcon: z.string().optional().describe('Empty state icon.'),
+      constrained: z.boolean().optional().default(true).describe('Wrap in eapp-page-constrained-wide. Disable only for intentional full-bleed surfaces.'),
+    },
+    async (input) => jsonText(buildExtensionResourceGridSnippet(input)),
   );
 
   server.tool(
@@ -3728,7 +3836,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER and #table_name. Repository calls are async: use `const result = await #table.find(...)` and read rows from `result.data || []`. Do not send compiledCode. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
+      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, and @USER. Repository calls are async and reads return result.data. Use @REPOS.main or #secure.table_name/@REPOS.secure.table_name for user-facing access; reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       anonymousAccess: z.enum(['public', 'private']).optional().default('private').describe('public adds the method to publicMethods; private removes this method from publicMethods.'),
       public: z.boolean().optional().describe('Compatibility alias for anonymousAccess. true means public, false means private.'),
@@ -3757,13 +3865,13 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       'Prefer api_endpoint_workflow when route access, role/user permissions, overwrite decisions, or multi-step planning matter.',
       'Use this one-shot helper only when the endpoint contract is already clear and no authenticated route-permission step is needed in the same operation, such as a simple public webhook or private admin-only utility that will be granted separately.',
       'It creates the route without mainTableId, ensures the method is available, validates sourceCode, creates or overwrites the route handler, optionally makes the method public, reloads routes, and can smoke-test the endpoint.',
-      'For sourceCode, call discover_script_contexts first. Use #table_name or @REPOS.table_name for explicit table repos with exact fields/auth checks; @REPOS.secure.<table> is rejected as non-portable.',
+      'For sourceCode, call discover_script_contexts first. Use #secure.table_name or @REPOS.secure.table_name for explicit user-facing table access; reserve #table_name/@REPOS.table_name for intentional trusted internal access.',
       'Use table/schema tools separately when the user needs persisted data. This tool is for custom behavior endpoints.',
     ].join(' '),
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, @USER and #table_name. Repository calls are async: use `const result = await #table.find(...)` and read rows from `result.data || []`. Do not send compiledCode. Do not use @REPOS.secure.<table>; use @REPOS.main for route main table or #table_name/@REPOS.table_name with explicit fields/auth checks.'),
+      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, and @USER. Repository calls are async and reads return result.data. Use @REPOS.main or #secure.table_name/@REPOS.secure.table_name for user-facing access; reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       public: z.boolean().optional().default(false).describe('When true, the method is added to publicMethods for anonymous access.'),
       description: z.string().optional().describe('Route description.'),

@@ -43,11 +43,11 @@ const ZONE_TABLES: Record<Exclude<RuntimeZone, 'admin_ui' | 'schema_data'>, Zone
     { tableName: 'enfyra_flow_step', fields: 'id,_id,name,key,type,description,sourceCode,condition,config,flow.id,flow.name,nextStep.id,errorStep.id,isEnabled', sourceFields: ['sourceCode', 'condition'], labelFields: ['name', 'key', 'type', 'description', 'flow.name', 'config'] },
   ],
   websocket_runtime: [
-    { tableName: 'enfyra_websocket', fields: 'id,_id,path,description,connectionHandlerScript,scriptLanguage,isEnabled', sourceFields: ['connectionHandlerScript'], labelFields: ['path', 'description'], pathFields: ['path'] },
-    { tableName: 'enfyra_websocket_event', fields: 'id,_id,eventName,description,handlerScript,scriptLanguage,gateway.id,gateway.path,isEnabled', sourceFields: ['handlerScript'], labelFields: ['eventName', 'description', 'gateway.path'], pathFields: ['gateway.path'] },
+    { tableName: 'enfyra_websocket', fields: 'id,_id,path,description,sourceCode,scriptLanguage,isEnabled', sourceFields: ['sourceCode'], labelFields: ['path', 'description'], pathFields: ['path'] },
+    { tableName: 'enfyra_websocket_event', fields: 'id,_id,eventName,description,sourceCode,scriptLanguage,gateway.id,gateway.path,isEnabled', sourceFields: ['sourceCode'], labelFields: ['eventName', 'description', 'gateway.path'], pathFields: ['gateway.path'] },
   ],
   graphql_runtime: [
-    { tableName: 'enfyra_graphql', fields: 'id,_id,name,description,sourceCode,scriptLanguage,table.id,table.name,isEnabled', sourceFields: ['sourceCode'], labelFields: ['name', 'description', 'table.name'] },
+    { tableName: 'enfyra_graphql', fields: 'id,_id,description,metadata,table.id,table.name,isEnabled', labelFields: ['description', 'table.name', 'metadata'] },
   ],
   package_runtime: [
     { tableName: 'enfyra_package', fields: 'id,_id,name,version,type,description,isEnabled,createdAt,updatedAt', labelFields: ['name', 'version', 'type', 'description'] },
@@ -59,12 +59,14 @@ const ZONE_TABLES: Record<Exclude<RuntimeZone, 'admin_ui' | 'schema_data'>, Zone
     { tableName: 'enfyra_file_permission', fields: 'id,_id,file.id,file.fileName,role.name,allowedUsers.id,methods.name,description,isEnabled', labelFields: ['file.fileName', 'role.name', 'description'] },
   ],
   auth_security: [
+    { tableName: 'enfyra_user', fields: 'id,_id,email,isRootAdmin,isSystem,role.id,role.name,createdAt,updatedAt', labelFields: ['email', 'role.name'] },
     { tableName: 'enfyra_role', fields: 'id,_id,name,description,isSystem,createdAt,updatedAt', labelFields: ['name', 'description'] },
     { tableName: 'enfyra_route_permission', fields: 'id,_id,description,isEnabled,route.id,route.path,role.name,methods.name,allowedUsers.id', labelFields: ['description', 'route.path', 'role.name'], pathFields: ['route.path'] },
     { tableName: 'enfyra_field_permission', fields: 'id,_id,description,action,effect,role.name,column.name,relation.propertyName,condition,isEnabled', labelFields: ['description', 'action', 'effect', 'role.name', 'column.name', 'relation.propertyName', 'condition'] },
     { tableName: 'enfyra_guard', fields: 'id,_id,name,description,position,isGlobal,isEnabled,route.id,route.path,methods.name', labelFields: ['name', 'description', 'route.path'], pathFields: ['route.path'] },
     { tableName: 'enfyra_guard_rule', fields: 'id,_id,name,field,operator,value,guard.id,guard.name,description,isEnabled', labelFields: ['name', 'field', 'operator', 'value', 'guard.name', 'description'] },
-    { tableName: 'enfyra_oauth_config', fields: 'id,_id,provider,displayName,redirectUri,scopes,isEnabled,description', labelFields: ['provider', 'displayName', 'redirectUri', 'scopes', 'description'] },
+    { tableName: 'enfyra_oauth_config', fields: 'id,_id,provider,redirectUri,sourceCode,appCallbackUrl,autoSetCookies,scriptLanguage,isEnabled,description', sourceFields: ['sourceCode'], labelFields: ['provider', 'redirectUri', 'appCallbackUrl', 'description'] },
+    { tableName: 'enfyra_oauth_account', fields: 'id,_id,provider,providerUserId,user.id,user.email,createdAt,updatedAt', labelFields: ['provider', 'providerUserId', 'user.email'] },
   ],
 };
 
@@ -73,11 +75,11 @@ export const RUNTIME_ZONE_DESCRIPTIONS: Record<RuntimeZone, string> = {
   api_runtime: 'REST routes, handlers, hooks, guards, guard rules, and route permissions.',
   flow_runtime: 'Flows and flow steps that run background jobs, scheduled tasks, and manual operations.',
   websocket_runtime: 'Socket.IO gateways and event handlers.',
-  graphql_runtime: 'GraphQL exposure and custom resolver source.',
+  graphql_runtime: 'Table GraphQL exposure metadata used by generated resolvers.',
   schema_data: 'Tables, columns, relations, column rules, field permissions, and route-backed data shape.',
   package_runtime: 'Installed app/server packages and runtime package availability.',
   storage_file: 'Storage configs, folders, files, public file state, and file permissions.',
-  auth_security: 'Roles, route permissions, field permissions, guards, guard rules, and OAuth auth surfaces.',
+  auth_security: 'Users, roles, route/field permissions, guards, OAuth provider provisioning, and linked OAuth accounts.',
 };
 
 function getId(record: any) {
