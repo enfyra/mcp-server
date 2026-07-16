@@ -74,3 +74,27 @@ test('dynamic repository builder rejects invalid macro table names', () => {
     /valid Enfyra identifier/,
   );
 });
+
+test('dynamic repository builder keeps TypeORM-style @BODY mutations and returns safe adaptation recipes', () => {
+  const created = buildDynamicRepositoryUsage({
+    access: 'secure_explicit',
+    operation: 'create',
+    tableName: 'orders',
+    fields: ['id', 'owner'],
+  });
+  const updated = buildDynamicRepositoryUsage({
+    access: 'secure_explicit',
+    operation: 'update',
+    tableName: 'orders',
+    fields: ['id'],
+  });
+
+  assert.match(created.code, /data: @BODY/);
+  assert.match(updated.code, /data: @BODY/);
+  assert.equal(created.typeOrmPartialBody, true);
+  assert.match(created.adaptationRecipes.serverOwnedField, /\.\.\.@BODY/);
+  assert.match(created.adaptationRecipes.serverOwnedField, /@USER\.id/);
+  assert.match(updated.adaptationRecipes.scopedMutation, /owner\/tenant/);
+  assert.match(updated.adaptationRecipes.nonUpdatableServerAction, /Do not change canonical metadata isUpdatable/);
+  assert.match(updated.adaptationRecipes.nonUpdatableServerAction, /trusted explicit repository/);
+});

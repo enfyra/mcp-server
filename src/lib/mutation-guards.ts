@@ -103,8 +103,26 @@ export function rejectUnsafeScriptPayload(tableName, payload) {
 
 export function validatePortableScriptSource(sourceCode) {
   if (typeof sourceCode !== 'string') return;
+  validateLogsContract(sourceCode);
+  validateSocketContract(sourceCode);
   validateAwaitedRepositoryCalls(sourceCode);
   validateNumericThrowDetails(sourceCode);
+}
+
+function validateSocketContract(sourceCode) {
+  const unsupportedEmit = /(?:@SOCKET|\$ctx\.\$socket)\s*\.\s*emit\s*\(/u.exec(sourceCode);
+  if (!unsupportedEmit) return;
+  throw new Error(
+    '@SOCKET has no generic emit() method. In websocket event/connection scripts use reply, emitToCurrentRoom, or broadcastToRoom; from global HTTP/flow contexts use emitToGateway, emitToRoom, emitToUser, or broadcast.'
+  );
+}
+
+function validateLogsContract(sourceCode) {
+  const methodCall = /@LOGS\s*\.\s*(?:info|warn|error|debug|log)\s*\(/u.exec(sourceCode);
+  if (!methodCall) return;
+  throw new Error(
+    '@LOGS is callable, not a console/logger object. Use @LOGS(message, details?) such as @LOGS("Approval requested", { requestId }); do not use @LOGS.info/@LOGS.warn/@LOGS.error/@LOGS.debug.'
+  );
 }
 
 function validateAwaitedRepositoryCalls(sourceCode) {

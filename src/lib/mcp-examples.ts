@@ -998,6 +998,109 @@ return { ok: true, email }\`
         ],
       },
       {
+        name: 'Third-party create endpoint with server-owned identity',
+        code: `api_endpoint_workflow({
+  path: "/integrations/orders",
+  method: "POST",
+  anonymousAccess: "private",
+  roleName: "user",
+  applyAll: true,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
+  sourceCode: \`const title = @BODY.title
+if (!title) @THROW400("title is required")
+
+const result = await #secure.orders.create({
+  data: {
+    ...@BODY,
+    owner: @USER.id
+  },
+  fields: ["id", "title", "owner"]
+})
+
+const order = result.data?.[0] ?? null
+if (!order) @THROW500("Order was not returned after create")
+return {
+  id: order.id,
+  title: order.title,
+  owner: order.owner?.id || order.owner
+}\`
+})`,
+        notes: [
+          'Custom routes have no main table, so explicit user-facing access uses #secure.orders rather than @REPOS.main.',
+          'data: @BODY is valid TypeORM-style repository usage. Put ...@BODY first and server-owned fields afterward so caller input cannot override them.',
+          'Custom handlers do not inherit canonical column-rule/Zod middleware; validate the endpoint-specific business payload in the handler.',
+          'Replace orders, owner, fields, role, and path only after inspecting live metadata and the intended external contract.',
+        ],
+      },
+      {
+        name: 'Third-party scoped update endpoint',
+        code: `const found = await #secure.orders.find({
+  filter: {
+    _and: [
+      { id: { _eq: @PARAMS.id } },
+      { owner: { id: { _eq: @USER.id } } }
+    ]
+  },
+  fields: ["id", "title", "owner"],
+  limit: 1
+})
+
+const order = found.data?.[0]
+if (!order) @THROW404("Order not found")
+
+const result = await #secure.orders.update({
+  id: order.id,
+  data: {
+    ...@BODY,
+    owner: @USER.id
+  },
+  fields: ["id", "title", "owner"]
+})
+
+const updated = result.data?.[0] ?? null
+return updated
+  ? { id: updated.id, title: updated.title, owner: updated.owner?.id || updated.owner }
+  : null`,
+        notes: [
+          'The scoped lookup proves the current row belongs to the caller before mutation; route permission and secure repository selection do not prove ownership.',
+          'The update keeps owner server-controlled instead of allowing @BODY to reassign it.',
+          'If ownership can change concurrently, make it immutable or use the transaction/business invariant appropriate to the application.',
+        ],
+      },
+      {
+        name: 'Third-party action updates a non-updatable server field',
+        code: `const found = await #secure.orders.find({
+  filter: {
+    _and: [
+      { id: { _eq: @PARAMS.id } },
+      { owner: { id: { _eq: @USER.id } } }
+    ]
+  },
+  fields: ["id", "status", "owner"],
+  limit: 1
+})
+
+const order = found.data?.[0]
+if (!order) @THROW404("Order not found")
+if (order.status !== "pending") @THROW409("Order is not pending")
+
+const result = await #orders.update({
+  id: order.id,
+  data: { status: "cancelled" },
+  fields: ["id", "status"]
+})
+
+const updated = result.data?.[0] ?? null
+return updated ? { id: updated.id, status: updated.status } : null`,
+        notes: [
+          'The secure lookup proves caller scope before the privileged mutation.',
+          'The trusted write is intentional because status is server-owned and non-updatable through normal CRUD. It writes an exact literal object, never raw @BODY.',
+          'Do not change status.isUpdatable to make this action work; that would broaden canonical CRUD for eApp and every other consumer.',
+          'Return an explicit response shape and never the raw trusted row.',
+        ],
+      },
+      {
         name: 'Custom register handler',
         code: `const email = @BODY.email
 const password = @BODY.password
@@ -1017,9 +1120,12 @@ const result = await #enfyra_user.create({
   }
 })
 
-return result.data?.[0] ?? null`,
+const user = result.data?.[0] ?? null
+if (!user) @THROW500("User was not returned after create")
+return { id: user.id, email: user.email }`,
         notes: [
           'create/update return { data: [...] }, not a bare row.',
+          'The trusted user repository is intentional for registration internals. Shape the response explicitly and never return the raw trusted row.',
           'Use numeric @THROW helpers for raw HTTP messages. If you pass details, pass an object/array such as @THROW404("Request not found", { requestId }). Use @THROW.notFound(resource, id?) or @THROW.duplicate(resource, field, value) only when you want Enfyra-formatted semantic messages.',
           'Prefer macros over raw $ctx when a macro exists.',
         ],
@@ -1099,7 +1205,7 @@ return {
         ],
       },
       {
-        name: 'Pre-hook RLS filter merge',
+        name: 'Canonical route pre-hook RLS filter merge',
         code: `const incoming = @QUERY.filter || {}
 const scope = {
   memberships: {
@@ -1113,6 +1219,7 @@ const scope = {
         notes: [
           '@QUERY.filter is initialized as an object for REST pre-hooks.',
           'Mutate @QUERY.filter before canonical CRUD runs.',
+          'This policy affects every consumer of the canonical route, including eApp. Use a separate custom endpoint handler when the scope is third-party-only.',
           'Do not override @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, @QUERY.aggregate, or debugMode in RLS; keep projection and pagination client-owned.',
         ],
       },
@@ -1498,6 +1605,7 @@ return { ok: true, message }`,
           'Do not ask the client for senderId. The sender relation is derived from @USER.id.',
           'conversationId is accepted only as the room/business identifier; persistence uses relation properties conversation and sender, not physical FK fields.',
           'Event scripts should explicitly emit replies/broadcasts.',
+          '@SOCKET has no generic emit() method. Use reply/emitToCurrentRoom/broadcastToRoom in bound websocket scripts.',
           'Use #table_name for explicit table access in generated scripts; select exact fields, enforce membership checks, and return shaped payloads.',
         ],
       },
@@ -1566,13 +1674,14 @@ return order && order.total > 1000`,
 { "table": "todo", "data": { "title": "Review", "status": "open" } }
 
 // ensure_update_flow_step
-{ "table": "todo", "id": "@FLOW_PAYLOAD.todoId", "data": { "status": "done" } }
+{ "table": "todo", "id": "fixed-todo-id", "data": { "status": "done" } }
 
 // ensure_delete_flow_step
-{ "table": "todo", "id": "@FLOW_PAYLOAD.todoId" }`,
+{ "table": "todo", "id": "fixed-todo-id" }`,
         notes: [
-          'Use fixed CRUD flow step tools for single-record writes.',
-          'Use script only when a step must coordinate multiple records, compute complex data, or call packages.',
+          'Use fixed CRUD flow step tools only for static config; ESV does not interpolate @FLOW_PAYLOAD, @FLOW_LAST, or @FLOW inside fixed-step config.',
+          'Use one focused script step when a record id or body comes from runtime flow values, when a step coordinates multiple records, computes complex data, or calls packages.',
+          'Inside a script step, write captured logs with @LOGS(message, details?), not @LOGS.info().',
         ],
       },
     ],

@@ -99,7 +99,8 @@ import { getSupportedColumnTypesFromMetadata, registerTableTools } from './lib/t
 import { registerPlatformOperationTools, validateExtensionCode } from './lib/platform-operation-tools.js';
 import { registerRuntimeZoneTools } from './lib/runtime-zone-tools.js';
 import { registerDynamicRepositoryBuilder } from './lib/dynamic-repository-builder.js';
-import { parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
+import { assertCreateHandlerRouteBoundary } from './lib/dynamic-endpoint-contract.js';
+import { parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
 import {
   assertDynamicCodeKnowledgeAck,
   assertDynamicCodeKnowledgeAckIf,
@@ -114,6 +115,7 @@ import { validateMainTableRoutePath } from './lib/route-guards.js';
 import { installColumnarToolFormatter, jsonContent } from './lib/response-format.js';
 import { startMcpUsageTelemetry } from './lib/mcp-usage-telemetry.js';
 import { startRuntimeCacheSocket } from './lib/runtime-cache-socket.js';
+import { executeSequentialBatch } from './lib/sequential-batch.js';
 import { compactSourceFields, writeSourceArtifact } from './lib/source-artifacts.js';
 import { installToolsetFilter, normalizeMcpToolset, summarizeToolsetForInstructions } from './lib/toolset-filter.js';
 import {
@@ -1358,6 +1360,12 @@ server.tool(
           '@STATUS': '$ctx.$statusCode',
           '@ERROR': '$ctx.$error',
         },
+        logging: '@LOGS is a callable function. Use @LOGS(message, details?) such as @LOGS("Approval requested", { requestId }); do not use @LOGS.info, @LOGS.warn, @LOGS.error, or @LOGS.debug.',
+        socket: {
+          contract: '@SOCKET has no generic emit() method.',
+          boundWebsocketMethods: ['reply(event, data)', 'join(room)', 'leave(room)', 'emitToCurrentRoom(room, event, data)', 'broadcastToRoom(room, event, data)', 'disconnect()'],
+          globalMethods: ['emitToGateway(path, event, data)', 'emitToRoom(path, room, event, data)', 'emitToUser(userId, event, data)', 'broadcast(event, data)', 'roomSize(room)'],
+        },
         flowMacros: {
           '@FLOW': '$ctx.$flow',
           '@FLOW_PAYLOAD': '$ctx.$flow.$payload',
@@ -1669,11 +1677,11 @@ server.tool(
 // CRUD TOOLS
 // ============================================================================
 
-server.tool('create_records', 'Create one or more route-backed records. Always pass records as a native JSON array; for one record, pass a one-item array. MCP preflights every item against live metadata first, then sends one POST per record sequentially; this is not a backend bulk endpoint or transaction. create_records only writes one table at a time, so when seeding related tables, follow create_tables cleanupHints.recordCreateOrder and create parent/target records before child/source records.', {
+server.tool('create_records', 'Create one or more route-backed records. Always pass records as a native JSON array; for one record, pass a one-item array. MCP preflights every item before the first POST, then writes sequentially; this is not a backend bulk endpoint or transaction. On a failed item, it returns the completed checkpoint and remaining indexes—retry only the remaining records after resolving the error.', {
   tableName: z.string().describe('Table name to insert into'),
   records: bulkObjectArrayParam(z, 'Records').describe('Records as a native JSON array. Each item must be a JSON object using metadata-backed column names and relation propertyName values.'),
   queryParams: z.string().optional().describe('Optional query params as JSON object string applied to every POST, for route contracts that intentionally keep workflow fields out of the validated body.'),
-  maxRecords: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one MCP batch. Default/max is 100. For larger imports, split intentionally.'),
+  maxRecords: z.number().int().min(1).max(100).optional().default(20).describe('Safety cap for one MCP batch. Default is 20; explicitly raise it up to 100 only when partial-write recovery is acceptable.'),
   globalRulesAckKey: globalRulesAckParam(z),
   knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required only when any item contains sourceCode. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
   extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required only when tableName is enfyra_extension and any item contains code. Use extensionAckKey from get_enfyra_required_knowledge.'),
@@ -1691,19 +1699,35 @@ server.tool('create_records', 'Create one or more route-backed records. Always p
     extensionValidations.push(await validateExtensionCodeForGenericMutation(tableName, item.payload, item.payload?.name || item.index));
   }
   const query = parseQueryParamsArg(queryParams);
-  const created = [];
-  for (const item of prepared.records) {
+  const batch = await executeSequentialBatch(prepared.records, async (item) => {
     const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}`, query), { method: 'POST', body: JSON.stringify(item.payload) });
-    created.push({
+    return {
       index: item.index,
       ...summarizeMutationResult(result, 'created', tableName),
-    });
+    };
+  });
+  if (batch.status === 'partial_failure') {
+    return {
+      isError: true,
+      content: [{ type: 'text', text: JSON.stringify({
+        action: 'create_records_partial_failure',
+        tableName,
+        requested: parsedRecords.length,
+        createdCount: batch.completed.length,
+        sequential: true,
+        transactional: false,
+        completed: batch.completed,
+        failed: batch.failure,
+        remainingIndexes: batch.remainingIndexes,
+        retryHint: 'Resolve the failed item, then retry only the failed item and remaining indexes. Do not retry completed records unless the table has an idempotent unique key.',
+      }, null, 2) }],
+    };
   }
   return { content: [{ type: 'text', text: JSON.stringify({
     action: 'created_records',
     tableName,
     requested: parsedRecords.length,
-    createdCount: created.length,
+    createdCount: batch.completed.length,
     sequential: true,
     transactional: false,
     preflight: {
@@ -1711,15 +1735,15 @@ server.tool('create_records', 'Create one or more route-backed records. Always p
       scriptValidatedBeforeAnyPost: prepared.records.some((item) => item.scriptValidation?.validated === true),
       extensionValidatedBeforeAnyPost: extensionValidations.some(Boolean),
     },
-    created,
-    detailHint: `Use query_table({ tableName: "${tableName}", fields: [...], limit: ${Math.min(created.length, 20)} }) to inspect created records when needed.`,
+    created: batch.completed,
+    detailHint: `Use query_table({ tableName: "${tableName}", fields: [...], limit: ${Math.min(batch.completed.length, 20)} }) to inspect created records when needed.`,
   }, null, 2) }] };
 });
 
-server.tool('update_records', 'Update one or more records in one MCP call. Pass items as a native JSON array; for one update, pass one item. MCP preflights every item against live metadata and extension/script validators first, rejects duplicate ids, then PATCHes sequentially to avoid races and server overload.', {
+server.tool('update_records', 'Update one or more records in one MCP call. Pass items as a native JSON array; for one update, pass one item. MCP preflights every item, rejects duplicate ids, then PATCHes sequentially. On a failed item, it returns the completed checkpoint and remaining indexes so callers do not replay prior updates.', {
   tableName: z.string().describe('Table name'),
   items: bulkObjectArrayParam(z, 'Update items').describe('Native JSON array of update items: [{ "id": "...", "data": { ... }, "queryParams": { ... }? }]. data must use metadata-backed column names and relation propertyName values.'),
-  maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one MCP batch. Default/max is 100.'),
+  maxItems: z.number().int().min(1).max(100).optional().default(20).describe('Safety cap for one MCP batch. Default is 20; explicitly raise it up to 100 only when partial-write recovery is acceptable.'),
   globalRulesAckKey: globalRulesAckParam(z),
   knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required only when any item.data contains sourceCode. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
   extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required only when tableName is enfyra_extension and any item.data contains code. Use extensionAckKey from get_enfyra_required_knowledge.'),
@@ -1743,22 +1767,37 @@ server.tool('update_records', 'Update one or more records in one MCP call. Pass 
     extensionValidations.push(await validateExtensionCodeForGenericMutation(tableName, prepared.payload, item.id));
   }
 
-  const updated = [];
-  for (const item of preparedItems) {
+  const batch = await executeSequentialBatch(preparedItems, async (item) => {
     const query = parseQueryParamsArg(JSON.stringify(item.queryParams || {}));
     const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${encodeURIComponent(String(item.id))}`, query), { method: 'PATCH', body: JSON.stringify(item.prepared.payload) });
-    updated.push({
+    return {
       index: item.index,
       id: item.id,
       ...summarizeMutationResult(result, 'updated', tableName),
-    });
+    };
+  });
+  if (batch.status === 'partial_failure') {
+    return {
+      isError: true,
+      content: [{ type: 'text', text: JSON.stringify({
+        action: 'update_records_partial_failure',
+        tableName,
+        requested: parsedItems.length,
+        updatedCount: batch.completed.length,
+        sequential: true,
+        completed: batch.completed,
+        failed: batch.failure,
+        remainingIndexes: batch.remainingIndexes,
+        retryHint: 'Resolve the failed item, then retry only the failed item and remaining indexes. Do not replay completed updates unless the new value is deliberately idempotent.',
+      }, null, 2) }],
+    };
   }
 
   return { content: [{ type: 'text', text: JSON.stringify({
     action: 'updated_records',
     tableName,
     requested: parsedItems.length,
-    updatedCount: updated.length,
+    updatedCount: batch.completed.length,
     sequential: true,
     duplicateIdsRejected: true,
     preflight: {
@@ -1766,7 +1805,7 @@ server.tool('update_records', 'Update one or more records in one MCP call. Pass 
       scriptValidatedBeforeAnyPatch: preparedItems.some((item) => item.prepared.scriptValidation?.validated === true),
       extensionValidatedBeforeAnyPatch: extensionValidations.some(Boolean),
     },
-    updated,
+    updated: batch.completed,
   }, null, 2) }] };
 });
 
@@ -2169,6 +2208,7 @@ server.tool(
   [
     'Run an Enfyra admin test without saving metadata. Wraps POST /admin/test/run.',
     'Kinds: script, flow_step, websocket_event, websocket_connection. Use this to validate dynamic script, flow, or websocket behavior before creating records.',
+    'kind=script captures logs but not socket emitted calls. Use kind=websocket_event or kind=websocket_connection when emitted capture is required; admin websocket tests still do not prove a real Socket.IO client transport/handshake.',
   ].join(' '),
   {
     kind: z.enum(['script', 'flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
@@ -2176,6 +2216,10 @@ server.tool(
   },
   async ({ kind, body }) => {
     const parsed = body ? JSON.parse(body) : {};
+    const sourceCode = kind === 'flow_step'
+      ? parsed?.config?.sourceCode ?? parsed?.config?.code
+      : parsed?.script ?? parsed?.sourceCode;
+    if (typeof sourceCode === 'string') validatePortableScriptSource(sourceCode);
     const result = await fetchAPI(ENFYRA_API_URL, '/admin/test/run', {
       method: 'POST',
       body: JSON.stringify({ ...parsed, kind }),
@@ -2823,7 +2867,7 @@ server.tool(
   [
     '**Use this when the user wants a new REST API route or path** — not `create_tables`. Custom routes must omit `mainTableId`.',
     '`mainTableId` is only a marker for canonical table routes such as `/orders`; do not set it for `/orders/stats`, `/reports/summary`, `/auth/login`, or any custom path.',
-    'Do NOT create a new enfyra_table only to expose an endpoint; create a route without `mainTableId`, then have the handler/hook query explicit repos such as `$ctx.$repos.orders`.',
+    'Do NOT create a new enfyra_table only to expose an endpoint; create a route without `mainTableId`, then have the handler/hook query user-facing tables through secure explicit repos such as `#secure.orders` or `$ctx.$repos.secure.orders`.',
     'availableMethods = which REST verbs the route responds to. publicMethods = which REST verbs are public (no auth). GraphQL is enabled separately through enfyra_graphql/update_tables graphqlEnabled.',
     'After creation the tool auto-reloads routes. Then create handlers for specific methods via create_handler on this route id.',
     'Flow: create_route → create_handler (per method) → optionally create_pre_hook / create_post_hook → test via HTTP or admin test APIs (see server instructions).',
@@ -2888,7 +2932,8 @@ server.tool(
   'create_handler',
   [
     'Create a handler for a route+method. One handler per (route, method) pair.',
-    'Attach to the route the user cares about (`get_all_routes`): typically a path from `create_route`, not a spurious table created only for handlers.',
+    'Attach to a custom route from `create_route` for endpoint-specific or third-party behavior. Do not use this low-level tool to bypass api_endpoint_workflow canonical-collision checks.',
+    'Canonical table routes are shared with eApp/admin CRUD. Adding a new canonical handler requires allowCanonicalRoute=true and main-table repository access; otherwise create a separate custom path.',
     'Use sourceCode, not logic/name. Enfyra compiles sourceCode into compiledCode; do not send compiledCode.',
     'Handler code runs inside a sandbox with $ctx. Use macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503, @SOCKET, @PKGS, @LOGS, @SHARE.',
     'Call discover_script_contexts first. For explicit user-facing table repos use #secure.table_name or @REPOS.secure.table_name; use #table_name/@REPOS.table_name only for intentional trusted internal access.',
@@ -2906,10 +2951,20 @@ server.tool(
     timeout: z.number().optional().describe('Timeout in ms (default: system DEFAULT_HANDLER_TIMEOUT, usually 30000)'),
     globalRulesAckKey: globalRulesAckParam(z),
     knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
+    allowCanonicalRoute: z.boolean().optional().default(false).describe('Explicit acknowledgement for adding a new handler to a canonical main-table route. Use only when the new method intentionally belongs to the shared eApp/admin CRUD surface; third-party endpoint-specific behavior must use a separate custom route.'),
   },
-  async ({ routeId, method, methods, sourceCode, scriptLanguage, timeout, globalRulesAckKey, knowledgeAckKey }) => {
+  async ({ routeId, method, methods, sourceCode, scriptLanguage, timeout, globalRulesAckKey, knowledgeAckKey, allowCanonicalRoute }) => {
     assertGlobalRulesAck(globalRulesAckKey);
     assertDynamicCodeKnowledgeAck(knowledgeAckKey);
+    const routeQuery = new URLSearchParams({
+      filter: JSON.stringify({ id: { _eq: routeId } }),
+      fields: 'id,path,mainTable.id,mainTable.name',
+      limit: '1',
+    });
+    const routeResult = await fetchAPI(ENFYRA_API_URL, `/enfyra_route?${routeQuery.toString()}`);
+    const targetRoute = unwrapData(routeResult)[0];
+    if (!targetRoute) throw new Error(`Route not found: ${String(routeId)}`);
+    assertCreateHandlerRouteBoundary(targetRoute, sourceCode, allowCanonicalRoute);
     const methodNames = methods && methods.length > 0 ? methods : method ? [method] : [];
     if (methodNames.length === 0) throw new Error('Provide method or methods');
     const methodMap = await getMethodMap();
@@ -2945,6 +3000,7 @@ server.tool(
     return { content: [{ type: 'text', text: JSON.stringify({
       action: 'created',
       handlers: results,
+      canonicalRouteAcknowledged: Boolean(targetRoute?.mainTable && allowCanonicalRoute),
       scriptValidation,
       routeReload,
       detailHint: 'Use inspect_route with the same routeId/path to inspect saved handlers.',
@@ -3245,7 +3301,7 @@ server.tool(
 );
 
 // Register table tools
-registerTableTools(server, ENFYRA_API_URL);
+registerTableTools(server, ENFYRA_API_URL, { toolset: MCP_TOOLSET });
 registerPlatformOperationTools(server, ENFYRA_API_URL);
 registerRuntimeZoneTools(server, ENFYRA_API_URL);
 registerDynamicRepositoryBuilder(server);

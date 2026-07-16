@@ -1,8 +1,8 @@
 export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONES::SCHEMA-DESIGN-CONTEXT::RECORD-BATCH::20260704H';
-export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SECURE-EXPLICIT::20260714A';
+export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::RUNTIME-SURFACE-CONTRACTS::20260716D';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260708A';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-14.secure-repositories-graphql-metadata';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-07-16.runtime-surface-contracts';
 
 export function globalRulesAckParam(z) {
   return z.string().describe('Required global-rules acknowledgement key from get_enfyra_required_knowledge. Call that tool, read the global Enfyra MCP rules, then pass globalRulesAckKey exactly.');
@@ -163,7 +163,13 @@ const DYNAMIC_CODE_SECTIONS = [
     rules: [
       'Secure repository selection does not prove the user is allowed to access a record.',
       'Handlers and hooks still need route access, owner/tenant filters, membership checks, and explicit mutation authorization.',
-      'For canonical table reads and RLS, merge security filters into @QUERY.filter and preserve @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, @QUERY.aggregate, and debugMode.',
+      'Use a canonical route pre-hook only when row policy is intentionally shared by every consumer of that canonical CRUD route. For third-party-only owner/tenant/business policy, create a separate custom endpoint and enforce the policy in its handler.',
+      'Custom routes have no main table: use #secure.table_name or @REPOS.secure.table_name, never @REPOS.main. Canonical table routes may use @REPOS.main.',
+      'Repository create/update with data: @BODY is the supported TypeORM-style partial-entity contract. Secure repositories enforce field permissions and persistence sanitation, but handlers must still force server-owned fields after ...@BODY and enforce business invariants.',
+      'Do not change canonical column metadata such as isUpdatable merely to let a custom action update a server-owned field. First prove owner/tenant scope with a secure repository lookup; when the action must change an intentionally non-updatable field, perform an exact trusted internal write without raw @BODY and shape the response explicitly.',
+      'Do not bypass a custom-endpoint canonical collision by calling create_handler on the table route. create_handler requires explicit canonical acknowledgement for a new main-table handler; third-party endpoint-specific behavior belongs on a separate route.',
+      'Canonical POST/PATCH routes run metadata column-rule/Zod body validation. Custom repository handlers do not inherit that middleware and must validate endpoint-specific body semantics when required.',
+      'For canonical table reads and shared RLS, merge security filters into @QUERY.filter and preserve @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, @QUERY.aggregate, and debugMode.',
     ],
   },
   {
@@ -190,6 +196,9 @@ const DYNAMIC_CODE_SECTIONS = [
       'When using repository find({ deep }) in handlers/hooks/flows, include each deep relation name in top-level fields, then choose nested fields under deep.<relation>.fields.',
       'Repository calls are async. Always await secure and trusted repository find/create/update/delete/exists calls; reads return { data: [...], meta? }.',
       'Create/update repository calls return collection-shaped data arrays; read result.data?.[0] for a single row.',
+      '@LOGS is a callable function: use @LOGS(message, details?). It has no .info/.warn/.error/.debug methods.',
+      '@SOCKET has no generic emit() method. Bound websocket scripts use reply, emitToCurrentRoom, or broadcastToRoom; global HTTP/flow scripts use emitToGateway, emitToRoom, emitToUser, or broadcast.',
+      'ESV fixed flow step configs are static host-side objects. Do not put @FLOW_PAYLOAD, @FLOW_LAST, or @FLOW inside query/create/update/delete/http/sleep/trigger/log config; use a focused script step when runtime values are required.',
       'For intentional HTTP errors, numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message).',
       'When numeric helpers include details, pass an object or array such as @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut.',
       'Use @THROW.http(status, message, details?) for dynamic status codes. Use @THROW.notFound(resource, id?) and @THROW.duplicate(resource, field, value) only when you intentionally want Enfyra-formatted semantic messages.',

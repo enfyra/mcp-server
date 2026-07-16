@@ -109,6 +109,17 @@ function compactOutputStats(result: any) {
   const compressionStats = parsed && typeof parsed === 'object' && parsed.compressionStats && typeof parsed.compressionStats === 'object'
     ? parsed.compressionStats
     : undefined;
+  const review = parsed && typeof parsed === 'object' && parsed.contractReview && typeof parsed.contractReview === 'object'
+    ? parsed.contractReview
+    : undefined;
+  const contractReview = review
+    ? {
+      status: String(review.status || 'unknown').slice(0, 40),
+      errorCodes: Array.isArray(review.errorCodes) ? review.errorCodes.map(String).slice(0, 20) : [],
+      warningCodes: Array.isArray(review.warningCodes) ? review.warningCodes.map(String).slice(0, 20) : [],
+      infoCodes: Array.isArray(review.infoCodes) ? review.infoCodes.map(String).slice(0, 20) : [],
+    }
+    : undefined;
   return {
     contentItems: Array.isArray(result?.content) ? result.content.length : 0,
     textItems: texts.length,
@@ -116,6 +127,7 @@ function compactOutputStats(result: any) {
     outputEstimatedTokens: estimateTokens(text),
     responseFormat: parsed && typeof parsed === 'object' ? parsed.responseFormat : undefined,
     compressionStats,
+    contractReview,
   };
 }
 
@@ -277,6 +289,12 @@ function summarizeUsage(lines: UnknownRecord[], apiUrl: string, toolset: string,
   const failureStats: UnknownRecord = {};
   const retryStats: UnknownRecord = {};
   const compressionStats: UnknownRecord = { appliedCount: 0, savedTokens: 0, originalTokens: 0, compactTokens: 0 };
+  const contractReviewStats: UnknownRecord = {
+    statuses: {},
+    errorCodes: {},
+    warningCodes: {},
+    infoCodes: {},
+  };
   const samples: UnknownRecord[] = [];
   let previousErrorTool = '';
   let previousErrorAt = 0;
@@ -326,6 +344,16 @@ function summarizeUsage(lines: UnknownRecord[], apiUrl: string, toolset: string,
       compressionStats.originalTokens += Number(stats.originalTokens || 0);
       compressionStats.compactTokens += Number(stats.compactTokens || 0);
     }
+    const contractReview = line.contractReview;
+    if (contractReview && typeof contractReview === 'object') {
+      incrementBucket(contractReviewStats.statuses, String(contractReview.status || 'unknown').slice(0, 40), { count: 1 });
+      for (const field of ['errorCodes', 'warningCodes', 'infoCodes']) {
+        const codes = Array.isArray(contractReview[field]) ? contractReview[field] : [];
+        for (const code of codes) {
+          incrementBucket(contractReviewStats[field], String(code).slice(0, 80), { count: 1 });
+        }
+      }
+    }
   }
 
   for (const [toolName, stats] of Object.entries(toolStats)) {
@@ -358,6 +386,18 @@ function summarizeUsage(lines: UnknownRecord[], apiUrl: string, toolset: string,
       authInvalidations: cacheStats.invalidations.auth || 0,
       warmFailures: cacheStats.warm.failed || 0,
       events: cacheStats.events,
+    });
+  }
+  if (Object.keys(contractReviewStats.statuses).length > 0) {
+    const counts = (value: UnknownRecord) => Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, Number((item as UnknownRecord).count || 0)]),
+    );
+    samples.push({
+      kind: 'dynamic_contract_review',
+      statuses: counts(contractReviewStats.statuses),
+      errorCodes: counts(contractReviewStats.errorCodes),
+      warningCodes: counts(contractReviewStats.warningCodes),
+      infoCodes: counts(contractReviewStats.infoCodes),
     });
   }
 

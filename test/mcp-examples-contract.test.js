@@ -5,6 +5,7 @@ import { EXAMPLE_CATEGORIES } from '../dist/lib/mcp-examples.js';
 import { validateExtensionCodeLocally } from '../dist/lib/platform-operation-tools.js';
 
 const WRITE_TOOLS = [
+  'api_endpoint_workflow',
   'ensure_route_access',
   'public_route_methods',
   'private_route_methods',
@@ -94,4 +95,30 @@ test('GraphQL has focused enablement and execution examples', () => {
   assert.match(content, /isEnabled/);
   assert.doesNotMatch(content, /set_table_graphql\(\{[^}]*\benabled:/s);
   assert.match(content, /test_graphql/);
+});
+
+test('dynamic endpoint examples preserve TypeORM body usage and shape trusted output', () => {
+  const examples = EXAMPLE_CATEGORIES['handlers-hooks'].examples;
+  const thirdPartyCreate = examples.find((example) => example.name === 'Third-party create endpoint with server-owned identity');
+  const scopedUpdate = examples.find((example) => example.name === 'Third-party scoped update endpoint');
+  const serverAction = examples.find((example) => example.name === 'Third-party action updates a non-updatable server field');
+  const registration = examples.find((example) => example.name === 'Custom register handler');
+  const canonicalRls = examples.find((example) => example.name === 'Canonical route pre-hook RLS filter merge');
+
+  assert.ok(thirdPartyCreate);
+  assert.match(thirdPartyCreate.code, /#secure\.orders\.create/);
+  assert.match(thirdPartyCreate.code, /\.\.\.@BODY[\s\S]*owner: @USER\.id/);
+  assert.ok(scopedUpdate);
+  assert.match(scopedUpdate.code, /owner: \{ id: \{ _eq: @USER\.id \} \}/);
+  assert.match(scopedUpdate.code, /#secure\.orders\.update/);
+  assert.ok(serverAction);
+  assert.match(serverAction.code, /#secure\.orders\.find/);
+  assert.match(serverAction.code, /#orders\.update/);
+  assert.doesNotMatch(serverAction.code, /data:\s*@BODY|\.\.\.@BODY/);
+  assert.match(serverAction.notes.join(' '), /Do not change status\.isUpdatable/i);
+  assert.ok(registration);
+  assert.doesNotMatch(registration.code, /return result\.data/);
+  assert.match(registration.code, /return \{ id: user\.id, email: user\.email \}/);
+  assert.ok(canonicalRls);
+  assert.match(canonicalRls.notes.join(' '), /every consumer.*eApp/i);
 });

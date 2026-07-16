@@ -71,8 +71,9 @@ export const TOOL_WORKFLOWS = [
       'Creating or changing a custom API path with handler behavior.',
       'Changing public/private method access on a custom endpoint.',
       'Adding route permissions for endpoint access.',
+      'Exposing a third-party or external integration contract whose policy must not change canonical table CRUD.',
     ],
-    keywords: ['endpoint', 'api', 'route handler', 'handler', 'webhook', 'custom route', 'rest path'],
+    keywords: ['endpoint', 'api', 'route handler', 'handler', 'webhook', 'custom route', 'rest path', 'third-party api', 'third party api', 'external integration'],
     firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'inspect_route'],
     inspectTools: ['inspect_route', 'get_all_routes', 'trace_metadata_usage'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts'],
@@ -91,12 +92,19 @@ export const TOOL_WORKFLOWS = [
         useInstead: 'api_endpoint_workflow',
         reason: 'Tables create persisted data models; custom route handlers own behavior endpoints.',
       },
+      {
+        tool: 'create_pre_hook',
+        when: 'the requirement is third-party-only owner/tenant/business policy',
+        useInstead: 'api_endpoint_workflow with policy in the handler',
+        reason: 'A canonical route pre-hook affects every consumer of that canonical CRUD route, including eApp. Keep endpoint-specific policy inside the separate endpoint contract.',
+      },
     ],
     requiredAck: ['globalRulesAckKey', 'dynamicCodeAckKey when saving handler source'],
     exampleCategories: ['handlers-hooks', 'permissions-rls'],
     nextStepTemplate: [
       'For an ambiguous, high-risk, or approval-gated change, inspect the route or run api_endpoint_workflow with apply=false.',
       'Read required knowledge before applying.',
+      'Use secure explicit repositories in custom handlers, inspect their live metadata, and keep TypeORM-style data: @BODY unless the business contract requires validation or server-owned field overrides.',
       'For a fully specified non-destructive endpoint, use applyAll after the required narrow reads; otherwise apply one reviewed pending step.',
       'Verify the endpoint with test_rest_endpoint or run_admin_test.',
     ],
@@ -346,15 +354,15 @@ export const TOOL_WORKFLOWS = [
       {
         tool: 'ensure_field_permission',
         when: 'the requirement is owner/tenant row scoping or RLS query filtering',
-        useInstead: 'create_pre_hook',
-        reason: 'Field permissions protect field visibility; row ownership/RLS is enforced by pre-hooks that merge owner/tenant filters into @QUERY.filter.',
+        useInstead: 'create_pre_hook for canonical shared policy, or api_endpoint_workflow for third-party-only policy',
+        reason: 'Field permissions protect field visibility. Canonical shared row ownership belongs in a route pre-hook; endpoint-specific ownership belongs in the custom handler.',
       },
     ],
     requiredAck: ['globalRulesAckKey'],
     exampleCategories: ['permissions-rls', 'schema-relations'],
     nextStepTemplate: [
       'Inspect the target table/route and decide the security boundary first.',
-      'Use create_pre_hook for owner/tenant row filters; use ensure_field_permission only for field visibility.',
+      'Use a canonical route pre-hook for row filters shared by every canonical CRUD consumer. Use api_endpoint_workflow when the owner/tenant/business policy belongs only to a third-party custom contract.',
       'Use the specific ensure_* operation for guard, field, or column rule surfaces.',
       'Verify with the route/query behavior the rule is meant to protect.',
     ],
@@ -386,7 +394,8 @@ export const TOOL_WORKFLOWS = [
     exampleCategories: ['flows'],
     nextStepTemplate: [
       'Use flow_workflow with apply=false for multi-step flows; use plan_flow_steps only for dry-run step selection.',
-      'Prefer fixed step types over script steps.',
+      'Prefer fixed step types for static config. Fixed-step config is not template-transformed; use one focused script step for @FLOW_PAYLOAD/@FLOW_LAST/@FLOW values.',
+      'In scripts call @LOGS(message, details?); @LOGS has no .info/.warn/.error/.debug methods.',
       'Validate/test script or condition steps before relying on the flow.',
       'Trigger manually only after the saved steps are verified.',
     ],
@@ -419,7 +428,7 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Discover websocket script context before writing source.',
       'Ensure gateway first, then event.',
-      'Use run_admin_test for event/connection scripts where possible.',
+      'Use run_admin_test(kind=websocket_event|websocket_connection) to capture emitted calls. This validates runtime script behavior but does not prove a real Socket.IO client transport/handshake.',
     ],
     recommendedScope: 'dynamic-code',
   },
@@ -450,6 +459,7 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Inspect the table and GraphQL enablement state.',
       'Use set_table_graphql for enablement changes.',
+      'Hide a field from generated GraphQL with table metadata isPublished=false. Use ensure_field_permission only when an explicit role/user subject is part of the requirement.',
       'Run test_graphql with an authenticated query and inspect GraphQL errors as data.',
       'Remember GraphQL table data requires Bearer auth even when REST is public.',
     ],
@@ -483,6 +493,7 @@ export const TOOL_WORKFLOWS = [
       'Search storage_file runtime state, then inspect the selected record/table.',
       'Use the files examples for browser proxy, multipart, progress, and @STORAGE contracts.',
       'Use generic record tools only for metadata/configuration rows, never as a binary upload substitute.',
+      'The guided MCP does not expose a binary/multipart upload input tool. For an execute-now upload request, report that capability boundary before creating metadata-only file artifacts; browser code must use multipart /enfyra/enfyra_file and dynamic code must use @STORAGE.',
     ],
     recommendedScope: 'schema',
   },
@@ -753,7 +764,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(2, 'discover_script_contexts', 'Load socket helpers and room APIs.'),
         step(3, 'search_runtime_zone', 'Locate existing websocket gateway/event with zone=websocket_runtime when editing.'),
         step(4, 'ensure_websocket_gateway / ensure_websocket_event', 'Create or update gateway/event through validation-aware tools.'),
-        step(5, 'run_admin_test', 'Verify connection/event handler behavior with the admin test runner.'),
+        step(5, 'run_admin_test', 'Verify connection/event handler behavior and captured emits with kind=websocket_event or websocket_connection. This does not prove a real Socket.IO client transport/handshake.'),
       ];
     case 'graphql':
       return [
@@ -767,7 +778,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(1, 'search_runtime_zone', 'Search storage configs, folders, files, and file permissions with zone=storage_file.'),
         step(2, 'search_runtime_zone', 'Inspect the selected storage_file result using nextInspect.input.'),
         step(3, 'get_enfyra_examples', 'Load category=files when browser multipart, proxy, progress, or @STORAGE behavior is involved.'),
-        step(4, 'create_records / update_records / delete_records', 'Mutate metadata/configuration rows only after reading required knowledge; do not use record CRUD to upload bytes.'),
+        step(4, 'create_records / update_records / delete_records', 'Mutate metadata/configuration rows only after reading required knowledge; do not use record CRUD to upload bytes. This MCP does not expose a binary/multipart upload input tool, so stop and report that boundary for execute-now upload requests.'),
         step(5, 'search_runtime_zone or query_table', 'Verify the saved metadata and public/permission state.'),
       ];
     case 'identity-access':

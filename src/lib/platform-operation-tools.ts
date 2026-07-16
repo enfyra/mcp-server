@@ -2,7 +2,13 @@ import { z } from 'zod';
 import { createHash } from 'node:crypto';
 
 import { fetchAPI } from './fetch.js';
-import { fetchTableCatalog, fetchTableMetadataByRef, resolveTableCatalogEntry } from './metadata-client.js';
+import { fetchTableCatalog, fetchTableMetadata, fetchTableMetadataByRef, resolveTableCatalogEntry } from './metadata-client.js';
+import {
+  assertCustomEndpointRoute,
+  assertDynamicEndpointContract,
+  extractExplicitRepositoryTableNames,
+  reviewDynamicEndpointContract,
+} from './dynamic-endpoint-contract.js';
 import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
 import {
   assertDynamicCodeKnowledgeAck,
@@ -2384,20 +2390,20 @@ const FLOW_STEP_TOOL_GUIDANCE = [
   {
     tool: 'ensure_create_flow_step',
     type: 'create',
-    when: 'Create one record in one table from static config or previous flow values.',
+    when: 'Create one record from static config only. Fixed step config is not template-transformed; use a script step when data comes from @FLOW_PAYLOAD, @FLOW_LAST, or @FLOW.',
     config: { table: 'table_name', data: { field: 'value' } },
   },
   {
     tool: 'ensure_update_flow_step',
     type: 'update',
-    when: 'Update one known record by id.',
-    config: { table: 'table_name', id: '@FLOW_PAYLOAD.id', data: { field: 'value' } },
+    when: 'Update one statically known record. Use a script step when id or data comes from runtime flow values.',
+    config: { table: 'table_name', id: '<static-id>', data: { field: 'value' } },
   },
   {
     tool: 'ensure_delete_flow_step',
     type: 'delete',
-    when: 'Delete one known record by id.',
-    config: { table: 'table_name', id: '@FLOW_PAYLOAD.id' },
+    when: 'Delete one statically known record. Use a script step when id comes from runtime flow values.',
+    config: { table: 'table_name', id: '<static-id>' },
   },
   {
     tool: 'ensure_http_flow_step',
@@ -2452,6 +2458,35 @@ function chooseFlowStepTool(intent) {
   return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'script');
 }
 
+const FIXED_FLOW_STEP_TYPES = new Set(['query', 'create', 'update', 'delete', 'http', 'sleep', 'trigger_flow', 'log']);
+const FLOW_RUNTIME_MACRO_PATTERN = /@FLOW(?:_PAYLOAD|_LAST|_META)?\b/u;
+
+function findFlowRuntimeMacro(value): string | null {
+  if (typeof value === 'string') return FLOW_RUNTIME_MACRO_PATTERN.exec(value)?.[0] || null;
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const match = findFlowRuntimeMacro(item);
+      if (match) return match;
+    }
+    return null;
+  }
+  if (!value || typeof value !== 'object') return null;
+  for (const item of Object.values(value)) {
+    const match = findFlowRuntimeMacro(item);
+    if (match) return match;
+  }
+  return null;
+}
+
+export function assertFixedFlowStepConfigIsStatic(type, config, index = 0) {
+  if (!FIXED_FLOW_STEP_TYPES.has(String(type))) return;
+  const macro = findFlowRuntimeMacro(config);
+  if (!macro) return;
+  throw new Error(
+    `steps[${index}] uses ${macro} inside a ${type} config, but ESV fixed flow step configs are static and are not template-transformed. Use a script step for runtime payload/previous-step values, keep one business operation in that script, and call @LOGS(message, details?) for captured logs.`
+  );
+}
+
 function planFlowSteps(steps) {
   const items = Array.isArray(steps) ? steps : [];
   return items.map((step, index) => {
@@ -2492,7 +2527,7 @@ function normalizeFlowWorkflowStep(step, index) {
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '')
     .slice(0, 64) || `step_${index + 1}`;
-  return {
+  const normalized = {
     index,
     key,
     name: input.name || intent,
@@ -2507,6 +2542,8 @@ function normalizeFlowWorkflowStep(step, index) {
     chosenByIntent: !input.type,
     recommendedTool: guidance.tool,
   };
+  assertFixedFlowStepConfigIsStatic(type, normalized.config, index);
+  return normalized;
 }
 
 async function runFlowWorkflow(apiUrl, opts) {
@@ -2536,7 +2573,7 @@ async function runFlowWorkflow(apiUrl, opts) {
       plan,
       requiredAckParams: ['globalRulesAckKey', ...(hasDynamicCode ? ['knowledgeAckKey'] : [])],
       nextSteps: [
-        'Review the plan. Prefer fixed step types; script is only for logic not covered by query/create/update/delete/http/sleep/trigger/log/condition.',
+        'Review the plan. Prefer fixed step types only for static config; ESV does not interpolate @FLOW_PAYLOAD/@FLOW_LAST/@FLOW inside fixed-step config. Use one focused script step when runtime values are required.',
         'Call flow_workflow again with apply=true and the required ack params to create/update the flow and steps sequentially.',
         'Use test_flow_step for script, condition, or high-risk steps before triggering the flow.',
       ],
@@ -2591,6 +2628,31 @@ function normalizeEndpointAccess(anonymousAccess, makePublic) {
   return anonymousAccess || 'private';
 }
 
+async function reviewCustomEndpointSource(apiUrl: string, method: string, sourceCode: string) {
+  const repositoryTables = extractExplicitRepositoryTableNames(sourceCode);
+  const selectedTables = repositoryTables.slice(0, 5);
+  const results = await Promise.allSettled(
+    selectedTables.map(async (tableName) => [tableName, await fetchTableMetadata(apiUrl, tableName)] as const),
+  );
+  const tableMetadata: Record<string, AnyRecord> = {};
+  const metadataUnavailable: string[] = [];
+  for (const [index, result] of results.entries()) {
+    if (result.status === 'fulfilled') {
+      tableMetadata[result.value[0]] = result.value[1];
+    } else {
+      metadataUnavailable.push(selectedTables[index]);
+    }
+  }
+  return reviewDynamicEndpointContract({
+    routeKind: 'custom',
+    method,
+    sourceCode,
+    tableMetadata,
+    metadataUnavailable,
+    metadataTruncated: repositoryTables.length > selectedTables.length,
+  });
+}
+
 function sourceMatches(existingHandler, sourceCode, scriptLanguage, timeout) {
   if (!existingHandler) return false;
   if (String(existingHandler.sourceCode ?? '') !== String(sourceCode ?? '')) return false;
@@ -2619,19 +2681,26 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
   const normalizedPath = normalizeRestPath(opts.path);
   const methodName = normalizeMethodName(opts.method);
   const access = normalizeEndpointAccess(opts.anonymousAccess, opts.public);
+  assertDynamicEndpointContract(reviewDynamicEndpointContract({
+    routeKind: 'custom',
+    method: methodName,
+    sourceCode: opts.sourceCode,
+  }));
   const { methodMap, methodIdNameMap } = await getMethodContext(apiUrl);
   const methodId = methodMap[methodName];
   if (!methodId) throw new Error(`Unknown method "${methodName}". Valid methods: ${Object.keys(methodMap).sort().join(', ')}`);
 
-  const [routes, scriptValidation] = await Promise.all([
+  const [routes, scriptValidation, contractReview] = await Promise.all([
     fetchAll(apiUrl, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,description,availableMethods.*,publicMethods.*,mainTable.name'),
     validateScriptSourceIfPresent(fetchAPI, apiUrl, 'enfyra_route_handler', {
       sourceCode: opts.sourceCode,
       scriptLanguage: opts.scriptLanguage || 'javascript',
     }),
+    reviewCustomEndpointSource(apiUrl, methodName, opts.sourceCode),
   ]);
 
   const route = routes.find((item) => item.path === normalizedPath) || null;
+  assertCustomEndpointRoute(route);
   const routeId = getId(route);
   const availableMethods = methodNamesFromRecords(route?.availableMethods || [], methodIdNameMap);
   const publicMethods = methodNamesFromRecords(route?.publicMethods || [], methodIdNameMap);
@@ -2758,6 +2827,7 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
     handler,
     role,
     scriptValidation,
+    contractReview,
     steps,
     firstRunnable,
     blocked,
@@ -2919,6 +2989,7 @@ async function runApiEndpointWorkflow(apiUrl, opts) {
     action: operations.length ? 'api_endpoint_workflow_advanced' : 'api_endpoint_workflow_planned',
     endpoint: latestState.endpoint,
     scriptValidation: latestState.scriptValidation,
+    contractReview: latestState.contractReview,
     steps: latestSteps,
     operations,
     complete: latestSteps.every((item) => ['completed', 'skipped'].includes(item.status)),
@@ -3830,13 +3901,13 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     [
       'Step-by-step workflow for creating or updating a custom REST endpoint.',
       'Use this when an LLM is building or changing endpoint behavior and should follow live nextSteps instead of guessing raw metadata mutations.',
-      'With apply=false it validates sourceCode, reads live route/handler/access state, and returns pending steps.',
+      'With apply=false it validates sourceCode, blocks canonical-route collisions, reviews explicit repository metadata/security boundaries, reads live route/handler/access state, and returns pending steps.',
       'With apply=true it applies only the next pending step, then returns a fresh plan. With applyAll=true it advances all currently safe pending steps.',
     ].join(' '),
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, and @USER. Repository calls are async and reads return result.data. Use @REPOS.main or #secure.table_name/@REPOS.secure.table_name for user-facing access; reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
+      sourceCode: z.string().describe('Handler sourceCode for a custom route, which has no main table. Use #secure.table_name or @REPOS.secure.table_name for user-facing explicit-table access. Repository calls are async and reads return result.data. Passing @BODY as create/update data is valid TypeORM-style usage; enforce endpoint-specific owner/tenant/business rules in code. Reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       anonymousAccess: z.enum(['public', 'private']).optional().default('private').describe('public adds the method to publicMethods; private removes this method from publicMethods.'),
       public: z.boolean().optional().describe('Compatibility alias for anonymousAccess. true means public, false means private.'),
@@ -3871,7 +3942,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode. Use macros such as @QUERY, @BODY, @THROW400, @REPOS, and @USER. Repository calls are async and reads return result.data. Use @REPOS.main or #secure.table_name/@REPOS.secure.table_name for user-facing access; reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
+      sourceCode: z.string().describe('Handler sourceCode for a custom route, which has no main table. Use #secure.table_name or @REPOS.secure.table_name for user-facing explicit-table access. Repository calls are async and reads return result.data. Passing @BODY as create/update data is valid TypeORM-style usage; enforce endpoint-specific owner/tenant/business rules in code. Reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       public: z.boolean().optional().default(false).describe('When true, the method is added to publicMethods for anonymous access.'),
       description: z.string().optional().describe('Route description.'),
@@ -3887,12 +3958,25 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       assertDynamicCodeKnowledgeAck(knowledgeAckKey);
       const normalizedPath = normalizeRestPath(path);
       const methodName = normalizeMethodName(method);
-      const { methodMap, methodIdNameMap } = await getMethodContext(ENFYRA_API_URL);
+      assertDynamicEndpointContract(reviewDynamicEndpointContract({
+        routeKind: 'custom',
+        method: methodName,
+        sourceCode,
+      }));
+      const [{ methodMap, methodIdNameMap }, routes, scriptValidation, contractReview] = await Promise.all([
+        getMethodContext(ENFYRA_API_URL),
+        fetchAll(ENFYRA_API_URL, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,availableMethods.*,publicMethods.*,mainTable.name'),
+        validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_route_handler', {
+          sourceCode,
+          scriptLanguage,
+        }),
+        reviewCustomEndpointSource(ENFYRA_API_URL, methodName, sourceCode),
+      ]);
       const methodId = methodMap[methodName];
       if (!methodId) throw new Error(`Unknown method "${methodName}". Valid methods: ${Object.keys(methodMap).sort().join(', ')}`);
 
-      const routes = await fetchAll(ENFYRA_API_URL, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,availableMethods.*,publicMethods.*,mainTable.name');
       let route = routes.find((item) => item.path === normalizedPath);
+      assertCustomEndpointRoute(route);
       let routeAction = 'existing';
       if (!route) {
         const createRouteResult = await fetchAPI(ENFYRA_API_URL, '/enfyra_route', {
@@ -3925,10 +4009,6 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       }
 
       const routeId = getId(route);
-      const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_route_handler', {
-        sourceCode,
-        scriptLanguage,
-      });
       const existingHandler = await findHandler(ENFYRA_API_URL, routeId, methodId);
       let handlerResult;
       let handlerAction;
@@ -3991,6 +4071,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
             routeAction,
             handlerAction,
             scriptValidation,
+            contractReview,
             routeReload,
             smokeTest,
             usage: {
@@ -4342,6 +4423,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       'Workflow front door for creating or updating an Enfyra flow and its steps in one guided path.',
       'For a fully specified, non-destructive flow, use apply=true to create/update the flow and all steps sequentially in one call. Use apply=false only when step types or risk need review.',
       'Prefer this over choosing individual ensure_*_flow_step tools in guided mode.',
+      'Fixed query/create/update/delete/http/sleep/trigger/log config is static in current ESV and does not interpolate @FLOW_PAYLOAD/@FLOW_LAST/@FLOW; use a focused script step for runtime values.',
     ].join(' '),
     {
       name: z.string().describe('Flow name. Existing flow with this name is updated.'),
@@ -4354,7 +4436,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
           name: z.string().optional().describe('Human label. Defaults from intent.'),
           intent: z.string().optional().describe('Plain-language step intent. Used to choose a fixed step type when type is omitted.'),
           type: z.enum(['query', 'create', 'update', 'delete', 'http', 'condition', 'sleep', 'trigger_flow', 'log', 'script']).optional().describe('Explicit step type. Omit to let the workflow choose from intent.'),
-          config: z.union([z.record(z.any()), z.string()]).optional().describe('Step config object or JSON string. For query/create/update/delete/http/sleep/trigger/log steps, prefer config over sourceCode.'),
+          config: z.union([z.record(z.any()), z.string()]).optional().describe('Step config object or JSON string. Fixed-step config is static and cannot contain @FLOW_PAYLOAD/@FLOW_LAST/@FLOW. Use a focused script step for runtime values.'),
           sourceCode: z.string().optional().describe('Only for script or condition steps. Use fixed step types when possible.'),
           scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript'),
           order: z.number().optional().describe('Step order. Defaults to index * 10.'),

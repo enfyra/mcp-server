@@ -114,6 +114,7 @@ return { ok: true, id: ${idExpression} }`;
   }
 
   const fieldPermissionsEnforced = input.access !== 'trusted_explicit';
+  const typeOrmPartialBody = input.operation === 'create' || input.operation === 'update';
   return {
     access: input.access,
     operation: input.operation,
@@ -123,6 +124,13 @@ return { ok: true, id: ${idExpression} }`;
     securityBoundary: fieldPermissionsEnforced
       ? 'Field permissions are enforced by the selected secure repository. Owner, tenant, membership, and route authorization remain separate checks.'
       : 'This trusted repository bypasses field permissions. Use it only for intentional internal work, request exact fields, enforce authorization explicitly, and never return raw trusted rows.',
+    typeOrmPartialBody,
+    adaptationRecipes: {
+      serverOwnedField: 'When the live metadata identifies a server-owned field, adapt the mutation to data: { ...@BODY, <server_owned_field>: @USER.id } so caller input cannot override it.',
+      scopedMutation: 'For endpoint-specific owner/tenant policy, load the target with both id and the owner/tenant filter before update/delete, then perform the repository mutation.',
+      nonUpdatableServerAction: 'Do not change canonical metadata isUpdatable merely so a custom action can write a server-owned field. Prove row scope with a secure lookup, then use a trusted explicit repository for an exact server-controlled write with no raw @BODY and return a shaped response.',
+      customValidation: 'Custom handlers do not inherit canonical column-rule/Zod body middleware. Validate extra business semantics in the handler when required.',
+    },
     code,
     next: 'Adapt only live field, filter, owner/tenant, and domain error details; keep the repository access class, await, result.data shape, and bounded query contract.',
   };

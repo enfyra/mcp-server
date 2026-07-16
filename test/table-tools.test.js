@@ -6,6 +6,7 @@ import { initAuth, resetTokens } from '../dist/lib/auth.js';
 import { fetchAPI } from '../dist/lib/fetch.js';
 import {
   buildColumnDefinition,
+  assertColumnContractBroadening,
   assertIndexesDoNotReferenceUniqueFields,
   buildPrimaryColumnForDbType,
   computeBatchCleanupOrder,
@@ -22,6 +23,7 @@ import {
   resolveTableFromMetadataByName,
   sanitizeExistingRelationForTablePatch,
 } from '../dist/lib/table-tools.js';
+
 import { prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource } from '../dist/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../dist/lib/route-guards.js';
 import {
@@ -38,6 +40,38 @@ import {
   summarizeRouteAccess,
   validateMethodsForRoute,
 } from '../dist/lib/route-permission-tools.js';
+
+test('column contract broadening requires explicit acknowledgement', () => {
+  assert.throws(
+    () => assertColumnContractBroadening(
+      { isUpdatable: false, isPublished: false },
+      { isUpdatable: true },
+    ),
+    /blocked in the guided toolset/,
+  );
+  assert.throws(
+    () => assertColumnContractBroadening(
+      { isUpdatable: false, isPublished: false },
+      { isUpdatable: true, isPublished: true, allowContractBroadening: true },
+    ),
+    /blocked in the guided toolset/,
+  );
+  assert.deepEqual(
+    assertColumnContractBroadening(
+      { isUpdatable: false, isPublished: false },
+      { isUpdatable: true, isPublished: true, allowContractBroadening: true },
+      'full',
+    ),
+    ['isUpdatable false→true', 'isPublished false→true'],
+  );
+  assert.deepEqual(
+    assertColumnContractBroadening(
+      { isUpdatable: true, isPublished: true },
+      { isUpdatable: false, isPublished: false },
+    ),
+    [],
+  );
+});
 
 test('platform operation module imports cleanly', async () => {
   const module = await import('../dist/lib/platform-operation-tools.js');
@@ -647,6 +681,22 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
   assert.equal(endpoint.key, 'api-endpoint');
   assert.ok(endpoint.primaryPath.some((step) => step.tool === 'api_endpoint_workflow'));
   assert.match(JSON.stringify(endpoint.avoidTools), /create_route/);
+
+  const thirdPartyPolicy = discoverWorkflowRoutes({
+    intent: 'expose orders to a third-party app with endpoint-specific owner policy',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(thirdPartyPolicy.key, 'api-endpoint');
+  assert.match(JSON.stringify(thirdPartyPolicy.primaryPath), /api_endpoint_workflow/);
+
+  const canonicalPolicy = discoverWorkflowRoutes({
+    intent: 'add owner tenant RLS to canonical orders CRUD',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(canonicalPolicy.key, 'guards-permissions-rules');
+  assert.match(JSON.stringify(canonicalPolicy.primaryPath), /create_pre_hook/);
 
   const flow = discoverWorkflowRoutes({
     intent: 'add a provisioning flow step that queries then updates a record',
@@ -2222,6 +2272,24 @@ test('dynamic script guidance documents repository deep projection contract', ()
   assert.match(requiredKnowledge, /Reserve #table_name\/@REPOS\.table_name for trusted internal work/);
 });
 
+test('dynamic endpoint guidance distinguishes canonical policy from custom endpoint policy', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
+  const routing = readFileSync(new URL('../src/lib/tool-routing.ts', import.meta.url), 'utf8');
+  const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.ts', import.meta.url), 'utf8');
+
+  assert.match(requiredKnowledge, /Custom routes have no main table/);
+  assert.match(requiredKnowledge, /canonical route pre-hook/);
+  assert.match(requiredKnowledge, /data: @BODY/);
+  assert.match(requiredKnowledge, /column-rule\/Zod/);
+  assert.match(routing, /third-party-only owner\/tenant\/business policy/);
+  assert.match(routing, /canonical route pre-hook/);
+  assert.doesNotMatch(platformTools, /sourceCode: z\.string\(\)\.describe\('[^']*@REPOS\.main/);
+  assert.match(platformTools, /assertCustomEndpointRoute\(route\)/);
+  assert.match(entry, /#secure\.orders/);
+  assert.doesNotMatch(entry, /explicit repos such as `\$ctx\.\$repos\.orders`/);
+});
+
 test('guidance rejects sql-like filter operators', () => {
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
@@ -2332,7 +2400,7 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260704H$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-07-14.secure-repositories-graphql-metadata');
+  assert.equal(payload.version, '2026-07-16.runtime-surface-contracts');
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);

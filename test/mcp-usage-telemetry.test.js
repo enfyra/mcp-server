@@ -36,6 +36,20 @@ test('mcp usage telemetry summarizes token, retry, failure, and compression evid
       outputEstimatedTokens: 6000,
       durationMs: 20,
     },
+    {
+      timestamp: '2026-07-04T00:03:00.000Z',
+      toolName: 'api_endpoint_workflow',
+      status: 'ok',
+      inputEstimatedTokens: 0,
+      outputEstimatedTokens: 0,
+      durationMs: 5,
+      contractReview: {
+        status: 'review_required',
+        errorCodes: [],
+        warningCodes: ['trusted_repository_bypass'],
+        infoCodes: ['typeorm_partial_body'],
+      },
+    },
   ], 'https://admin.enfyra.io/api', 'guided', {
     hits: 8,
     misses: 2,
@@ -48,7 +62,7 @@ test('mcp usage telemetry summarizes token, retry, failure, and compression evid
   });
 
   assert.equal(report.schema_version, 'v1');
-  assert.equal(report.tool_call_count, 3);
+  assert.equal(report.tool_call_count, 4);
   assert.equal(report.failed_call_count, 1);
   assert.equal(report.retry_signal_count, 1);
   assert.equal(report.input_token_estimate, 60);
@@ -61,6 +75,11 @@ test('mcp usage telemetry summarizes token, retry, failure, and compression evid
   assert.equal(report.samples.some((item) => item.kind === 'token_hotspot' && item.toolName === 'query_table'), true);
   assert.equal(report.samples.some((item) => item.kind === 'cache_summary' && item.hitRate === 0.8 && item.warmSuccessRate === 0.5), true);
   assert.equal(report.samples.some((item) => item.kind === 'cache_recovery' && item.warmFailures === 1 && item.events[0].kind === 'warm_failure'), true);
+  assert.equal(report.samples.some((item) => (
+    item.kind === 'dynamic_contract_review'
+    && item.statuses.review_required === 1
+    && item.warningCodes.trusted_repository_bypass === 1
+  )), true);
   assert.match(report.client_hash, /^[a-f0-9]{32}$/);
   assert.match(report.api_host_hash, /^[a-f0-9]{32}$/);
   assert.equal(JSON.stringify(report).includes('admin.enfyra.io'), false);
