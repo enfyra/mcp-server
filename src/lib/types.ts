@@ -17,6 +17,92 @@ export interface ToolResult {
 
 export type UnknownRecord = Record<string, unknown>;
 
+export interface McpToolAnnotations {
+  title: string;
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+}
+
+export interface McpToolContract {
+  name: string;
+  annotations: McpToolAnnotations;
+  catalogExecutable: boolean;
+}
+
+export interface RegisteredToolDefinition {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: McpToolAnnotations;
+  handler: (...args: any[]) => any;
+  visible: boolean;
+  registration?: {
+    enabled: boolean;
+  };
+}
+
+export interface ToolsetRegistrationState {
+  toolset: string;
+  profile: string;
+  dynamic: boolean;
+  hiddenTools: string[];
+  getTool(name: string): RegisteredToolDefinition | undefined;
+  listTools(): RegisteredToolDefinition[];
+  listVisibleToolNames(): string[];
+  setActiveTools(toolNames: Iterable<string>): {
+    changed: boolean;
+    visibleToolNames: string[];
+    hiddenToolCount: number;
+  };
+}
+
+export type ToolAvailabilityStatus = 'allowed' | 'denied' | 'unknown';
+
+export interface ToolAvailability {
+  status: ToolAvailabilityStatus;
+  reason: string;
+}
+
+export interface ModelEvalTraceEvent {
+  tool: string;
+  arguments?: Record<string, unknown>;
+  result?: unknown;
+  isError?: boolean;
+}
+
+export interface ModelEvalRun {
+  scenarioId: string;
+  model: string;
+  events: ModelEvalTraceEvent[];
+}
+
+export interface ModelEvalScenario {
+  id: string;
+  prompt: string;
+  surface: string;
+  requiredToolGroups: string[][];
+  verificationTools: string[];
+  maxToolCalls: number;
+  mutationExpected: boolean;
+  destructiveExpected?: boolean;
+}
+
+export interface ModelEvalCheck {
+  key: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface ModelEvalScore {
+  scenarioId: string;
+  model: string;
+  score: number;
+  recommended: boolean;
+  checks: ModelEvalCheck[];
+}
+
 export interface MetadataContext {
   dbType: "postgres" | "mysql" | "mongodb" | "mariadb" | "sqlite" | null;
   enfyraVersion: string | null;

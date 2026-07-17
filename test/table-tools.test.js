@@ -714,7 +714,8 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
     detail: 'plan',
   }).workflows[0];
   assert.equal(flowSourcePatch.key, 'dynamic-script');
-  assert.ok(flowSourcePatch.primaryPath.some((step) => step.tool === 'get_script_source'));
+  assert.ok(flowSourcePatch.primaryPath.some((step) => step.tool === 'search_runtime_zone'));
+  assert.equal(flowSourcePatch.primaryPath.some((step) => step.tool === 'get_script_source'), false);
   assert.ok(flowSourcePatch.primaryPath.some((step) => step.tool === 'patch_script_source or update_script_source'));
 
   const schema = discoverWorkflowRoutes({
@@ -2386,9 +2387,9 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
   const payload = buildRequiredKnowledgePayload();
   const payloadText = JSON.stringify(payload);
 
-  assert.match(GLOBAL_RULES_ACK_KEY, /20260704H$/);
+  assert.match(GLOBAL_RULES_ACK_KEY, /20260717I$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-07-17.async-helper-contract');
+  assert.equal(payload.version, '2026-07-17.runtime-zone-inventory-locator-first');
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);

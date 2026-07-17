@@ -20,7 +20,7 @@ export const WORKFLOW_SURFACES = [
 
 const ALL_DETAILS = ['summary', 'plan', 'full'] as const;
 
-type WorkflowSurface = typeof WORKFLOW_SURFACES[number];
+export type WorkflowSurface = typeof WORKFLOW_SURFACES[number];
 type WorkflowDetail = typeof ALL_DETAILS[number];
 
 type AvoidToolRule = {
@@ -131,7 +131,7 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'search_admin_extensions'],
     inspectTools: ['search_admin_extensions(mode=search)', 'search_admin_extensions(mode=inspect)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'build_extension_ui'],
-    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
+    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension', 'delete_records'],
     verifyTools: ['verify_extension_runtime', 'build_extension_ui(kind=runtime_review|theme_review|review)', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     avoidTools: [
       {
@@ -160,6 +160,7 @@ export const TOOL_WORKFLOWS = [
       'Use search_admin_extensions to locate the existing menu/extension/global shell registration, then inspect one candidate before editing.',
       'Use extension_workflow with apply=false only when page/menu wiring is ambiguous or needs approval; use applyAll after narrow inspection when the requested create/wire contract is fully specified.',
       'Use reorder_menus for menu order/parent changes instead of patching individual enfyra_menu records.',
+      'For temporary extension cleanup, inspect the exact extension id, preview delete_records on enfyra_extension with confirm=false, repeat with confirm=true, then verify absence with search_admin_extensions.',
       'Choose count only when the source already owns an exact count; choose dot/chip for new-attention signals.',
       'Validate extension code or use an ensure_*_extension tool that validates before saving.',
     ],
@@ -265,7 +266,7 @@ export const TOOL_WORKFLOWS = [
     ],
     keywords: ['sourcecode', 'script', 'hook', 'pre hook', 'post hook', 'compiledcode', 'macro', 'repos', 'bootstrap'],
     firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'build_dynamic_repository_usage', 'search_runtime_zone'],
-    inspectTools: ['search_runtime_zone(mode=search, zone=api_runtime|flow_runtime|websocket_runtime)', 'search_runtime_zone(mode=inspect)', 'trace_metadata_usage', 'get_script_source', 'discover_script_contexts'],
+    inspectTools: ['search_runtime_zone(mode=search, zone=api_runtime|flow_runtime|websocket_runtime)', 'search_runtime_zone(mode=inspect)', 'trace_metadata_usage', 'discover_script_contexts'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'build_dynamic_repository_usage'],
     writeTools: ['patch_script_source', 'update_script_source', 'create_handler', 'create_pre_hook', 'create_post_hook', 'api_endpoint_workflow'],
     verifyTools: ['validate_dynamic_script', 'run_admin_test', 'test_rest_endpoint', 'test_flow_step'],
@@ -288,7 +289,7 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Discover script context macros for the surface.',
       'Generate repository access with build_dynamic_repository_usage instead of composing secure/trusted syntax from memory.',
-      'Read existing source through trace_metadata_usage/get_script_source when patching.',
+      'Use the source artifact returned by search_runtime_zone(mode=inspect) or trace_metadata_usage when patching.',
       'Validate source before save unless the chosen write tool already validates.',
       'Verify behavior with the route/test runner that matches the script surface.',
     ],
@@ -747,9 +748,8 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(2, 'discover_script_contexts', 'Load macros, repository trust paths, per-surface helpers, and the fields+deep projection contract for script repository reads.'),
         step(3, 'build_dynamic_repository_usage', 'Generate secure or intentional trusted repository access when the script reads or writes table data.'),
         step(4, 'search_runtime_zone', 'Locate the script-backed runtime artifact in api_runtime, flow_runtime, or websocket_runtime.'),
-        step(5, 'get_script_source', 'Read editable sourceCode and hash for the selected record.'),
-        step(6, 'patch_script_source or update_script_source', 'Patch or replace source with validation and hash checks.'),
-        step(7, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify through the runtime path that owns the script.'),
+        step(5, 'patch_script_source or update_script_source', 'Patch or replace the inspected source artifact with validation and hash checks.'),
+        step(6, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify through the runtime path that owns the script.'),
       ];
     case 'route-access':
     case 'guards-permissions-rules':
@@ -836,7 +836,26 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
 }
 
 function splitCompositeToolName(tool: string) {
-  return tool.split(/\s+or\s+| \/ /g).map((item) => item.trim()).filter(Boolean);
+  if (tool === 'full toolset reload tools') return [];
+  return tool
+    .split(/\s+or\s+|\s*\/\s*/g)
+    .map((item) => item.trim().replace(/\(.*/, ''))
+    .filter(Boolean);
+}
+
+export function workflowToolNames(surface: WorkflowSurface) {
+  const workflow = TOOL_WORKFLOWS.find((item) => item.key === surface);
+  if (!workflow) return [];
+  return [...new Set([
+    ...workflow.firstTools,
+    ...workflow.inspectTools,
+    ...workflow.knowledgeTools,
+    ...workflow.writeTools,
+    ...workflow.verifyTools,
+    ...primaryPathFor(workflow).flatMap((item) => splitCompositeToolName(item.tool)),
+    ...advancedToolsFor(workflow).flatMap(splitCompositeToolName),
+    ...verifyPathFor(workflow).flatMap((item) => splitCompositeToolName(item.tool)),
+  ])];
 }
 
 function advancedToolsFor(workflow: ToolWorkflow) {

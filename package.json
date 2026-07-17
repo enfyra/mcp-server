@@ -1,6 +1,6 @@
 {
   "name": "@enfyra/mcp-server",
-  "version": "0.1.64",
+  "version": "0.1.66",
   "description": "MCP server for Enfyra - manage Enfyra instances from MCP-compatible coding tools",
   "type": "module",
   "packageManager": "yarn@4.17.0",
@@ -21,6 +21,8 @@
     "mcp:config": "node dist/index.js config",
     "test": "yarn build && node --test",
     "test:e2e:extension": "yarn build && node scripts/e2e-extension-lifecycle.mjs",
+    "test:e2e:contracts": "yarn build && node scripts/eval-mcp-contracts.mjs",
+    "test:e2e:p2": "yarn build && node scripts/eval-mcp-contracts.mjs && node scripts/eval-model-workflows.mjs",
     "prepack": "yarn build"
   },
   "dependencies": {
@@ -29,7 +31,8 @@
     "@vue/compiler-sfc": "^3.5.0",
     "dotenv": "^17.3.1",
     "socket.io-client": "^4.8.3",
-    "zod": "^3.24.0"
+    "zod": "^3.24.0",
+    "zod-to-json-schema": "^3.25.0"
   },
   "publishConfig": {
     "access": "public"

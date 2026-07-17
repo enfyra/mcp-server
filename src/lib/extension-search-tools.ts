@@ -1,6 +1,7 @@
 import { fetchAPI } from './fetch.js';
 import { writeSourceArtifact } from './source-artifacts.js';
 import { normalizeSnippetChars } from './tool-input-normalization.js';
+import { paginateResults } from './pagination.js';
 
 type ExtensionRecord = Record<string, any>;
 type MenuRecord = Record<string, any>;
@@ -182,6 +183,7 @@ function lineEntries(code: string) {
 
 function compactArtifact(artifact: ReturnType<typeof writeSourceArtifact>) {
   return {
+    resourceUri: artifact.resourceUri,
     tmpFile: artifact.tmpFile,
     length: artifact.length,
     sha256: artifact.sha256,
@@ -292,7 +294,7 @@ export async function searchExtensions(apiUrl: string, input: any) {
   const includeDisabled = input.includeDisabled !== false;
   const includeSourceArtifact = Boolean(input.includeSourceArtifact);
 
-  if (!query && !path && !type) {
+  if (!query && !path && !type && !input.allowInventory) {
     throw new Error('Provide query, path, or type so extension search stays bounded.');
   }
 
@@ -328,14 +330,18 @@ export async function searchExtensions(apiUrl: string, input: any) {
       });
     }
 
-    if (matches.length > 0 || (type && !query && !path)) {
+    if (matches.length > 0 || (type && !query && !path) || input.allowInventory) {
       results.push(summarizeExtension(extension, menu, matches, includeSourceArtifact, exactPathMatch));
     }
   }
 
   results.sort((a, b) => Number(b.exactPathMatch) - Number(a.exactPathMatch) || b.score - a.score || String(a.name).localeCompare(String(b.name)));
-  const limited = results.slice(0, maxResults);
-  const estimatedOutputChars = JSON.stringify(limited).length;
+  const paginated = paginateResults(results, {
+    limit: maxResults,
+    cursor: input.cursor,
+    fingerprint: { query, path, type: type || null, includeDisabled, maxResults },
+  });
+  const estimatedOutputChars = JSON.stringify(paginated.items).length;
 
   return {
     action: 'extensions_searched',
@@ -347,8 +353,9 @@ export async function searchExtensions(apiUrl: string, input: any) {
       menus: menus.length,
       includeDisabled,
     },
-    results: limited,
+    results: paginated.items,
     resultCount: results.length,
+    page: paginated.page,
     tokenBudget: {
       estimatedOutputChars,
       estimatedOutputTokens: Math.ceil(estimatedOutputChars / 4),

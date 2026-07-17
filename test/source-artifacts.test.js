@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { compactSourceFields, writeSourceArtifact } from '../dist/lib/source-artifacts.js';
+import { compactSourceFields, readSourceArtifactResource, writeSourceArtifact } from '../dist/lib/source-artifacts.js';
 
 test('writeSourceArtifact stores full source in tmp and returns compact metadata', () => {
   const source = 'export default ' + 'x'.repeat(1600);
@@ -15,8 +15,12 @@ test('writeSourceArtifact stores full source in tmp and returns compact metadata
 
   assert.match(artifact.tmpFile, /enfyra-mcp-sources/);
   assert.match(artifact.tmpFile, /\.vue$/);
+  assert.match(artifact.resourceUri, /^enfyra-source:\/\/artifact\//);
   assert.equal(artifact.length, source.length);
   assert.equal(readFileSync(artifact.tmpFile, 'utf8'), source);
+  const resource = readSourceArtifactResource(artifact.resourceUri);
+  assert.equal(resource.text, source);
+  assert.equal(resource.mimeType, 'text/x-vue');
   assert.notEqual(artifact.preview, source);
   assert.ok(artifact.preview.length <= 600);
 });

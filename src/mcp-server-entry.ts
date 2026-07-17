@@ -5,7 +5,7 @@
 import { config } from 'dotenv';
 config();
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
@@ -117,8 +117,13 @@ import { installColumnarToolFormatter, jsonContent } from './lib/response-format
 import { startMcpUsageTelemetry } from './lib/mcp-usage-telemetry.js';
 import { startRuntimeCacheSocket } from './lib/runtime-cache-socket.js';
 import { executeSequentialBatch } from './lib/sequential-batch.js';
-import { compactSourceFields, writeSourceArtifact } from './lib/source-artifacts.js';
-import { installToolsetFilter, normalizeMcpProfile, normalizeMcpToolset, summarizeToolsetForInstructions } from './lib/toolset-filter.js';
+import { compactSourceFields, readSourceArtifactResource, writeSourceArtifact } from './lib/source-artifacts.js';
+import { installToolsetFilter, normalizeDynamicToolPacks, normalizeMcpProfile, normalizeMcpToolset, summarizeToolsetForInstructions } from './lib/toolset-filter.js';
+import { installToolAnnotations } from './lib/tool-contracts.js';
+import { installToolOutputContracts } from './lib/tool-output-contracts.js';
+import { registerToolCatalogTools } from './lib/tool-catalog.js';
+import { registerWorkflowToolPack } from './lib/workflow-tool-packs.js';
+import type { ToolAvailability } from './lib/types.js';
 import {
   findRoutePermission,
   mergeMethodNames,
@@ -135,6 +140,7 @@ import {
 initAuth(ENFYRA_API_URL, ENFYRA_API_TOKEN);
 const MCP_TOOLSET = normalizeMcpToolset(process.env.ENFYRA_MCP_TOOLSET);
 const MCP_PROFILE = normalizeMcpProfile(process.env.ENFYRA_MCP_PROFILE);
+const MCP_DYNAMIC_TOOLS = normalizeDynamicToolPacks(process.env.ENFYRA_MCP_DYNAMIC_TOOLS, MCP_TOOLSET, MCP_PROFILE);
 
 const CAPABILITY_AREAS = [
   {
@@ -504,6 +510,31 @@ function summarizePermissionProfile(user) {
         tools: item.tools,
       })),
   };
+}
+
+async function resolveCatalogToolAvailability(toolNames: string[]): Promise<Record<string, ToolAvailability>> {
+  const fields = DEFAULT_ME_PERMISSION_FIELDS.join(',');
+  const result = await fetchAPI(ENFYRA_API_URL, `/me?fields=${encodeURIComponent(fields)}`);
+  const user = firstDataRecord(result);
+  if (user?.isRootAdmin) {
+    return Object.fromEntries(toolNames.map((name) => [name, {
+      status: 'allowed',
+      reason: 'The configured PAT belongs to a root administrator.',
+    }]));
+  }
+  const requirements = summarizePermissionProfile(user).mcpRequirements;
+  return Object.fromEntries(toolNames.map((name) => {
+    const requirement = requirements.find((item) => item.tools.includes(name));
+    if (!requirement) {
+      return [name, {
+        status: 'unknown',
+        reason: 'No static admin-route capability mapping exists for this tool; Enfyra PAT/RBAC remains authoritative at execution time.',
+      }];
+    }
+    return [name, requirement.allowed
+      ? { status: 'allowed', reason: `Current PAT grants ${requirement.methods.map((item) => item.method).join(', ')} ${requirement.route}.` }
+      : { status: 'denied', reason: `Current PAT lacks one or more required methods on ${requirement.route}.` }];
+  }));
 }
 
 function parseJsonArg(value, fallback = undefined) {
@@ -915,13 +946,25 @@ const server = new McpServer(
   },
   {
     instructions: buildMcpServerInstructions(ENFYRA_API_URL, {
-      toolsetSummary: summarizeToolsetForInstructions(MCP_TOOLSET, MCP_PROFILE),
+      toolsetSummary: summarizeToolsetForInstructions(MCP_TOOLSET, MCP_PROFILE, MCP_DYNAMIC_TOOLS),
     }),
   },
 );
+installToolOutputContracts(server);
 installColumnarToolFormatter(server);
-installToolsetFilter(server, MCP_TOOLSET, MCP_PROFILE);
+const toolsetState = installToolsetFilter(server, MCP_TOOLSET, MCP_PROFILE, { dynamic: MCP_DYNAMIC_TOOLS });
+installToolAnnotations(server);
 startMcpUsageTelemetry(ENFYRA_API_URL, `${MCP_TOOLSET}:${MCP_PROFILE}`);
+server.registerResource(
+  'enfyra-source-artifact',
+  new ResourceTemplate('enfyra-source://artifact/{artifactId}', { list: undefined }),
+  {
+    title: 'Enfyra source artifact',
+    description: 'Process-scoped source or diff artifact created by an Enfyra MCP inspect or preview tool.',
+    mimeType: 'text/plain',
+  },
+  async (uri) => ({ contents: [readSourceArtifactResource(uri.href)] }),
+);
 
 // ============================================================================
 // METADATA TOOLS
@@ -1821,11 +1864,12 @@ server.tool(
   'get_script_source',
   [
     'Fetch the full editable source for one script-backed metadata record without preview truncation.',
-    'Use this before reviewing or patching long handlers, hooks, flow steps, websocket scripts, OAuth provisioning scripts, or bootstrap scripts.',
+    'Use search_runtime_zone first and pass the returned nextInspect.input to inspect the concrete record. The inspection already returns exact source artifacts.',
+    'Call get_script_source only when a fresh artifact is needed for that located record. Never guess or probe record ids.',
   ].join(' '),
   {
     tableName: z.enum(SCRIPT_BACKED_TABLES).describe('Script-backed table to read'),
-    id: z.string().describe('Record ID to read'),
+    id: z.string().describe('Concrete record id returned by search_runtime_zone, inspect output, or a successful create/update operation. Never guess an id.'),
   },
   async ({ tableName, id }) => {
     const { primaryKey, record, sourceField, sourceCode } = await fetchScriptRecord(tableName, id);
@@ -3576,6 +3620,11 @@ server.tool(
     });
   },
 );
+
+registerToolCatalogTools(server, toolsetState, {
+  resolveAvailability: resolveCatalogToolAvailability,
+});
+registerWorkflowToolPack(server, toolsetState);
 
 // ============================================================================
 // MAIN

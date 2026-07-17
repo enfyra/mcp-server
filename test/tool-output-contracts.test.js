@@ -1,0 +1,99 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { z } from 'zod';
+import {
+  getToolOutputSchema,
+  installToolOutputContracts,
+  validateStructuredToolOutput,
+} from '../dist/lib/tool-output-contracts.js';
+import { formatJsonPayload } from '../dist/lib/response-format.js';
+
+test('core workflow tools receive formal output schemas', () => {
+  for (const name of [
+    'discover_enfyra_workflows',
+    'select_enfyra_workflow',
+    'search_enfyra_tools',
+    'execute_enfyra_tool',
+    'get_enfyra_api_context',
+    'get_permission_profile',
+    'search_runtime_zone',
+    'search_admin_extensions',
+    'inspect_table',
+    'inspect_route',
+    'api_endpoint_workflow',
+    'extension_workflow',
+    'flow_workflow',
+    'verify_extension_runtime',
+  ]) {
+    assert.ok(getToolOutputSchema(name), `${name} has no output schema`);
+  }
+});
+
+test('output contract wrapper migrates contracted legacy calls to registerTool', () => {
+  const registrations = [];
+  const server = {
+    tool() { throw new Error('contracted tool should use registerTool'); },
+    registerTool(name, config, handler) {
+      registrations.push({ name, config, handler });
+      return { enabled: true };
+    },
+  };
+  installToolOutputContracts(server);
+  server.tool('discover_enfyra_workflows', '', {}, async () => null);
+  assert.equal(registrations[0].name, 'discover_enfyra_workflows');
+  assert.ok(registrations[0].config.outputSchema instanceof z.ZodType);
+  assert.equal(registrations[0].config.outputSchema.safeParse({
+    responseFormat: 'json+columnar-v1',
+    action: 'enfyra_workflows_discovered',
+    profile: 'all',
+    workflows: [],
+    guidance: [],
+    extra: true,
+  }).success, true);
+});
+
+test('structured output validation accepts matching contracts and rejects drift', () => {
+  assert.equal(validateStructuredToolOutput('discover_enfyra_workflows', {
+    responseFormat: 'json+columnar-v1',
+    action: 'enfyra_workflows_discovered',
+    profile: 'all',
+    workflows: [],
+    guidance: [],
+  }).success, true);
+  const invalid = validateStructuredToolOutput('discover_enfyra_workflows', {
+    responseFormat: 'json+columnar-v1',
+    action: 'wrong_action',
+  });
+  assert.equal(invalid.success, false);
+});
+
+test('structured output validation accepts record arrays after columnar formatting', () => {
+  const workflowOutput = formatJsonPayload({
+    action: 'enfyra_workflows_discovered',
+    profile: 'all',
+    workflows: Array.from({ length: 12 }, (_, index) => ({
+      key: `surface-${index}`,
+      title: `Workflow surface ${index}`,
+      score: 12 - index,
+      recommendedScope: `scope-${index}`,
+    })),
+    guidance: [],
+  });
+  assert.equal(workflowOutput.workflows.format, 'columnar-v1');
+  assert.equal(validateStructuredToolOutput('discover_enfyra_workflows', workflowOutput).success, true);
+
+  const catalogOutput = formatJsonPayload({
+    action: 'enfyra_tools_searched',
+    resultCount: 2,
+    page: {},
+    tools: Array.from({ length: 12 }, (_, index) => ({
+      name: `tool_${index}`,
+      risk: 'read',
+      description: `Read-only catalog tool number ${index}`,
+      availability: 'visible',
+    })),
+    guidance: [],
+  });
+  assert.equal(catalogOutput.tools.format, 'columnar-v1');
+  assert.equal(validateStructuredToolOutput('search_enfyra_tools', catalogOutput).success, true);
+});

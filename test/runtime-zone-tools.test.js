@@ -49,6 +49,34 @@ function installFetchMock() {
   };
 }
 
+test('searchRuntimeZone returns a bounded zone catalog when the zone is unknown', async () => {
+  const result = await searchRuntimeZone(apiUrl, {});
+  assert.equal(result.action, 'runtime_zone_catalog');
+  assert.equal(result.zones.length, 9);
+  assert.equal(result.zones.some((zone) => zone.name === 'auth_security'), true);
+  assert.deepEqual(result.zones.find((zone) => zone.name === 'storage_file').nextSearch.input, {
+    mode: 'search',
+    zone: 'storage_file',
+  });
+});
+
+test('searchRuntimeZone returns bounded inventory when query and path are omitted', async () => {
+  const restore = installFetchMock();
+  try {
+    initAuth(apiUrl, 'efy_pat_test');
+    const result = await searchRuntimeZone(apiUrl, {
+      zone: 'api_runtime',
+      maxResults: 2,
+    });
+    assert.equal(result.action, 'runtime_zone_inventory');
+    assert.equal(result.results.length, 2);
+    assert.equal(result.resultCount, 2);
+    assert.equal(result.results.every((entry) => entry.nextInspect.input.mode === 'inspect'), true);
+  } finally {
+    restore();
+  }
+});
+
 test('searchRuntimeZone searches and inspects one API runtime artifact through one tool contract', async () => {
   const restore = installFetchMock();
   try {

@@ -4,11 +4,12 @@ import { readFileSync } from 'node:fs';
 import {
   installToolsetFilter,
   isToolVisibleInToolset,
+  normalizeDynamicToolPacks,
   normalizeMcpProfile,
   normalizeMcpToolset,
   summarizeToolsetForInstructions,
 } from '../dist/lib/toolset-filter.js';
-import { WORKFLOW_SURFACES, WORKFLOW_SURFACES_BY_PROFILE, discoverWorkflowRoutes } from '../dist/lib/tool-routing.js';
+import { WORKFLOW_SURFACES, WORKFLOW_SURFACES_BY_PROFILE, discoverWorkflowRoutes, workflowToolNames } from '../dist/lib/tool-routing.js';
 
 const TOOL_REGISTRATION_SOURCES = [
   '../src/mcp-server-entry.ts',
@@ -16,6 +17,7 @@ const TOOL_REGISTRATION_SOURCES = [
   '../src/lib/platform-operation-tools.ts',
   '../src/lib/runtime-zone-tools.ts',
   '../src/lib/table-tools.ts',
+  '../src/lib/tool-catalog.ts',
 ];
 
 function registeredToolNames() {
@@ -50,6 +52,15 @@ test('normalizes MCP domain profile to all by default', () => {
   assert.equal(normalizeMcpProfile('schema'), 'schema');
   assert.equal(normalizeMcpProfile('runtime'), 'runtime');
   assert.equal(normalizeMcpProfile('operations'), 'operations');
+});
+
+test('dynamic tool packs default on only for guided/all and keep profile fallback', () => {
+  assert.equal(normalizeDynamicToolPacks(undefined, 'guided', 'all'), true);
+  assert.equal(normalizeDynamicToolPacks('off', 'guided', 'all'), false);
+  assert.equal(normalizeDynamicToolPacks('on', 'guided', 'all'), true);
+  assert.equal(normalizeDynamicToolPacks(undefined, 'guided', 'extension'), false);
+  assert.equal(normalizeDynamicToolPacks('on', 'guided', 'extension'), false);
+  assert.equal(normalizeDynamicToolPacks('on', 'full', 'all'), false);
 });
 
 test('guided domain profiles expose a bounded task surface', () => {
@@ -125,20 +136,34 @@ test('full toolset exposes all tools', () => {
   assert.equal(isToolVisibleInToolset('any_future_tool', 'full', 'extension'), true);
 });
 
-test('installToolsetFilter skips hidden registrations without blocking visible tools', () => {
+test('installToolsetFilter registers disabled tools and activates one bounded pack', () => {
   const registered = [];
   const server = {
     tool(name, description, schema, handler) {
-      registered.push({ name, description, schema, handler });
-      return { name };
+      const registration = { name, enabled: true };
+      registered.push({ name, description, schema, handler, registration });
+      return registration;
     },
+    sendToolListChanged() {},
   };
-  const state = installToolsetFilter(server, 'guided', 'extension');
-  assert.deepEqual(server.tool('discover_enfyra_workflows', '', {}, () => null), { name: 'discover_enfyra_workflows' });
-  assert.equal(server.tool('create_route', '', {}, () => null), undefined);
-  assert.deepEqual(registered.map((item) => item.name), ['discover_enfyra_workflows']);
+  const state = installToolsetFilter(server, 'guided', 'all', { dynamic: true });
+  assert.equal(server.tool('discover_enfyra_workflows', '', {}, () => null).enabled, true);
+  assert.equal(server.tool('create_route', '', {}, () => null).enabled, false);
+  assert.deepEqual(registered.map((item) => item.name), ['discover_enfyra_workflows', 'create_route']);
   assert.deepEqual(state.hiddenTools, ['create_route']);
-  assert.equal(state.profile, 'extension');
+  assert.equal(state.profile, 'all');
+  assert.equal(state.getTool('create_route').visible, false);
+  assert.equal(state.getTool('discover_enfyra_workflows').visible, true);
+  const activated = state.setActiveTools(['create_route']);
+  assert.equal(activated.visibleToolNames.includes('create_route'), false);
+  assert.equal(activated.visibleToolNames.includes('discover_enfyra_workflows'), true);
+});
+
+test('guided profiles expose the hybrid catalog front doors', () => {
+  for (const profile of ['all', 'extension', 'schema', 'runtime', 'operations']) {
+    assert.equal(isToolVisibleInToolset('search_enfyra_tools', 'guided', profile), true);
+    assert.equal(isToolVisibleInToolset('execute_enfyra_tool', 'guided', profile), true);
+  }
 });
 
 test('toolset instruction summary names guided/full behavior', () => {
@@ -146,8 +171,8 @@ test('toolset instruction summary names guided/full behavior', () => {
   assert.match(summarizeToolsetForInstructions('guided', 'all'), /ENFYRA_MCP_TOOLSET=full/);
   assert.match(summarizeToolsetForInstructions('guided', 'extension'), /extension/);
   assert.match(summarizeToolsetForInstructions('guided', 'extension'), /ENFYRA_MCP_PROFILE=all/);
-  assert.match(summarizeToolsetForInstructions('guided', 'extension'), /T3/);
-  assert.match(summarizeToolsetForInstructions('guided', 'all'), /T3/);
+  assert.doesNotMatch(summarizeToolsetForInstructions('guided', 'extension'), /T[0-3]|tier/i);
+  assert.doesNotMatch(summarizeToolsetForInstructions('guided', 'all'), /T[0-3]|tier/i);
   assert.match(summarizeToolsetForInstructions('full'), /full/);
 });
 
@@ -167,6 +192,23 @@ test('guided workflow primary paths never direct callers to hidden tools', () =>
       }
     }
   }
+});
+
+test('every workflow pack includes its direct primary and verification tools', () => {
+  for (const surface of WORKFLOW_SURFACES) {
+    const workflow = discoverWorkflowRoutes({ surface, detail: 'plan', limit: 1 }).workflows[0];
+    const pack = new Set(workflowToolNames(surface));
+    for (const step of [...workflow.primaryPath, ...workflow.verifyPath]) {
+      for (const toolName of splitWorkflowToolNames(step.tool)) {
+        assert.ok(pack.has(toolName), `${surface} pack misses ${toolName}`);
+      }
+    }
+  }
+});
+
+test('extension workflow pack supports safe lifecycle cleanup', () => {
+  const pack = new Set(workflowToolNames('extension'));
+  assert.ok(pack.has('delete_records'));
 });
 
 test('domain-profile workflow routes only direct callers to visible profile tools', () => {

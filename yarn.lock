@@ -53,6 +53,7 @@ __metadata:
     socket.io-client: "npm:^4.8.3"
     typescript: "npm:^6.0.3"
     zod: "npm:^3.24.0"
+    zod-to-json-schema: "npm:^3.25.0"
   bin:
     enfyra-mcp-server: dist/index.js
     mcp-server: dist/index.js
@@ -1168,7 +1169,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"zod-to-json-schema@npm:^3.25.1":
+"zod-to-json-schema@npm:^3.25.0, zod-to-json-schema@npm:^3.25.1":
   version: 3.25.2
   resolution: "zod-to-json-schema@npm:3.25.2"
   peerDependencies:

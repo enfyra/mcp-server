@@ -147,6 +147,12 @@ test('full knowledge scope and disabled-flow verification paths are explicit', (
   assert.match(entry, /test_flow_step[\s\S]*payload: z\.union[\s\S]*parsedPayload[\s\S]*payload: parsedPayload/);
 });
 
+test('script source reads require a located record instead of guessed ids', () => {
+  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  assert.match(entry, /Never guess or probe record ids/);
+  assert.match(entry, /Use search_runtime_zone first and pass the returned nextInspect\.input/);
+});
+
 test('successful extension writes verify the exact saved source without relying on a follow-up model call', () => {
   const source = readFileSync(new URL('../src/lib/platform-operation-tools.ts', import.meta.url), 'utf8');
   assert.match(source, /async function updateExtensionCode[\s\S]*?const verification = await verifyExtensionRuntime[\s\S]*?verification,/);

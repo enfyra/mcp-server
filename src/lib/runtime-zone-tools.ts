@@ -5,6 +5,7 @@ import { jsonContent } from './response-format.js';
 import { writeSourceArtifact } from './source-artifacts.js';
 import { inspectExtensionLocation, searchExtensions } from './extension-search-tools.js';
 import { normalizeSnippetChars } from './tool-input-normalization.js';
+import { paginateResults } from './pagination.js';
 
 const RUNTIME_ZONES = [
   'admin_ui',
@@ -82,6 +83,24 @@ export const RUNTIME_ZONE_DESCRIPTIONS: Record<RuntimeZone, string> = {
   storage_file: 'Storage configs, folders, files, public file state, and file permissions.',
   auth_security: 'Users, roles, route/field permissions, guards, OAuth provider provisioning, and linked OAuth accounts.',
 };
+
+function buildRuntimeZoneCatalog() {
+  return {
+    action: 'runtime_zone_catalog',
+    zones: RUNTIME_ZONES.map((name) => ({
+      name,
+      description: RUNTIME_ZONE_DESCRIPTIONS[name],
+      nextSearch: {
+        tool: 'search_runtime_zone',
+        input: { mode: 'search', zone: name },
+      },
+    })),
+    guidance: [
+      'Choose one returned zone and call its nextSearch input.',
+      'Add query or path when you know a target. Keep them omitted for a bounded zone inventory.',
+    ],
+  };
+}
 
 function getId(record: any) {
   return record?.id ?? record?._id ?? null;
@@ -268,7 +287,7 @@ function summarizeGenericRecord(zone: RuntimeZone, table: ZoneTable, record: Run
       ? includeSourceArtifact
         ? (() => {
             const artifact = writeSourceArtifact({ tableName: table.tableName, id: id ?? 'record', fieldName: sourceField!, source });
-            return { tmpFile: artifact.tmpFile, length: artifact.length, sha256: artifact.sha256 };
+            return { resourceUri: artifact.resourceUri, tmpFile: artifact.tmpFile, length: artifact.length, sha256: artifact.sha256 };
           })()
         : { field: sourceField, length: source.length }
       : null,
@@ -282,11 +301,24 @@ function summarizeGenericRecord(zone: RuntimeZone, table: ZoneTable, record: Run
 async function searchSchemaZone(apiUrl: string, input: any) {
   const query = String(input.query ?? '').trim();
   const normalizedQuery = normalizeText(query);
+  const inventory = !normalizedQuery;
   const maxResults = Math.min(Math.max(Number(input.maxResults ?? 8), 1), 25);
   const catalog = await fetchTableCatalog(apiUrl);
   const tables = await fetchMetadataTables(apiUrl, catalog);
   const results = [];
   for (const table of tables as any[]) {
+    if (inventory) {
+      results.push({
+        zone: 'schema_data',
+        tableName: table.name,
+        id: getId(table),
+        alias: table.alias,
+        score: 0,
+        matches: [],
+        nextInspect: { tool: 'search_runtime_zone', input: { mode: 'inspect', zone: 'schema_data', tableName: table.name } },
+      });
+      continue;
+    }
     const tableMatches = [];
     for (const field of ['name', 'alias', 'description']) {
       const raw = flattenValue(table?.[field]);
@@ -318,22 +350,30 @@ async function searchSchemaZone(apiUrl: string, input: any) {
     });
   }
   results.sort((a, b) => b.score - a.score || String(a.tableName).localeCompare(String(b.tableName)));
+  const paginated = paginateResults(results, {
+    limit: maxResults,
+    cursor: input.cursor,
+    fingerprint: { zone: 'schema_data', query, maxResults },
+  });
   return {
-    action: 'runtime_zone_searched',
+    action: inventory ? 'runtime_zone_inventory' : 'runtime_zone_searched',
     zone: 'schema_data',
     zoneDescription: RUNTIME_ZONE_DESCRIPTIONS.schema_data,
     query,
     resultCount: results.length,
-    results: results.slice(0, maxResults),
+    results: paginated.items,
+    page: paginated.page,
     searched: { tables: tables.length },
   };
 }
 
 export async function searchRuntimeZone(apiUrl: string, input: any) {
-  if ((input.mode ?? 'search') === 'inspect') return inspectRuntimeZoneLocation(apiUrl, input);
   const zone = input.zone as RuntimeZone;
+  if (!zone) return buildRuntimeZoneCatalog();
+  if ((input.mode ?? 'search') === 'inspect') return inspectRuntimeZoneLocation(apiUrl, input);
   if (!RUNTIME_ZONES.includes(zone)) throw new Error(`Unsupported runtime zone: ${zone}`);
   if (zone === 'admin_ui') {
+    const inventory = !String(input.query ?? '').trim() && !String(input.path ?? '').trim();
     const adminResult = await searchExtensions(apiUrl, {
       query: input.query,
       path: input.path,
@@ -342,11 +382,13 @@ export async function searchRuntimeZone(apiUrl: string, input: any) {
       maxResults: input.maxResults,
       snippetChars: input.snippetChars,
       maxMatchesPerExtension: input.maxMatchesPerRecord,
-      includeSourceArtifact: input.includeSourceArtifact,
+      includeSourceArtifact: inventory ? false : input.includeSourceArtifact,
+      allowInventory: inventory,
+      cursor: input.cursor,
     });
     return {
       ...adminResult,
-      action: 'runtime_zone_searched',
+      action: inventory ? 'runtime_zone_inventory' : 'runtime_zone_searched',
       zone,
       zoneDescription: RUNTIME_ZONE_DESCRIPTIONS.admin_ui,
       results: (adminResult.results ?? []).map((item: any) => ({
@@ -362,11 +404,11 @@ export async function searchRuntimeZone(apiUrl: string, input: any) {
   if (zone === 'schema_data') return searchSchemaZone(apiUrl, input);
 
   const query = String(input.query ?? input.path ?? '').trim();
-  if (!query) throw new Error('query or path is required for this runtime zone.');
   const path = input.path ? String(input.path).trim() : '';
+  const inventory = !query && !path;
   const maxResults = Math.min(Math.max(Number(input.maxResults ?? 8), 1), 25);
   const snippetChars = normalizeSnippetChars(input.snippetChars);
-  const includeSourceArtifact = Boolean(input.includeSourceArtifact);
+  const includeSourceArtifact = inventory ? false : Boolean(input.includeSourceArtifact);
   const tables = ZONE_TABLES[zone as Exclude<RuntimeZone, 'admin_ui' | 'schema_data'>];
   const allResults = [];
   const errors = [];
@@ -377,6 +419,10 @@ export async function searchRuntimeZone(apiUrl: string, input: any) {
       continue;
     }
     for (const record of records) {
+      if (inventory) {
+        allResults.push(summarizeGenericRecord(zone, table, record, [], false));
+        continue;
+      }
       if (path) {
         const pathHit = (table.pathFields ?? []).some((field) => flattenValue(valueAt(record, field)) === path);
         if (!pathHit) continue;
@@ -390,14 +436,20 @@ export async function searchRuntimeZone(apiUrl: string, input: any) {
     }
   }
   allResults.sort((a, b) => b.score - a.score || String(a.tableName).localeCompare(String(b.tableName)));
-  const results = allResults.slice(0, maxResults);
+  const paginated = paginateResults(allResults, {
+    limit: maxResults,
+    cursor: input.cursor,
+    fingerprint: { zone, query, path, maxResults },
+  });
+  const results = paginated.items;
   return {
-    action: 'runtime_zone_searched',
+    action: inventory ? 'runtime_zone_inventory' : 'runtime_zone_searched',
     zone,
     zoneDescription: RUNTIME_ZONE_DESCRIPTIONS[zone],
     query: query || null,
     path: path || null,
     resultCount: allResults.length,
+    page: paginated.page,
     results,
     readErrors: errors,
     tokenBudget: {
@@ -407,6 +459,7 @@ export async function searchRuntimeZone(apiUrl: string, input: any) {
     },
     guidance: [
       'Use the returned nextInspect input on search_runtime_zone(mode=inspect) for the best candidate before editing.',
+      ...(inventory ? ['This is a bounded inventory. Add query or path when you need ranked matching.'] : []),
       'Use source artifacts only for the selected candidate when snippets are insufficient.',
       'Use zone-specific write tools after inspection instead of generic CRUD when a business operation tool exists.',
     ],
@@ -565,7 +618,7 @@ export async function inspectRuntimeZoneLocation(apiUrl: string, input: any) {
     sources,
     nextSteps: [
       'Use zone-specific edit tools where available.',
-      'For source edits, use get_script_source/patch_script_source/update_script_source when the table is script-backed.',
+      'When sources are returned, use those exact artifacts. Call get_script_source only with this concrete record id when a fresh source artifact is needed.',
       'Re-run search_runtime_zone or the specific inspector after mutation.',
     ],
   };
@@ -587,6 +640,7 @@ export function registerRuntimeZoneTools(server: any, ENFYRA_API_URL: string) {
       type: z.enum(['page', 'widget', 'global']).optional().describe('Narrows extension type.'),
       includeDisabled: z.boolean().optional().default(true),
       maxResults: z.number().int().min(1).max(25).optional().default(8),
+      cursor: z.string().optional().describe('Opaque cursor from the previous search result. Reuse it only with the same query, path, type, filters, and maxResults.'),
       snippetChars: z.number().int().optional().default(180).transform(normalizeSnippetChars).describe('Approximate snippet characters per match. Values outside 120-600 are clamped.'),
       includeSourceArtifact: z.boolean().optional().default(false),
     },
@@ -617,12 +671,12 @@ export function registerRuntimeZoneTools(server: any, ENFYRA_API_URL: string) {
     [
       'Single zone-scoped search/inspect tool for DB-backed Enfyra runtime artifacts.',
       'Use this before editing anything that lives in the database rather than repo files.',
-      'Choose a zone first so the output stays precise and token-bounded. Use mode=search first, then call this same tool with mode=inspect using nextInspect.input.',
+      'Omit zone once when the correct zone is unclear; the tool returns a compact zone catalog. With a zone, omit query/path for bounded inventory or provide either value for ranked matching. Then call mode=inspect using nextInspect.input.',
     ].join(' '),
     {
-      mode: z.enum(['search', 'inspect']).optional().default('search').describe('search returns ranked matches. inspect opens one result using tableName/id or admin UI name/path/query.'),
-      zone: z.enum(RUNTIME_ZONES).describe('DB-backed runtime zone to search. admin_ui=menu/extensions, api_runtime=routes/handlers/hooks/guards, flow_runtime=flows, websocket_runtime=socket gateways/events, graphql_runtime=GraphQL, schema_data=tables/fields/relations, package_runtime=packages, storage_file=storage/files, auth_security=access/auth.'),
-      query: z.string().optional().describe('Visible label, path, event name, flow step key, route path, source-code term, field name, package name, or config keyword.'),
+      mode: z.enum(['search', 'inspect']).optional().default('search').describe('search returns a zone catalog, bounded inventory, or ranked matches. inspect opens one result using nextInspect.input.'),
+      zone: z.enum(RUNTIME_ZONES).optional().describe('DB-backed runtime zone. Omit only when the correct zone is unclear; the result returns the zone catalog. admin_ui=menu/extensions, api_runtime=routes/handlers/hooks/guards, flow_runtime=flows, websocket_runtime=socket gateways/events, graphql_runtime=GraphQL, schema_data=tables/fields/relations, package_runtime=packages, storage_file=storage/files, auth_security=access/auth.'),
+      query: z.string().optional().describe('Visible label, path, event name, flow step key, route path, source-code term, field name, package name, or config keyword. Omit with a selected zone for bounded inventory.'),
       path: z.string().optional().describe('Exact route/gateway/menu/file path where the zone supports path lookup.'),
       tableName: z.string().optional().describe('Required for mode=inspect on non-admin zones; use nextInspect.input from search results.'),
       id: z.union([z.string(), z.number()]).optional().describe('Record id for mode=inspect; use nextInspect.input from search results.'),
@@ -630,6 +684,7 @@ export function registerRuntimeZoneTools(server: any, ENFYRA_API_URL: string) {
       extensionType: z.enum(['page', 'widget', 'global']).optional().describe('Only for admin_ui zone. Narrows extension type.'),
       includeDisabled: z.boolean().optional().default(true).describe('Only for admin_ui zone. Include disabled extensions.'),
       maxResults: z.number().int().min(1).max(25).optional().default(8).describe('Maximum ranked results.'),
+      cursor: z.string().optional().describe('Opaque cursor from the previous inventory/search page. Reuse it only with the same zone, query, path, filters, and maxResults.'),
       snippetChars: z.number().int().optional().default(180).transform(normalizeSnippetChars).describe('Approximate snippet characters per match. Values outside 120-600 are clamped.'),
       maxMatchesPerRecord: z.number().int().min(1).max(8).optional().default(2).describe('Only for admin_ui zone. Maximum source matches per extension.'),
       includeSourceArtifact: z.boolean().optional().default(false).describe('Write matched source to /tmp and return compact source artifact metadata. Prefer false unless snippets are insufficient.'),
