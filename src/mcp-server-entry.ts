@@ -98,6 +98,7 @@ import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './lib/tool-routing.js
 import { getSupportedColumnTypesFromMetadata, registerTableTools } from './lib/table-tools.js';
 import { registerPlatformOperationTools, validateExtensionCode } from './lib/platform-operation-tools.js';
 import { registerRuntimeZoneTools } from './lib/runtime-zone-tools.js';
+import { registerOAuthProviderTools } from './lib/oauth-tools.js';
 import { registerDynamicRepositoryBuilder } from './lib/dynamic-repository-builder.js';
 import { assertCreateHandlerRouteBoundary } from './lib/dynamic-endpoint-contract.js';
 import { assertGenericRecordMutationAllowed, parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
@@ -113,7 +114,7 @@ import {
   globalRulesAckParam,
 } from './lib/required-knowledge.js';
 import { validateMainTableRoutePath } from './lib/route-guards.js';
-import { buildDeletePostcondition, buildQuerySchemaReceipt } from './lib/record-contracts.js';
+import { assertRecordFieldsReadable, buildDeletePostcondition, buildQuerySchemaReceipt } from './lib/record-contracts.js';
 import { installColumnarToolFormatter, jsonContent } from './lib/response-format.js';
 import { startMcpUsageTelemetry } from './lib/mcp-usage-telemetry.js';
 import { startRuntimeCacheSocket } from './lib/runtime-cache-socket.js';
@@ -1049,7 +1050,7 @@ server.tool(
   'get_enfyra_examples',
   [
     'Return concrete Enfyra examples by category.',
-    'Use this before generating schemas, queries, handlers/hooks, SSR app auth, OAuth, Socket.IO, flows, files, or extensions so implementation details follow proven patterns.',
+    'Use this before generating schemas, queries, handlers/hooks, third-app connections, OAuth, Socket.IO, flows, files, or extensions so implementation details follow proven patterns.',
   ].join(' '),
   {
     category: z.enum(asNonEmptyStringTuple(listExampleCategories().map((item) => item.key), 'Example categories')).optional().describe('Example category key. Omit to list categories.'),
@@ -1555,7 +1556,7 @@ server.tool(
   },
 );
 
-server.tool('query_table', 'Query any route-backed table with a live metadata preflight. Explicit fields are validated before the REST read and the result includes schemaReceipt, so a separate metadata call is optional unless the schema itself must be inspected. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
+server.tool('query_table', 'Query any route-backed table with a live metadata preflight. Explicit fields are validated before the REST read and the result includes schemaReceipt, so a separate metadata call is optional unless the schema itself must be inspected. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
   tableName: z.string().describe('Table name to query'),
   filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object. Example: {"status": {"_eq": "active"}}.'),
   sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
@@ -1575,6 +1576,7 @@ server.tool('query_table', 'Query any route-backed table with a live metadata pr
   }
   validateTableName(tableName);
   assertExtensionReadFields(tableName, fields);
+  assertRecordFieldsReadable(tableName, fields);
   const filterParam = stringifyJsonArg(filter);
   const deepParam = stringifyJsonArg(deep);
   const aggregateParam = stringifyJsonArg(aggregate);
@@ -1673,7 +1675,7 @@ server.tool(
 
 server.tool(
   'find_one_record',
-  'Find a single record by ID or filter. By ID uses GET with filter (Enfyra has no GET /table/:id route). For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.',
+  'Find a single record by ID or filter. By ID uses GET with filter (Enfyra has no GET /table/:id route). OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.',
   {
 	    tableName: z.string().describe('Table name'),
 	    id: z.string().optional().describe('Record ID'),
@@ -1683,6 +1685,7 @@ server.tool(
   async ({ tableName, id, filter, fields }) => {
     validateTableName(tableName);
     assertExtensionReadFields(tableName, fields);
+    assertRecordFieldsReadable(tableName, fields);
     const primaryKey = await getPrimaryFieldName(tableName);
     const selectedFields = fields && fields.length > 0 ? fields : [primaryKey];
     if (id) {
@@ -3408,6 +3411,7 @@ server.tool(
 registerTableTools(server, ENFYRA_API_URL, { toolset: MCP_TOOLSET });
 registerPlatformOperationTools(server, ENFYRA_API_URL);
 registerRuntimeZoneTools(server, ENFYRA_API_URL);
+registerOAuthProviderTools(server, ENFYRA_API_URL);
 registerDynamicRepositoryBuilder(server);
 
 // ============================================================================

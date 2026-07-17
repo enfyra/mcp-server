@@ -21,6 +21,7 @@ const MUTATION_TOOLS = new Set([
   'test_flow_step',
   'test_graphql',
   'test_rest_endpoint',
+  'setup_oauth_provider',
   'login',
 ]);
 
@@ -48,6 +49,7 @@ const IDEMPOTENT_MUTATIONS = new Set([
   'add_route_methods',
   'remove_route_methods',
   'reorder_menus',
+  'setup_oauth_provider',
 ]);
 
 export function isMutationTool(toolName: string) {

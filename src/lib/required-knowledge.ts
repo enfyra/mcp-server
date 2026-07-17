@@ -1,8 +1,8 @@
-export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY::SCHEMA-DESIGN-CONTEXT::20260717I';
+export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY::SCHEMA-DESIGN-CONTEXT::20260717M';
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::LOCATOR-FIRST::ASYNC-HELPER-BRIDGE::20260717B';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-17.runtime-zone-inventory-locator-first';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-07-17.connect-credentials-seed-callback-order';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -134,6 +134,19 @@ const GLOBAL_RULES_SECTIONS = [
       'Destructive operations are preview-first. A confirmed delete must match a successful preview from the same MCP process session; pass confirm=true only after inspecting that preview and receiving explicit user approval.',
       'Do not manually reload caches unless natural partial reload is proven stale or a concrete reload error requires it.',
       'Never fabricate ids, field names, relation names, paths, package names, or permission scopes.',
+    ],
+  },
+  {
+    id: 'oauth-provider-third-app-handoff',
+    rules: [
+      'Connect the third app to Enfyra before asking for provider credentials. Load category=connect, inspect the actual framework, and implement or verify its app-origin proxy, OAuth start action, cookieBridgePrefix, and /me session check first.',
+      'Only after the app connection is verified, stop and ask the user to supply provider clientId and clientSecret, then call setup_oauth_provider with appConnectionVerified=true. OAuth credentials are write-only: never inspect, read, or reuse stored credential values through query_table, find_one_record, runtime search, or any other tool. Do not ask the user for a callback URI or use generic record CRUD for this operation.',
+      'When credentials are missing from the current user request, ask only for clientId and clientSecret. Do not inspect provider state, present callbackUri, or tell the user to configure the provider console before setup_oauth_provider returns its verified receipt.',
+      'A successful setup_oauth_provider call proves only that the Enfyra config was saved and loaded. It returns setupComplete=false because the provider console is still unconfirmed.',
+      'Present the exact returned callbackUri and providerConsole.field, tell the user to add that URI in the provider console, then stop and wait for confirmation. Never return credentials or ask for them again after the Enfyra config is saved.',
+      'After confirmation, use the OAuth button in the already connected app to complete a real provider login and verify /me. Only then report the OAuth setup as complete; /auth/providers or an existing linked OAuth account alone does not prove the current provider credentials and callback are valid.',
+      'The standard browser contract is one stable proxy prefix to the Enfyra app /api bridge, an OAuth start action with an absolute redirect plus matching cookieBridgePrefix, and a /me session check after return. Do not create custom ESV login, callback, token-cookie, or refresh routes for this flow.',
+      'For Nuxt routeRules proxying OAuth and /auth/set-cookies, keep fetchOptions.redirect="manual" so upstream redirects and Set-Cookie reach the browser.',
     ],
   },
   {

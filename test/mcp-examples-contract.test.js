@@ -64,6 +64,15 @@ test('mutation examples include the required global acknowledgement', () => {
   }
 });
 
+test('connect examples contain app wiring but no provider credential or callback configuration', () => {
+  const connect = JSON.stringify(EXAMPLE_CATEGORIES.connect);
+  assert.match(connect, /cookieBridgePrefix/);
+  assert.match(connect, /\/enfyra\/me/);
+  assert.doesNotMatch(connect, /clientSecret/);
+  assert.doesNotMatch(connect, /enfyra_oauth_config/);
+  assert.doesNotMatch(connect, /Authorized redirect URIs/);
+});
+
 test('embedded extension examples pass the local extension validator', () => {
   for (const example of EXAMPLE_CATEGORIES.extensions.examples) {
     const direct = example.code.trim();

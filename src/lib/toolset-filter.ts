@@ -108,6 +108,7 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
   operations: [
     ...CORE_TOOL_NAMES,
     'search_runtime_zone',
+    'setup_oauth_provider',
     'inspect_table',
     'inspect_route',
     'query_table',

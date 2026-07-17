@@ -93,6 +93,38 @@ const deleteRecordsOutputSchema = {
   }).passthrough(),
 } satisfies ZodRawShape;
 
+const oauthProviderOutputSchema = {
+  ...actionOutputSchema,
+  action: z.literal('oauth_provider_enfyra_config_saved'),
+  status: z.enum([
+    'provider_console_action_required',
+    'runtime_verification_required',
+    'configuration_verification_failed',
+  ]),
+  setupComplete: z.literal(false),
+  provider: z.enum(['google', 'facebook', 'github']),
+  operation: z.enum(['created', 'updated']),
+  callbackUri: z.string().url(),
+  providerConsole: z.object({
+    field: z.string(),
+    value: z.string().url(),
+    instruction: z.string(),
+    confirmationRequired: z.literal(true),
+  }).passthrough(),
+  verification: z.object({
+    configPersisted: z.boolean(),
+    runtimeProviderActive: z.boolean(),
+    providerConsoleConfirmed: z.literal(false),
+  }).passthrough(),
+  next: z.object({
+    instruction: z.string(),
+    requiresUserConfirmation: z.boolean(),
+    afterConfirmation: z.string(),
+    tool: z.string().optional(),
+    input: z.record(z.unknown()).optional(),
+  }).passthrough(),
+} satisfies ZodRawShape;
+
 const CORE_ACTION_OUTPUT_TOOLS = new Set([
   'search_runtime_zone',
   'search_admin_extensions',
@@ -145,6 +177,7 @@ export function getToolOutputSchema(toolName: string): ZodRawShape | undefined {
   if (toolName === 'get_enfyra_api_context') return apiContextOutputSchema;
   if (toolName === 'query_table') return queryTableOutputSchema;
   if (toolName === 'delete_records') return deleteRecordsOutputSchema;
+  if (toolName === 'setup_oauth_provider') return oauthProviderOutputSchema;
   if (CORE_ACTION_OUTPUT_TOOLS.has(toolName)) return actionOutputSchema;
   if (BASE_OUTPUT_TOOLS.has(toolName)) return baseOutputSchema;
   return undefined;

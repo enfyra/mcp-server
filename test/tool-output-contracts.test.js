@@ -15,6 +15,7 @@ test('core workflow tools receive formal output schemas', () => {
     'search_enfyra_tools',
     'execute_enfyra_tool',
     'get_enfyra_api_context',
+    'setup_oauth_provider',
     'get_permission_profile',
     'search_runtime_zone',
     'search_admin_extensions',
@@ -95,6 +96,38 @@ test('record read and delete output contracts require deterministic receipts', (
   assert.equal(validateStructuredToolOutput('delete_records', {
     responseFormat: 'json-v1',
     action: 'deleted_records',
+  }).success, false);
+});
+
+test('OAuth provider output contract requires a callback handoff and runtime verification', () => {
+  assert.equal(validateStructuredToolOutput('setup_oauth_provider', {
+    responseFormat: 'json-v1',
+    action: 'oauth_provider_enfyra_config_saved',
+    status: 'provider_console_action_required',
+    setupComplete: false,
+    provider: 'google',
+    operation: 'created',
+    callbackUri: 'https://demo.enfyra.io/api/auth/google/callback',
+    providerConsole: {
+      field: 'Authorized redirect URIs',
+      value: 'https://demo.enfyra.io/api/auth/google/callback',
+      instruction: 'Add this exact URI.',
+      confirmationRequired: true,
+    },
+    verification: {
+      configPersisted: true,
+      runtimeProviderActive: true,
+      providerConsoleConfirmed: false,
+    },
+    next: {
+      instruction: 'Present callbackUri and stop for confirmation.',
+      requiresUserConfirmation: true,
+      afterConfirmation: 'Verify the existing OAuth button and /me.',
+    },
+  }).success, true);
+  assert.equal(validateStructuredToolOutput('setup_oauth_provider', {
+    responseFormat: 'json-v1',
+    action: 'oauth_provider_enfyra_config_saved',
   }).success, false);
 });
 

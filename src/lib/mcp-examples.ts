@@ -7,9 +7,9 @@ export const EXAMPLE_REASONING_GUIDE = [
 ];
 
 export const EXAMPLE_CATEGORIES = {
-  'ssr-app-auth': {
-    title: 'SSR app auth, OAuth, refresh, and proxy setup',
-    useWhen: 'Use when building Nuxt, Next, or another browser app that should rely on Enfyra cookies through an app-origin proxy; adapt the framework-specific wrapper while preserving the same-origin proxy and cookie boundary.',
+  connect: {
+    title: 'Connect SSR and browser apps to Enfyra',
+    useWhen: 'Use when connecting Nuxt, Next, Angular, or another browser app to Enfyra for REST, login, OAuth, refresh, files, GraphQL, or Socket.IO; adapt the framework wrapper while preserving the app-origin proxy and cookie boundary.',
     examples: [
       {
         name: 'Nuxt routeRules for REST and Socket.IO',
@@ -27,9 +27,9 @@ export const EXAMPLE_CATEGORIES = {
   }
 })`,
         notes: [
-          'Browser code calls /enfyra/login, /enfyra/me, /enfyra/logout, and /enfyra/<table>.',
-          'Keep redirects manual so OAuth set-cookie redirects reach the browser.',
-          'Do not add custom token cookies when the proxy is enough.',
+          'Browser code calls app-origin routes such as /enfyra/login, /enfyra/me, /enfyra/logout, and /enfyra/<table>.',
+          'Keep redirects manual so OAuth and the set-cookie bridge return their redirect response to the browser.',
+          'Proxy to the Enfyra app /api bridge, not the raw Enfyra server. The Enfyra app bridge reads and refreshes cookies, then injects Authorization for protected ESV requests.',
         ],
       },
       {
@@ -51,8 +51,9 @@ export const EXAMPLE_CATEGORIES = {
 
 export default nextConfig`,
         notes: [
-          'Use rewrites for browser traffic.',
-          'If you add Next middleware/proxy for auth gating, server-side checks may call the Enfyra API origin directly while forwarding the incoming Cookie header.',
+          'Use rewrites for browser traffic, including the OAuth cookie bridge.',
+          'The destination is the Enfyra app /api bridge. Do not point the browser rewrite at a raw ESV origin.',
+          'For server components, forward the incoming Cookie header when fetching through the third app origin.',
         ],
       },
       {
@@ -109,7 +110,8 @@ const me = await fetch("/enfyra/me", {
   credentials: "include"
 }).then((res) => res.ok ? res.json() : null)`,
         notes: [
-          'Use /login, not /auth/login, for app/browser cookie login.',
+          'The third app proxy maps /enfyra/login to the Enfyra app /api/login cookie endpoint; use /login, not raw /auth/login, in browser cookie mode.',
+          'The Enfyra app bridge owns refresh and Bearer forwarding to ESV while HttpOnly cookies stay outside browser JavaScript.',
           'Do not read or store JWTs in browser JavaScript in proxy-cookie mode.',
         ],
       },
@@ -268,7 +270,7 @@ export class EnfyraAuthService {
 
   startGoogleOAuth(returnPath = "/") {
     const redirect = new URL(returnPath, window.location.origin)
-    const url = new URL("/enfyra/auth/google", window.location.origin)
+    const url = new URL("/api/auth/google", "https://demo.enfyra.io")
     url.searchParams.set("redirect", redirect.toString())
     url.searchParams.set("cookieBridgePrefix", "/enfyra")
     window.location.href = url.toString()
@@ -278,7 +280,7 @@ export class EnfyraAuthService {
           'Use HttpClient with a credentials interceptor for /enfyra/* calls so cookies are sent consistently.',
           'The guard is only for user experience; Enfyra route permissions and server-side owner checks remain authoritative.',
           'Keep the current user in an Angular service or store; do not read JWTs from cookies or URLs.',
-          'OAuth starts at the app proxy path and returns through the cookie bridge before the Angular route loads /enfyra/me.',
+          'OAuth starts at the Enfyra app /api/auth/google URL, not the local /enfyra path. It returns through the local cookie bridge before Angular loads /enfyra/me.',
         ],
       },
       {
@@ -430,34 +432,15 @@ export class EnfyraRealtimeService {
         ],
       },
       {
-        name: 'OAuth provider setup values',
-        code: `// Enfyra OAuth config row, stored in enfyra_oauth_config.
-{
-  "provider": "google",
-  "clientId": "<google-client-id>",
-  "clientSecret": "<google-client-secret>",
-  "redirectUri": "http://localhost:3000/api/auth/google/callback",
-  "isEnabled": true
-}
-
-// Google Cloud Console -> Authorized redirect URIs:
-// http://localhost:3000/api/auth/google/callback`,
-        notes: [
-          'redirectUri is the Enfyra callback URL: {ENFYRA_API_URL}/auth/google/callback.',
-          'The provider console callback URL and enfyra_oauth_config.redirectUri must match exactly.',
-          'This callback URL is not the app return page; the app return page is sent as the redirect query when starting OAuth.',
-          'Use appCallbackUrl only for manual-token apps that intentionally read token query parameters.',
-        ],
-      },
-      {
         name: 'Google OAuth button',
         code: `const redirect = new URL("/chat", window.location.origin)
-const url = new URL("/enfyra/auth/google", window.location.origin)
+const url = new URL("/api/auth/google", "https://demo.enfyra.io")
 url.searchParams.set("redirect", redirect.toString())
 url.searchParams.set("cookieBridgePrefix", "/enfyra")
 window.location.href = url.toString()`,
         notes: [
           'redirect must be absolute and must include the app origin.',
+          'Start OAuth on the Enfyra app URL. Do not start it at the third app /enfyra proxy path.',
           'cookieBridgePrefix is the app proxy prefix that forwards to Enfyra API routes.',
           'Enfyra redirects through {redirect.origin}{cookieBridgePrefix}/auth/set-cookies before returning to redirect.',
           'After returning, call /enfyra/me to load the authenticated user; do not parse tokens from the URL in proxy-cookie mode.',
@@ -467,86 +450,40 @@ window.location.href = url.toString()`,
   },
   'oauth-setup': {
     title: 'OAuth provider setup',
-    useWhen: 'Use when configuring Google or another OAuth provider for an Enfyra-backed app.',
+    useWhen: 'Use only after the third app follows the connect contract and the user is ready to supply Google, Facebook, or GitHub client credentials.',
     examples: [
       {
-        name: 'Google OAuth setup workflow',
-        code: `// 1. Ask for the public app/admin URL, not the API URL.
-// Example input from the user:
-const appUrl = "https://demo.enfyra.io"
-
-// 2. Derive the Enfyra API base and provider callback.
-const apiBase = appUrl.replace(/\\/$/, "") + "/api"
-const googleCallbackUrl = apiBase + "/auth/google/callback"
-
-// 3. Tell the user to paste this exact value into Google Cloud Console:
-// APIs & Services -> Credentials -> OAuth 2.0 Client -> Authorized redirect URIs
-// https://demo.enfyra.io/api/auth/google/callback
-
-// 4. After the user provides Google client id/secret, save Enfyra config:
-create_records({
-  tableName: "enfyra_oauth_config",
+        name: 'Configure the provider and hand off its callback',
+        code: `setup_oauth_provider({
+  provider: "google",
+  clientId: "<user-supplied-client-id>",
+  clientSecret: "<user-supplied-client-secret>",
+  appConnectionVerified: true,
   globalRulesAckKey: "<globalRulesAckKey>",
-  records: [
-    {
-      provider: "google",
-      clientId: "<google-client-id>",
-      clientSecret: "<google-client-secret>",
-      redirectUri: googleCallbackUrl,
-      isEnabled: true
-    }
-  ]
 })`,
         notes: [
-          'Ask for the app/admin URL such as https://demo.enfyra.io; derive the API base by appending /api.',
-          'The provider callback is {appUrl}/api/auth/{provider}/callback and must exactly match the Authorized redirect URI in Google Cloud Console.',
-          'Do not ask the user to choose or type the callback URL manually once the app URL is known; compute it and show the exact value to paste.',
-          'The OAuth callback is the Enfyra provider callback, not the final app page.',
-          'When starting OAuth from a browser app, use the same-origin proxy route with redirect and cookieBridgePrefix as shown in ssr-app-auth examples.',
+          'Connect the third app before asking for provider credentials. Load category=connect, inspect its framework, and verify the proxy, OAuth start action, cookieBridgePrefix, and /me flow first.',
+          'After the connection is verified, stop and ask the user to supply provider, clientId, and clientSecret. Never read or reuse stored credential values, never infer credentials, and never ask the user for a callback URI.',
+          'Do not present callbackUri or ask the user to configure the provider console before setup_oauth_provider returns its receipt. If credentials are missing, ask only for clientId and clientSecret and stop.',
+          'appConnectionVerified=true is required and may be sent only after that app connection check.',
+          'setup_oauth_provider derives callbackUri from the connected Enfyra API target, upserts enfyra_oauth_config, enables autoSetCookies, verifies runtime activation, and returns no credentials.',
+          'The receipt has setupComplete=false. Present providerConsole.value exactly as returned, ask the user to add it to providerConsole.field, then stop and wait for confirmation.',
+          'After confirmation, use the OAuth button in the already connected app and verify /me before reporting setup success.',
         ],
       },
       {
-        name: 'Browser OAuth start URL after setup',
-        code: `const returnUrl = new URL("/dashboard", window.location.origin)
-const oauthUrl = new URL("/enfyra/auth/google", window.location.origin)
-oauthUrl.searchParams.set("redirect", returnUrl.toString())
-oauthUrl.searchParams.set("cookieBridgePrefix", "/enfyra")
-window.location.href = oauthUrl.toString()`,
-        notes: [
-          'This is the browser start URL through the app proxy; it is different from the Google Authorized redirect URI.',
-          'After Enfyra finishes the Google callback, it bridges cookies through /enfyra/auth/set-cookies and returns to the absolute redirect URL.',
-          'After return, call /enfyra/me to load the user.',
-        ],
-      },
-      {
-        name: 'Update an existing Google OAuth config',
-        code: `const existing = await query_table({
-  tableName: "enfyra_oauth_config",
-  filter: JSON.stringify({ provider: { _eq: "google" } }),
-  fields: ["id", "provider", "redirectUri", "isEnabled"],
-  limit: 1
-})
+        name: 'Provider console handoff',
+        code: `// Use the successful setup_oauth_provider receipt.
+const callback = result.callbackUri
 
-// If a row exists, update it instead of creating a duplicate.
-update_records({
-  tableName: "enfyra_oauth_config",
-  globalRulesAckKey: "<globalRulesAckKey>",
-  items: [
-    {
-      id: "<existing-config-id>",
-      data: {
-        clientId: "<google-client-id>",
-        clientSecret: "<google-client-secret>",
-        redirectUri: "https://demo.enfyra.io/api/auth/google/callback",
-        isEnabled: true
-      }
-    }
-  ]
-})`,
+// Google: Authorized redirect URIs
+// Facebook: Valid OAuth Redirect URIs
+// GitHub: Authorization callback URL`,
         notes: [
-          'Inspect first so setup is idempotent.',
-          'Use the current system table name enfyra_oauth_config.',
-          'Never expose the client secret back in app code or documentation.',
+          'The provider callback is an Enfyra API URL, not the third-app return page.',
+          'If runtimeProviderActive is false, resolve verification before sending the user to the provider console.',
+          'Neither /auth/providers nor an existing linked OAuth account proves the provider console callback or current credentials work; complete a real browser login after confirmation.',
+          'Never echo clientId or clientSecret in the handoff.',
         ],
       },
     ],

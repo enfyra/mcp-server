@@ -10,6 +10,7 @@ export const WORKFLOW_SURFACES = [
   'websocket',
   'graphql',
   'storage-file',
+  'oauth',
   'identity-access',
   'platform-config',
   'package',
@@ -69,7 +70,7 @@ export const WORKFLOW_SURFACES_BY_PROFILE: Record<Exclude<WorkflowProfile, 'all'
   extension: ['extension'],
   schema: ['schema', 'record-data'],
   runtime: ['api-endpoint', 'dynamic-script', 'route-access', 'guards-permissions-rules', 'flow', 'websocket', 'graphql'],
-  operations: ['storage-file', 'identity-access', 'platform-config', 'package', 'cache', 'logs-debug', 'auth-context'],
+  operations: ['storage-file', 'oauth', 'identity-access', 'platform-config', 'package', 'cache', 'logs-debug', 'auth-context'],
 };
 
 export const TOOL_WORKFLOWS = [
@@ -508,17 +509,72 @@ export const TOOL_WORKFLOWS = [
     recommendedScope: 'schema',
   },
   {
+    key: 'oauth',
+    title: 'Connect a third app, then configure its OAuth provider',
+    useWhen: [
+      'Connecting a third app to Enfyra before creating or updating Google, Facebook, or GitHub OAuth.',
+      'Seeding OAuth client credentials and returning the exact provider callback URI.',
+      'Continuing third-app OAuth integration after the user confirms the provider console callback.',
+    ],
+    keywords: [
+      'oauth',
+      'google login',
+      'google oauth',
+      'social login',
+      'oauth provider',
+      'provider callback',
+      'authorized redirect uri',
+      'client id client secret',
+      'đăng nhập google',
+      'cấu hình oauth',
+      'tích hợp oauth',
+    ],
+    firstTools: ['get_enfyra_api_context', 'get_enfyra_examples'],
+    inspectTools: ['get_enfyra_api_context'],
+    knowledgeTools: ['get_enfyra_required_knowledge', 'get_enfyra_examples'],
+    writeTools: ['setup_oauth_provider'],
+    verifyTools: ['test_rest_endpoint', 'search_runtime_zone', 'query_table'],
+    avoidTools: [
+      {
+        tool: 'provider state reads before credentials',
+        when: 'the third app is connected but clientId or clientSecret is absent from the current user request',
+        useInstead: 'stop and ask only for clientId and clientSecret',
+        reason: 'setup_oauth_provider owns the existing-row upsert and runtime verification. Pre-reading provider state cannot replace user-supplied credentials and must not trigger an early callback handoff.',
+      },
+      {
+        tool: 'create_records / update_records',
+        when: 'the user asked to configure a built-in OAuth provider',
+        useInstead: 'setup_oauth_provider',
+        reason: 'The OAuth front door upserts credentials, derives the callback, verifies runtime activation, redacts secrets, and returns the provider-console handoff in one operation.',
+      },
+      {
+        tool: 'custom ESV login/logout/me routes',
+        when: 'the third app can proxy a stable prefix to the Enfyra app /api bridge',
+        useInstead: 'the built-in Enfyra auth endpoints through the framework-specific third-app proxy',
+        reason: 'Do not replace Enfyra identity behavior. The Enfyra app bridge already owns cookie storage, refresh, and Bearer forwarding to ESV.',
+      },
+    ],
+    requiredAck: ['globalRulesAckKey for OAuth configuration writes'],
+    exampleCategories: ['connect', 'oauth-setup'],
+    nextStepTemplate: [
+      'Load category=connect and inspect or implement the third-app connection before asking for provider credentials.',
+      'Once the app connection is verified, stop and ask only for clientId and clientSecret. Never inspect provider state or stored credential values, and do not present callbackUri before setup_oauth_provider returns.',
+      'Present callbackUri and providerConsole.field, then stop until the user confirms that callback was added in the provider console.',
+      'After confirmation, complete a real OAuth login through the existing app button and verify /me before reporting setup success.',
+    ],
+    recommendedScope: 'operations',
+  },
+  {
     key: 'identity-access',
-    title: 'Users, roles, OAuth configuration, and application identity access',
+    title: 'Users, roles, sessions, and application identity access',
     useWhen: [
       'Inspecting or managing Enfyra users and roles.',
-      'Configuring OAuth providers or OAuth account metadata.',
       'Designing application login, session, refresh, and role access behavior.',
     ],
-    keywords: ['user role', 'oauth provider', 'oauth config', 'oauth account', 'login flow', 'session refresh', 'identity access'],
+    keywords: ['user role', 'oauth account', 'login flow', 'session refresh', 'identity access'],
     firstTools: ['search_runtime_zone', 'get_enfyra_examples'],
     inspectTools: ['search_runtime_zone(mode=search, zone=auth_security)', 'search_runtime_zone(mode=inspect)', 'query_table', 'get_permission_profile'],
-    knowledgeTools: ['get_enfyra_required_knowledge', 'get_enfyra_examples(category=oauth-setup|ssr-app-auth)'],
+    knowledgeTools: ['get_enfyra_required_knowledge', 'get_enfyra_examples(category=oauth-setup|connect)'],
     writeTools: ['create_records', 'update_records', 'delete_records', 'ensure_route_access'],
     verifyTools: ['query_table', 'get_permission_profile', 'test_rest_endpoint'],
     avoidTools: [
@@ -530,7 +586,7 @@ export const TOOL_WORKFLOWS = [
       },
     ],
     requiredAck: ['globalRulesAckKey for identity metadata writes'],
-    exampleCategories: ['ssr-app-auth', 'oauth-setup'],
+    exampleCategories: ['connect'],
     nextStepTemplate: [
       'Separate MCP token context from application user/role/OAuth configuration.',
       'Inspect auth_security runtime records and the live table contract before writes.',
@@ -683,7 +739,7 @@ export const TOOL_WORKFLOWS = [
       },
     ],
     requiredAck: [],
-    exampleCategories: ['ssr-app-auth', 'oauth-setup'],
+    exampleCategories: ['connect', 'oauth-setup'],
     nextStepTemplate: [
       'Use get_enfyra_api_context for target sanity checks.',
       'Use get_permission_profile before assuming admin helper route access with non-root tokens.',
@@ -790,10 +846,22 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(4, 'create_records / update_records / delete_records', 'Mutate metadata/configuration rows only after reading required knowledge; do not use record CRUD to upload bytes. This MCP does not expose a binary/multipart upload input tool, so stop and report that boundary for execute-now upload requests.'),
         step(5, 'search_runtime_zone or query_table', 'Verify the saved metadata and public/permission state.'),
       ];
+    case 'oauth':
+      return [
+        step(1, 'get_enfyra_api_context', 'Confirm the Enfyra API target used to derive the provider callback URI.'),
+        step(2, 'get_enfyra_examples', 'Load category=connect, inspect the actual third-app framework, and implement or verify the proxy, OAuth start action, cookieBridgePrefix, and /me session check before asking for provider credentials.', {
+          stopWhen: 'The third app or its framework cannot be located: ask the user which app to connect instead of choosing one by guesswork.',
+        }),
+        step(3, 'get_enfyra_required_knowledge', 'After the app connection is verified, load scope=schema to acknowledge global rules before the OAuth config write.'),
+        step(4, 'setup_oauth_provider', 'After the user supplies clientId and clientSecret, call with appConnectionVerified=true to save the Enfyra config and receive the exact callback handoff. Never inspect or reuse stored credential values. Present callbackUri only from this receipt, then stop for provider-console confirmation; setupComplete remains false.', {
+          stopWhen: 'Client credentials are missing from the current user request: stop and ask only for clientId and clientSecret. Do not inspect provider state, do not present callbackUri, and do not ask the user to configure the provider console yet.',
+        }),
+        step(5, 'test_rest_endpoint', 'Only after the user confirms the callback URI was added, verify runtime availability, then complete a real browser OAuth login through the already connected app and verify /me. Do not declare success from /auth/providers alone.'),
+      ];
     case 'identity-access':
       return [
         step(1, 'search_runtime_zone', 'Search users, roles, permissions, guards, and OAuth config with zone=auth_security.'),
-        step(2, 'get_enfyra_examples', 'Load oauth-setup or ssr-app-auth only when that identity path is involved.'),
+        step(2, 'get_enfyra_examples', 'Load oauth-setup or connect only when that identity path is involved.'),
         step(3, 'inspect_table or query_table', 'Inspect the exact user, role, OAuth, or permission contract.'),
         step(4, 'create_records / update_records / delete_records / ensure_route_access', 'Apply the narrow identity metadata or access operation after required knowledge.'),
         step(5, 'query_table / get_permission_profile / test_rest_endpoint', 'Verify the closest identity/access behavior.'),
@@ -925,6 +993,9 @@ function scoreWorkflow(workflow: ToolWorkflow, { intent, surface, risk }: { inte
     }
   }
   if (risk === 'debug' && workflow.key === 'logs-debug') score += 6;
+  const oauthIntent = /\b(?:oauth|google login|social login|provider callback)\b|đăng nhập google|cấu hình oauth|tích hợp oauth/u.test(text);
+  if (oauthIntent && workflow.key === 'oauth') score += 20;
+  if (oauthIntent && ['auth-context', 'api-endpoint'].includes(workflow.key)) score -= 8;
   if (risk === 'write' && workflow.writeTools.length) score += 2;
   if (risk === 'destructive' && workflow.avoidTools.some((item) => normalize(item.when).includes('delete'))) score += 2;
   if (workflow.key === 'dynamic-script' && /\b(patch|edit|update|fix|change)\b/.test(text) && /\b(sourcecode|source|compiledcode|script)\b/.test(text)) score += 10;

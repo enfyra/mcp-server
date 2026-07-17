@@ -67,6 +67,9 @@ async function main() {
       assert.deepEqual(incomplete.map((tool) => tool.name), []);
       assert.ok(listed.tools.some((tool) => tool.name === 'search_enfyra_tools' && tool.outputSchema));
       assert.ok(listed.tools.some((tool) => tool.name === 'execute_enfyra_tool' && tool.outputSchema));
+      if (profile === 'operations') {
+        assert.ok(listed.tools.some((tool) => tool.name === 'setup_oauth_provider' && tool.outputSchema));
+      }
       surfaces[`guided/${profile}`] = measureTools(listed.tools);
       outputSchemas[`guided/${profile}`] = {
         covered: listed.tools.filter((tool) => tool.outputSchema).length,
@@ -125,6 +128,9 @@ async function main() {
         .filter((name) => isToolVisibleInToolset(name, 'guided', 'all'));
       const missing = expected.filter((name) => !visible.has(name));
       assert.deepEqual(missing, [], `${surface} dynamic pack is missing direct guided tools`);
+      if (surface === 'oauth') {
+        assert.ok(listed.tools.some((tool) => tool.name === 'setup_oauth_provider' && tool.outputSchema));
+      }
       dynamicPacks[surface] = measureTools(listed.tools);
     }
 

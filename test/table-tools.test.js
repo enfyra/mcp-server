@@ -1881,7 +1881,7 @@ test('code-writing tools require session or explicit required-knowledge acknowle
   assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(instructions, /discover_enfyra_workflows/);
   assert.match(instructions, /known non-destructive task/);
-  assert.match(instructions, /Session acknowledgement removes repeated ack-key boilerplate/);
+  assert.match(instructions, /Session acknowledgement removes repeated keys/);
 
   assert.match(entry, /server\.tool\(\s*['"]create_records['"]/);
   assert.match(entry, /server\.tool\(\s*['"]update_records['"]/);
@@ -2181,8 +2181,8 @@ test('server instructions stay compact and route details to tools', () => {
   assert.ok(Buffer.byteLength(instructions, 'utf8') < 4000);
   assert.match(instructions, /path is ambiguous/);
   assert.match(instructions, /get_enfyra_api_context/);
-  assert.match(instructions, /inspect only the table, route, extension, or runtime artifact/);
-  assert.match(instructions, /never preload broad context/);
+  assert.match(instructions, /Inspect only the exact artifact/);
+  assert.match(instructions, /Load other context lazily/);
   assert.match(instructions, /Session acknowledgement/);
   assert.match(routing, /progressive disclosure/);
   assert.match(routing, /query_table on destination domain lists/);
@@ -2387,9 +2387,9 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
   const payload = buildRequiredKnowledgePayload();
   const payloadText = JSON.stringify(payload);
 
-  assert.match(GLOBAL_RULES_ACK_KEY, /20260717I$/);
+  assert.match(GLOBAL_RULES_ACK_KEY, /20260717M$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-07-17.runtime-zone-inventory-locator-first');
+  assert.equal(payload.version, '2026-07-17.connect-credentials-seed-callback-order');
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);
@@ -2423,12 +2423,17 @@ test('OAuth setup examples guide provider console callback configuration', () =>
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
 
   assert.match(examples, /'oauth-setup'/);
-  assert.match(examples, /Google OAuth setup workflow/);
-  assert.match(examples, /Ask for the app\/admin URL/);
+  assert.match(examples, /setup_oauth_provider/);
   assert.match(examples, /Authorized redirect URIs/);
-  assert.match(examples, /\/api\/auth\/google\/callback/);
   assert.match(examples, /enfyra_oauth_config/);
-  assert.match(examples, /Do not ask the user to choose or type the callback URL manually/);
+  assert.match(examples, /never ask the user for a callback URI/i);
+  assert.match(examples, /connect the third app before asking for provider credentials/i);
+  assert.match(examples, /never read or reuse stored credential values/i);
+  assert.match(examples, /do not present callbackUri.*before setup_oauth_provider returns/i);
+  assert.match(examples, /wait for confirmation/i);
+  assert.match(examples, /setupComplete=false/i);
+  assert.match(examples, /Enfyra app bridge owns refresh and Bearer forwarding/);
+  assert.match(examples, /fetchOptions:\s*\{\s*redirect:\s*["']manual["']/);
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {

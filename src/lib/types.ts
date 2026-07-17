@@ -188,3 +188,24 @@ export interface ExtensionSfcAnalysis {
   errors: string[];
   elements: ExtensionSfcElementAnalysis[];
 }
+
+export type OAuthProvider = 'google' | 'facebook' | 'github';
+
+export interface OAuthProviderSetupInput {
+  provider: OAuthProvider;
+  clientId: string;
+  clientSecret: string;
+  appConnectionVerified: true;
+  globalRulesAckKey?: string;
+}
+
+export type OAuthToolFetch = (
+  apiUrl: string,
+  path: string,
+  options?: RequestInit,
+) => Promise<any>;
+
+export interface OAuthProviderToolDependencies {
+  fetchApi?: OAuthToolFetch;
+  assertGlobalRulesAck?: (key: unknown) => void;
+}

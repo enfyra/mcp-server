@@ -13,6 +13,7 @@ import { WORKFLOW_SURFACES, WORKFLOW_SURFACES_BY_PROFILE, discoverWorkflowRoutes
 
 const TOOL_REGISTRATION_SOURCES = [
   '../src/mcp-server-entry.ts',
+  '../src/lib/oauth-tools.ts',
   '../src/lib/dynamic-repository-builder.ts',
   '../src/lib/platform-operation-tools.ts',
   '../src/lib/runtime-zone-tools.ts',
@@ -207,6 +208,38 @@ test('dynamic workflow discovery returns an executable selection before domain t
   assert.match(result.guidance[0], /Call select_enfyra_workflow.*before.*primaryPath/i);
   assert.match(result.guidance[0], /do not use search_enfyra_tools/i);
   assert.match(JSON.stringify(result.workflows[0].primaryPath), /already return valid saved-state verification/i);
+});
+
+test('OAuth provider setup intents route to the dedicated OAuth workflow', () => {
+  for (const intent of [
+    'setup Google OAuth for a third-party web app',
+    'add social login to an external app, with callback cookies and refresh',
+    'tích hợp đăng nhập Google cho third app dùng Enfyra',
+    'cấu hình OAuth provider cho app bên ngoài',
+  ]) {
+    const result = discoverWorkflowRoutes({ intent, risk: 'write', detail: 'plan', limit: 1 }, 'all', true);
+    assert.equal(result.workflows[0].key, 'oauth', intent);
+    assert.deepEqual(result.nextSelection, {
+      tool: 'select_enfyra_workflow',
+      input: { surface: 'oauth', mode: 'replace' },
+    });
+    assert.match(JSON.stringify(result.workflows[0].primaryPath), /setup_oauth_provider/);
+    const primaryPath = result.workflows[0].primaryPath;
+    assert.equal(primaryPath[1].tool, 'get_enfyra_examples');
+    assert.match(primaryPath[1].purpose, /category=connect/i);
+    assert.match(primaryPath[1].purpose, /before asking for provider credentials/i);
+    assert.equal(primaryPath[2].tool, 'get_enfyra_required_knowledge');
+    assert.match(primaryPath[2].purpose, /scope=schema/i);
+    assert.equal(primaryPath[3].tool, 'setup_oauth_provider');
+    assert.match(primaryPath[3].purpose, /appConnectionVerified=true/);
+    assert.match(primaryPath[3].purpose, /never inspect or reuse stored credential values/i);
+    assert.match(primaryPath[3].stopWhen, /client credentials are missing/i);
+    assert.match(primaryPath[3].stopWhen, /stop and ask only/i);
+    assert.match(primaryPath[3].stopWhen, /ask only for clientId and clientSecret/i);
+    assert.match(primaryPath[3].stopWhen, /do not present callbackUri/i);
+    assert.match(primaryPath[4].purpose, /only after the user confirms/i);
+    assert.match(JSON.stringify(result.workflows[0].avoidTools), /provider state reads before credentials/i);
+  }
 });
 
 test('every workflow pack includes its direct primary and verification tools', () => {

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  assertRecordFieldsReadable,
   buildDeletePostcondition,
   buildQuerySchemaReceipt,
 } from '../dist/lib/record-contracts.js';
@@ -39,6 +40,23 @@ test('buildQuerySchemaReceipt rejects unknown explicit fields before the REST re
 
 test('buildQuerySchemaReceipt allows wildcard field selectors', () => {
   assert.equal(buildQuerySchemaReceipt(table, ['*']).requestedFieldsValidated, true);
+});
+
+test('OAuth provider credentials are write-only through setup_oauth_provider', () => {
+  assert.doesNotThrow(() => assertRecordFieldsReadable('enfyra_oauth_config', [
+    'id',
+    'provider',
+    'redirectUri',
+    'isEnabled',
+  ]));
+  assert.throws(
+    () => assertRecordFieldsReadable('enfyra_oauth_config', ['id', 'clientId', 'clientSecret']),
+    /write-only.*setup_oauth_provider.*ask the user/i,
+  );
+  assert.throws(
+    () => assertRecordFieldsReadable('enfyra_oauth_config', ['*']),
+    /wildcard.*credential/i,
+  );
 });
 
 test('buildDeletePostcondition proves exact requested ids are absent', () => {
