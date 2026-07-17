@@ -288,14 +288,17 @@ export async function searchExtensions(apiUrl: string, input: any) {
   const query = String(input.query ?? '').trim();
   const path = normalizePath(input.path);
   const type = input.type;
+  const exactId = input.id == null ? null : String(input.id);
+  const exactName = input.name == null ? null : normalizeText(input.name);
+  const exactLookup = exactId != null || Boolean(exactName);
   const maxResults = Math.min(Math.max(Number(input.maxResults ?? 4), 1), 25);
   const snippetChars = normalizeSnippetChars(input.snippetChars);
   const maxMatchesPerExtension = Math.min(Math.max(Number(input.maxMatchesPerExtension ?? 2), 1), 8);
   const includeDisabled = input.includeDisabled !== false;
   const includeSourceArtifact = Boolean(input.includeSourceArtifact);
 
-  if (!query && !path && !type && !input.allowInventory) {
-    throw new Error('Provide query, path, or type so extension search stays bounded.');
+  if (!query && !path && !type && !exactLookup && !input.allowInventory) {
+    throw new Error('Provide query, path, type, id, or name so extension search stays bounded.');
   }
 
   const [extensions, menus] = await Promise.all([
@@ -312,6 +315,9 @@ export async function searchExtensions(apiUrl: string, input: any) {
   const results = [];
   for (const extension of extensions) {
     if (!includeDisabled && extension.isEnabled === false) continue;
+    const exactIdMatch = exactId == null || String(getId(extension)) === exactId;
+    const exactNameMatch = !exactName || normalizeText(extension.name) === exactName;
+    if (exactLookup && (!exactIdMatch || !exactNameMatch)) continue;
     const menu = menuForExtension(extension, menus);
     const exactPathMatch = Boolean(path && extension.type === 'page' && normalizePath(menu?.path) === path);
     if (path && !query && !type && !exactPathMatch) continue;
@@ -330,6 +336,15 @@ export async function searchExtensions(apiUrl: string, input: any) {
       });
     }
 
+    if (exactLookup) {
+      matches.push({
+        field: exactId != null ? 'id' : 'name',
+        score: 160,
+        reason: exactId != null ? 'exact extension id match' : 'exact extension name match',
+        snippet: String(exactId != null ? getId(extension) : extension.name).slice(0, snippetChars),
+      });
+    }
+
     if (matches.length > 0 || (type && !query && !path) || input.allowInventory) {
       results.push(summarizeExtension(extension, menu, matches, includeSourceArtifact, exactPathMatch));
     }
@@ -339,12 +354,16 @@ export async function searchExtensions(apiUrl: string, input: any) {
   const paginated = paginateResults(results, {
     limit: maxResults,
     cursor: input.cursor,
-    fingerprint: { query, path, type: type || null, includeDisabled, maxResults },
+    fingerprint: { query, path, type: type || null, id: exactId, name: exactName, includeDisabled, maxResults },
   });
   const estimatedOutputChars = JSON.stringify(paginated.items).length;
 
   return {
     action: 'extensions_searched',
+    matchMode: exactLookup ? 'exact' : 'ranked',
+    target: exactLookup ? { id: input.id ?? null, name: input.name ?? null } : null,
+    targetFound: exactLookup ? results.length > 0 : undefined,
+    exactMatchCount: exactLookup ? results.length : undefined,
     query: query || null,
     path: path || null,
     type: type || null,

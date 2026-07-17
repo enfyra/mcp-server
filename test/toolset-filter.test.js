@@ -194,6 +194,21 @@ test('guided workflow primary paths never direct callers to hidden tools', () =>
   }
 });
 
+test('dynamic workflow discovery returns an executable selection before domain tools', () => {
+  const result = discoverWorkflowRoutes({
+    intent: 'create a temporary widget extension',
+    detail: 'plan',
+    limit: 1,
+  }, 'all', true);
+  assert.deepEqual(result.nextSelection, {
+    tool: 'select_enfyra_workflow',
+    input: { surface: 'extension', mode: 'replace' },
+  });
+  assert.match(result.guidance[0], /Call select_enfyra_workflow.*before.*primaryPath/i);
+  assert.match(result.guidance[0], /do not use search_enfyra_tools/i);
+  assert.match(JSON.stringify(result.workflows[0].primaryPath), /already return valid saved-state verification/i);
+});
+
 test('every workflow pack includes its direct primary and verification tools', () => {
   for (const surface of WORKFLOW_SURFACES) {
     const workflow = discoverWorkflowRoutes({ surface, detail: 'plan', limit: 1 }).workflows[0];

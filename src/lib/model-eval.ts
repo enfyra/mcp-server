@@ -73,7 +73,6 @@ export const MODEL_EVAL_SCENARIOS: ModelEvalScenario[] = [
     prompt: 'Inspect a route-backed table and return a bounded record list with explicit fields.',
     surface: 'record-data',
     requiredToolGroups: [
-      ['inspect_table', 'get_table_metadata'],
       ['query_table'],
     ],
     verificationTools: ['query_table'],
@@ -89,9 +88,9 @@ export const MODEL_EVAL_SCENARIOS: ModelEvalScenario[] = [
       ['get_extension_theme_contract'],
       ['ensure_widget_extension', 'extension_workflow'],
       ['delete_records'],
-      ['search_admin_extensions', 'find_one_record', 'query_table'],
+      ['delete_records', 'search_admin_extensions', 'find_one_record', 'query_table'],
     ],
-    verificationTools: ['search_admin_extensions', 'find_one_record', 'query_table'],
+    verificationTools: ['delete_records', 'search_admin_extensions', 'find_one_record', 'query_table'],
     maxToolCalls: 14,
     mutationExpected: true,
     destructiveExpected: true,
@@ -100,6 +99,22 @@ export const MODEL_EVAL_SCENARIOS: ModelEvalScenario[] = [
 
 function eventIndex(events: ModelEvalTraceEvent[], tools: string[], after = -1) {
   return events.findIndex((event, index) => index > after && tools.includes(event.tool) && !event.isError);
+}
+
+function expandCatalogReadEvents(events: ModelEvalTraceEvent[]) {
+  return events.flatMap((event) => {
+    if (event.tool !== 'execute_enfyra_tool' || event.isError) return [event];
+    const tool = typeof event.arguments?.name === 'string' ? event.arguments.name : '';
+    if (!tool || isMutationTool(tool) || isDestructiveTool(tool) || !isRecord(event.result)) return [event];
+    const nestedResult = event.result.result;
+    if (event.result.action !== 'enfyra_catalog_tool_executed' || event.result.tool !== tool || nestedResult === undefined) return [event];
+    return [event, {
+      tool,
+      arguments: isRecord(event.arguments?.arguments) ? event.arguments.arguments : {},
+      result: nestedResult,
+      isError: false,
+    }];
+  });
 }
 
 function requiredSequenceCheck(scenario: ModelEvalScenario, events: ModelEvalTraceEvent[]): ModelEvalCheck {
@@ -134,18 +149,29 @@ function workflowSelectionCheck(scenario: ModelEvalScenario, events: ModelEvalTr
     const selectedSurface = event.arguments?.surface;
     return typeof selectedSurface !== 'string' || selectedSurface === scenario.surface;
   });
-  const passed = boundary >= 0 && selection >= 0;
+  const catalogRead = scenario.mutationExpected ? -1 : events.findIndex((event) => (
+    event.tool === 'execute_enfyra_tool'
+      && !event.isError
+      && typeof event.arguments?.name === 'string'
+      && scenario.verificationTools.includes(event.arguments.name)
+      && !isMutationTool(event.arguments.name)
+      && !isDestructiveTool(event.arguments.name)
+  ));
+  const passed = boundary >= 0 && (selection >= 0 || catalogRead >= 0);
   return {
     key: 'workflow_selection',
     passed,
     detail: passed
-      ? `Selected the ${scenario.surface} workflow before execution.`
+      ? selection >= 0
+        ? `Selected the ${scenario.surface} workflow before execution.`
+        : 'Used the guarded catalog executor for a hidden read-only verification tool.'
       : `The ${scenario.surface} workflow was not selected before execution.`,
   };
 }
 
 function mutationGatewayCheck(events: ModelEvalTraceEvent[]): ModelEvalCheck {
   const invalid = events.find((event) => event.tool === 'execute_enfyra_tool'
+    && !event.isError
     && typeof event.arguments?.name === 'string'
     && isMutationTool(event.arguments.name));
   return {
@@ -202,6 +228,11 @@ function isEmptyCollection(value: unknown) {
 
 function provesAbsence(event: ModelEvalTraceEvent) {
   if (!isRecord(event.result)) return false;
+  if (event.tool === 'delete_records') {
+    return isRecord(event.result.postcondition)
+      && event.result.postcondition.confirmedAbsent === true
+      && isEmptyCollection(event.result.postcondition.remainingIds);
+  }
   if (event.tool === 'search_admin_extensions') {
     if (typeof event.result.resultCount === 'number') return event.result.resultCount === 0;
     return isEmptyCollection(event.result.results);
@@ -249,16 +280,43 @@ function cleanupAbsenceCheck(scenario: ModelEvalScenario, events: ModelEvalTrace
   const confirmedDelete = events.findIndex((event) => (
     event.tool === 'delete_records' && event.arguments?.confirm === true && !event.isError
   ));
+  const inlineProof = confirmedDelete >= 0 && provesAbsence(events[confirmedDelete]);
   const verification = events.find((event, index) => (
     index > confirmedDelete && scenario.verificationTools.includes(event.tool) && !event.isError
   ));
-  const passed = confirmedDelete >= 0 && Boolean(verification && provesAbsence(verification));
+  const passed = confirmedDelete >= 0 && (inlineProof || Boolean(verification && provesAbsence(verification)));
   return {
     key: 'cleanup_absence',
     passed,
     detail: passed
       ? 'Post-cleanup verification semantically proved the artifact is absent.'
       : 'Post-cleanup verification did not return an empty/null result for the target.',
+  };
+}
+
+function schemaPreflightCheck(scenario: ModelEvalScenario, events: ModelEvalTraceEvent[]): ModelEvalCheck {
+  if (scenario.id !== 'bounded-record-read') {
+    return { key: 'schema_preflight', passed: true, detail: 'No query schema preflight required.' };
+  }
+  const queryIndex = events.findIndex((event) => event.tool === 'query_table' && !event.isError);
+  const query = events[queryIndex];
+  const explicitFields = Array.isArray(query?.arguments?.fields) && query.arguments.fields.length > 0;
+  const externalMetadata = queryIndex > 0 && events.slice(0, queryIndex).some((event) => (
+    ['inspect_table', 'get_table_metadata'].includes(event.tool) && !event.isError
+  ));
+  const embeddedReceipt = isRecord(query?.result)
+    && isRecord(query.result.schemaReceipt)
+    && query.result.schemaReceipt.metadataChecked === true
+    && query.result.schemaReceipt.requestedFieldsValidated === true;
+  const passed = queryIndex >= 0 && explicitFields && (externalMetadata || embeddedReceipt);
+  return {
+    key: 'schema_preflight',
+    passed,
+    detail: passed
+      ? externalMetadata
+        ? 'Explicit fields followed live metadata inspection.'
+        : 'query_table returned an embedded live metadata validation receipt.'
+      : 'Bounded query lacked explicit fields or live metadata validation.',
   };
 }
 
@@ -283,25 +341,33 @@ function toolErrorCheck(events: ModelEvalTraceEvent[]): ModelEvalCheck {
 }
 
 export function scoreModelEvalRun(run: ModelEvalRun, scenario: ModelEvalScenario): ModelEvalScore {
-  const checks = [
-    requiredSequenceCheck(scenario, run.events),
-    workflowSelectionCheck(scenario, run.events),
+  const semanticEvents = expandCatalogReadEvents(run.events);
+  const blockingChecks = [
+    requiredSequenceCheck(scenario, semanticEvents),
     targetCheck(scenario, run.events),
     mutationGatewayCheck(run.events),
     destructiveCheck(scenario, run.events),
     creationVerificationCheck(scenario, run.events),
-    verificationCheck(scenario, run.events),
+    verificationCheck(scenario, semanticEvents),
     cleanupAbsenceCheck(scenario, run.events),
+    schemaPreflightCheck(scenario, semanticEvents),
+  ].map((check) => ({ ...check, blocking: true }));
+  const advisoryChecks = [
+    workflowSelectionCheck(scenario, semanticEvents),
     efficiencyCheck(scenario, run.events),
     toolErrorCheck(run.events),
-  ];
-  const passed = checks.filter((check) => check.passed).length;
-  const score = Number(((passed / checks.length) * 100).toFixed(2));
+  ].map((check) => ({ ...check, blocking: false }));
+  const checks = [...blockingChecks, ...advisoryChecks];
+  const passed = blockingChecks.filter((check) => check.passed).length;
+  const score = Number(((passed / blockingChecks.length) * 100).toFixed(2));
+  const optimizationPassed = advisoryChecks.filter((check) => check.passed).length;
+  const optimizationScore = Number(((optimizationPassed / advisoryChecks.length) * 100).toFixed(2));
   return {
     scenarioId: scenario.id,
     model: run.model,
     score,
-    recommended: score === 100,
+    optimizationScore,
+    recommended: blockingChecks.every((check) => check.passed),
     checks,
   };
 }

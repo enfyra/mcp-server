@@ -93,12 +93,14 @@ export interface ModelEvalCheck {
   key: string;
   passed: boolean;
   detail: string;
+  blocking?: boolean;
 }
 
 export interface ModelEvalScore {
   scenarioId: string;
   model: string;
   score: number;
+  optimizationScore: number;
   recommended: boolean;
   checks: ModelEvalCheck[];
 }

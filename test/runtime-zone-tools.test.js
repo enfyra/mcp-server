@@ -153,6 +153,31 @@ test('searchAdminExtensions keeps weak agents on the focused admin UI locator pa
   }
 });
 
+test('searchAdminExtensions uses name in search mode as an exact absence verifier', async () => {
+  const restore = installFetchMock();
+  try {
+    initAuth(apiUrl, 'efy_pat_test');
+    globalThis.fetch = async (input) => {
+      const url = String(input);
+      if (url.endsWith('/auth/token/exchange')) {
+        return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 600_000 });
+      }
+      if (url.includes('/enfyra_extension?') || url.includes('/enfyra_menu?')) {
+        return jsonResponse({ data: [] });
+      }
+      return jsonResponse({ data: [] });
+    };
+    const searched = await searchAdminExtensions(apiUrl, { mode: 'search', name: 'removed-fixture' });
+    assert.equal(searched.action, 'admin_extensions_searched');
+    assert.equal(searched.matchMode, 'exact');
+    assert.equal(searched.targetFound, false);
+    assert.equal(searched.exactMatchCount, 0);
+    assert.deepEqual(searched.results, []);
+  } finally {
+    restore();
+  }
+});
+
 test('searchRuntimeZone uses live metadata for zone projections and indexes folder slugs', async () => {
   const restore = installFetchMock();
   try {

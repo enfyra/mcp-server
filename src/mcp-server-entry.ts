@@ -113,6 +113,7 @@ import {
   globalRulesAckParam,
 } from './lib/required-knowledge.js';
 import { validateMainTableRoutePath } from './lib/route-guards.js';
+import { buildDeletePostcondition, buildQuerySchemaReceipt } from './lib/record-contracts.js';
 import { installColumnarToolFormatter, jsonContent } from './lib/response-format.js';
 import { startMcpUsageTelemetry } from './lib/mcp-usage-telemetry.js';
 import { startRuntimeCacheSocket } from './lib/runtime-cache-socket.js';
@@ -624,9 +625,9 @@ async function getTableSummary(tableName) {
   return summarizeTable(await fetchTableMetadata(ENFYRA_API_URL, tableName));
 }
 
-async function getPrimaryFieldName(tableName) {
-  const table = await getTableSummary(tableName);
-  if (table?.primaryKey) return table.primaryKey;
+async function getPrimaryFieldName(tableName, table = null) {
+  const resolvedTable = table ?? await getTableSummary(tableName);
+  if (resolvedTable?.primaryKey) return resolvedTable.primaryKey;
   const metadata = await fetchMetadataContext(ENFYRA_API_URL);
   return metadata.dbType === 'mongodb' ? '_id' : 'id';
 }
@@ -1073,7 +1074,7 @@ server.tool(
     detail: z.enum(['summary', 'plan', 'full']).optional().default('summary').describe('summary lists candidate workflows; plan adds tool sequence and avoidTools; full also includes matching keywords.'),
     limit: z.number().int().positive().max(10).optional().default(5).describe('Maximum workflows to return.'),
   },
-  async (input) => jsonContent(discoverWorkflowRoutes(input, MCP_PROFILE)),
+  async (input) => jsonContent(discoverWorkflowRoutes(input, MCP_PROFILE, MCP_DYNAMIC_TOOLS)),
 );
 
 server.tool(
@@ -1554,7 +1555,7 @@ server.tool(
   },
 );
 
-server.tool('query_table', 'Query any route-backed table. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
+server.tool('query_table', 'Query any route-backed table with a live metadata preflight. Explicit fields are validated before the REST read and the result includes schemaReceipt, so a separate metadata call is optional unless the schema itself must be inspected. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
   tableName: z.string().describe('Table name to query'),
   filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object. Example: {"status": {"_eq": "active"}}.'),
   sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
@@ -1582,9 +1583,12 @@ server.tool('query_table', 'Query any route-backed table. Response is minimal un
   parseJsonArg(aggregate, undefined);
 
   const queryParams = new URLSearchParams();
-  const requestedFields = fields && fields.length > 0 ? fields : [await getPrimaryFieldName(tableName)];
+  const table = await getTableSummary(tableName);
+  const primaryKey = await getPrimaryFieldName(tableName, table);
+  const requestedFields = fields && fields.length > 0 ? fields : [primaryKey];
   const deepFieldSelection = applyDeepFieldSelections(requestedFields, deep);
   const selectedFields = deepFieldSelection.fields;
+  const schemaReceipt = buildQuerySchemaReceipt({ ...table, primaryKey }, selectedFields);
   if (filterParam) queryParams.set('filter', filterParam);
   const normalizedSort = normalizeSortParam(sort);
   if (normalizedSort) queryParams.set('sort', normalizedSort);
@@ -1613,6 +1617,7 @@ server.tool('query_table', 'Query any route-backed table. Response is minimal un
       aggregate: aggregate ? parseJsonArg(aggregate, null) : null,
     },
     minimalDefaultApplied: !(fields && fields.length > 0),
+    schemaReceipt,
     meta: result?.meta,
     data: compactSourceFields(result?.data || [], { tableName }),
     detailHint: fields && fields.length > 0
@@ -2016,7 +2021,7 @@ function isNotFoundDeleteError(error: unknown) {
     || message.includes('does not exist');
 }
 
-server.tool('delete_records', 'Delete one or more route-backed records in one MCP call. Pass items as a native JSON array; for one delete, pass one item. The tool previews every target when confirm=false, rejects duplicate ids, and deletes sequentially when confirm=true. By default, confirm=true skips records that were already removed by cascade or a previous cleanup step.', {
+server.tool('delete_records', 'Delete one or more route-backed records in one MCP call. Pass items as a native JSON array; for one delete, pass one item. The tool previews every target when confirm=false, rejects duplicate ids, and deletes sequentially when confirm=true. Confirmed deletes automatically re-read the requested primary keys and return postcondition.confirmedAbsent plus remainingIds, so a separate absence query is optional. By default, confirm=true skips records that were already removed by cascade or a previous cleanup step.', {
   tableName: z.string().describe('Table name'),
   items: bulkObjectArrayParam(z, 'Delete items').describe('Native JSON array of delete items: [{ "id": "...", "queryParams": { ... }? }].'),
   maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one MCP batch. Default/max is 100.'),
@@ -2058,6 +2063,12 @@ server.tool('delete_records', 'Delete one or more route-backed records in one MC
       duplicateIdsRejected: true,
       destructive: true,
       previews,
+      postcondition: {
+        verificationMethod: 'not_run_preview',
+        requestedIds: parsedItems.map((item) => item.id),
+        remainingIds: previews.filter((item) => item.preview).map((item) => item.id),
+        confirmedAbsent: false,
+      },
       next: 'Call delete_records again with the same items and confirm=true to delete these route-backed records sequentially.',
     }, null, 2) }] };
   }
@@ -2088,6 +2099,25 @@ server.tool('delete_records', 'Delete one or more route-backed records in one MC
 	      throw error;
 	    }
 	  }
+	  const requestedIds = parsedItems.map((item) => item.id);
+	  let postcondition;
+	  try {
+	    const verificationQuery = new URLSearchParams({
+	      filter: JSON.stringify({ [primaryKey]: { _in: requestedIds } }),
+	      limit: String(parsedItems.length),
+	      fields: primaryKey,
+	    });
+	    const verification = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${verificationQuery.toString()}`);
+	    postcondition = buildDeletePostcondition(requestedIds, verification?.data ?? [], primaryKey);
+	  } catch (error) {
+	    postcondition = {
+	      verificationMethod: 'route_read_by_primary_keys',
+	      requestedIds,
+	      remainingIds: [],
+	      confirmedAbsent: false,
+	      verificationError: String((error as any)?.message || error),
+	    };
+	  }
 	  return { content: [{ type: 'text', text: JSON.stringify({
 	    action: 'deleted_records',
 	    tableName,
@@ -2099,6 +2129,7 @@ server.tool('delete_records', 'Delete one or more route-backed records in one MC
 	    skipNotFound,
 	    deleted,
 	    skippedNotFound,
+	    postcondition,
 	  }, null, 2) }] };
 	});
 

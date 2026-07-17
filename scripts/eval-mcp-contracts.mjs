@@ -102,6 +102,16 @@ async function main() {
     assert.ok(!initial.tools.some((tool) => tool.name === 'create_tables'));
     dynamicPacks.initial = measureTools(initial.tools);
 
+    const routed = parseToolResult(await dynamicConnection.client.callTool({
+      name: 'discover_enfyra_workflows',
+      arguments: { intent: 'create a temporary widget extension', detail: 'plan', limit: 1 },
+    }));
+    assert.deepEqual(routed.nextSelection, {
+      tool: 'select_enfyra_workflow',
+      input: { surface: 'extension', mode: 'replace' },
+    });
+    dynamicPacks.discoveryNextSelection = routed.nextSelection;
+
     for (const surface of WORKFLOW_SURFACES) {
       const selected = parseToolResult(await dynamicConnection.client.callTool({
         name: 'select_enfyra_workflow',
@@ -183,7 +193,20 @@ async function main() {
       arguments: { tableName: 'enfyra_method', fields: ['id', 'name'], limit: 1 },
     }));
     assert.equal(records.dataBoundary.trust, 'untrusted');
+    assert.equal(records.schemaReceipt.metadataChecked, true);
+    assert.equal(records.schemaReceipt.requestedFieldsValidated, true);
+    assert.deepEqual(records.schemaReceipt.requestedTopLevelFields, ['id', 'name']);
     scenarios.push({ name: 'untrusted_data_boundary', status: 'passed' });
+
+    const exactMissing = parseToolResult(await client.callTool({
+      name: 'search_admin_extensions',
+      arguments: { mode: 'search', name: '__mcp_contract_absence_fixture__' },
+    }));
+    assert.equal(exactMissing.matchMode, 'exact');
+    assert.equal(exactMissing.targetFound, false);
+    assert.equal(exactMissing.exactMatchCount, 0);
+    assert.deepEqual(exactMissing.results, []);
+    scenarios.push({ name: 'exact_extension_absence', status: 'passed' });
 
     const firstPage = parseToolResult(await client.callTool({
       name: 'search_runtime_zone',

@@ -67,6 +67,37 @@ test('structured output validation accepts matching contracts and rejects drift'
   assert.equal(invalid.success, false);
 });
 
+test('record read and delete output contracts require deterministic receipts', () => {
+  assert.equal(validateStructuredToolOutput('query_table', {
+    responseFormat: 'json-v1',
+    schemaReceipt: {
+      tableName: 'tasks',
+      primaryKey: 'id',
+      metadataChecked: true,
+      requestedFieldsValidated: true,
+      requestedTopLevelFields: ['id'],
+    },
+  }).success, true);
+  assert.equal(validateStructuredToolOutput('query_table', {
+    responseFormat: 'json-v1',
+  }).success, false);
+
+  assert.equal(validateStructuredToolOutput('delete_records', {
+    responseFormat: 'json-v1',
+    action: 'deleted_records',
+    postcondition: {
+      verificationMethod: 'route_read_by_primary_keys',
+      requestedIds: ['1'],
+      remainingIds: [],
+      confirmedAbsent: true,
+    },
+  }).success, true);
+  assert.equal(validateStructuredToolOutput('delete_records', {
+    responseFormat: 'json-v1',
+    action: 'deleted_records',
+  }).success, false);
+});
+
 test('structured output validation accepts record arrays after columnar formatting', () => {
   const workflowOutput = formatJsonPayload({
     action: 'enfyra_workflows_discovered',

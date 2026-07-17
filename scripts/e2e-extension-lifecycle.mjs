@@ -142,6 +142,8 @@ async function main() {
           confirm: true,
         });
         assert.equal(deleted.deleted?.length, 1);
+        assert.equal(deleted.postcondition?.confirmedAbsent, true);
+        assert.deepEqual(deleted.postcondition?.remainingIds, []);
         const remaining = await call('query_table', {
           tableName: 'enfyra_extension',
           fields: ['id', 'name'],

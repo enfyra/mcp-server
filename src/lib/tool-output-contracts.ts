@@ -72,6 +72,27 @@ const apiContextOutputSchema = {
   auth: z.record(z.unknown()),
 } satisfies ZodRawShape;
 
+const queryTableOutputSchema = {
+  ...baseOutputSchema,
+  schemaReceipt: z.object({
+    tableName: z.string(),
+    primaryKey: z.string().nullable(),
+    metadataChecked: z.literal(true),
+    requestedFieldsValidated: z.literal(true),
+    requestedTopLevelFields: z.array(z.string()),
+  }).passthrough(),
+} satisfies ZodRawShape;
+
+const deleteRecordsOutputSchema = {
+  ...actionOutputSchema,
+  postcondition: z.object({
+    verificationMethod: z.string(),
+    requestedIds: z.array(z.unknown()),
+    remainingIds: z.array(z.unknown()),
+    confirmedAbsent: z.boolean(),
+  }).passthrough(),
+} satisfies ZodRawShape;
+
 const CORE_ACTION_OUTPUT_TOOLS = new Set([
   'search_runtime_zone',
   'search_admin_extensions',
@@ -122,6 +143,8 @@ export function getToolOutputSchema(toolName: string): ZodRawShape | undefined {
   if (toolName === 'search_enfyra_tools') return catalogSearchOutputSchema;
   if (toolName === 'execute_enfyra_tool') return catalogExecuteOutputSchema;
   if (toolName === 'get_enfyra_api_context') return apiContextOutputSchema;
+  if (toolName === 'query_table') return queryTableOutputSchema;
+  if (toolName === 'delete_records') return deleteRecordsOutputSchema;
   if (CORE_ACTION_OUTPUT_TOOLS.has(toolName)) return actionOutputSchema;
   if (BASE_OUTPUT_TOOLS.has(toolName)) return baseOutputSchema;
   return undefined;

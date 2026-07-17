@@ -14,7 +14,8 @@ const report = tracePath
         generatedAt: new Date().toISOString(),
         mode: 'scored-traces',
         tracePath,
-        recommendedThreshold: 100,
+        taskSafetyThreshold: 100,
+        optimizationSignals: ['workflow_selection', 'bounded_tool_calls', 'tool_errors'],
         scores,
         allRecommended: scores.every((score) => score.recommended),
       };
@@ -22,7 +23,8 @@ const report = tracePath
   : {
       generatedAt: new Date().toISOString(),
       mode: 'suite-contract',
-      recommendedThreshold: 100,
+      taskSafetyThreshold: 100,
+      optimizationSignals: ['workflow_selection', 'bounded_tool_calls', 'tool_errors'],
       scenarioCount: MODEL_EVAL_SCENARIOS.length,
       scenarios: MODEL_EVAL_SCENARIOS,
       guidance: 'Set ENFYRA_MCP_MODEL_EVAL_TRACES to a JSON trace file produced by a real model runner to score model-in-loop behavior.',

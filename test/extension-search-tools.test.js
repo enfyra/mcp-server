@@ -146,6 +146,28 @@ test('searchExtensions finds global shell registry code with compact snippets', 
   }
 });
 
+test('searchExtensions treats name and id as exact search selectors', async () => {
+  const restore = installFetchMock();
+  try {
+    initAuth(apiUrl, 'efy_pat_test');
+    const byName = await searchExtensions(apiUrl, { name: 'CloudHosts', maxResults: 4 });
+    assert.equal(byName.matchMode, 'exact');
+    assert.deepEqual(byName.target, { id: null, name: 'CloudHosts' });
+    assert.equal(byName.targetFound, true);
+    assert.equal(byName.exactMatchCount, 1);
+    assert.deepEqual(byName.results.map((item) => item.id), [1]);
+
+    const byId = await searchExtensions(apiUrl, { id: 999, maxResults: 4 });
+    assert.equal(byId.matchMode, 'exact');
+    assert.deepEqual(byId.target, { id: 999, name: null });
+    assert.equal(byId.targetFound, false);
+    assert.equal(byId.exactMatchCount, 0);
+    assert.deepEqual(byId.results, []);
+  } finally {
+    restore();
+  }
+});
+
 test('inspectExtensionLocation returns source artifact and widget consumers', async () => {
   const restore = installFetchMock();
   try {

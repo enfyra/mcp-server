@@ -373,10 +373,13 @@ export async function searchRuntimeZone(apiUrl: string, input: any) {
   if ((input.mode ?? 'search') === 'inspect') return inspectRuntimeZoneLocation(apiUrl, input);
   if (!RUNTIME_ZONES.includes(zone)) throw new Error(`Unsupported runtime zone: ${zone}`);
   if (zone === 'admin_ui') {
-    const inventory = !String(input.query ?? '').trim() && !String(input.path ?? '').trim();
+    const exactLookup = input.id != null || Boolean(String(input.name ?? '').trim());
+    const inventory = !String(input.query ?? '').trim() && !String(input.path ?? '').trim() && !exactLookup;
     const adminResult = await searchExtensions(apiUrl, {
       query: input.query,
       path: input.path,
+      id: input.id,
+      name: input.name,
       type: input.extensionType,
       includeDisabled: input.includeDisabled,
       maxResults: input.maxResults,
@@ -635,8 +638,8 @@ export function registerRuntimeZoneTools(server: any, ENFYRA_API_URL: string) {
       mode: z.enum(['search', 'inspect']).optional().default('search').describe('search returns ranked admin UI matches. inspect opens one result using id/name/path/query.'),
       query: z.string().optional().describe('Visible text, button label, menu label, component name, class, icon, source term, or UX phrase.'),
       path: z.string().optional().describe('Menu/page path such as /cloud/hosts when known.'),
-      id: z.union([z.string(), z.number()]).optional().describe('Extension id for mode=inspect; use nextInspect.input from search results.'),
-      name: z.string().optional().describe('Extension name for mode=inspect.'),
+      id: z.union([z.string(), z.number()]).optional().describe('Exact extension id for search verification, or the extension id for mode=inspect.'),
+      name: z.string().optional().describe('Exact extension name for search verification, or the extension name for mode=inspect.'),
       type: z.enum(['page', 'widget', 'global']).optional().describe('Narrows extension type.'),
       includeDisabled: z.boolean().optional().default(true),
       maxResults: z.number().int().min(1).max(25).optional().default(8),

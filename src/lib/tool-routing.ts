@@ -723,7 +723,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(4, 'search_admin_extensions', 'Inspect the selected admin UI artifact with mode=inspect using nextInspect.input.'),
         step(5, 'build_extension_ui', 'After acknowledgement, generate or review high-contract extension UI lazily by kind: drawer, modal, page shell, permission gate, empty state, resource list, FormEditor, Widget, shell registries, tabs, upload modal, api usage, notify, runtime review, theme classes, theme review, or full review.'),
         step(6, 'extension_workflow or patch_extension_code/update_extension_code', 'Use extension_workflow for create/wire flows, patch_extension_code for focused edits, or update_extension_code for full replacements.'),
-        step(7, 'verify_extension_runtime', 'Verify saved metadata, source hash, server compilation, UI/theme/runtime policy, and page menu wiring; run browser QA separately when browserRender is not_run.'),
+        step(7, 'verify_extension_runtime', 'Extension save operations already return valid saved-state verification. Call this only when that receipt is inconclusive or the task explicitly requires an independent recheck; run browser QA separately when browserRender is not_run.'),
       ];
     case 'schema':
       return [
@@ -956,7 +956,7 @@ export function discoverWorkflowRoutes({
   risk = 'unknown',
   detail = 'summary',
   limit = 5,
-}: WorkflowRouteOptions = {}, profile: WorkflowProfile = 'all') {
+}: WorkflowRouteOptions = {}, profile: WorkflowProfile = 'all', dynamicToolPacks = false) {
   const normalizedSurface = surface ? normalize(surface) : undefined;
   const normalizedDetail = normalizeDetail(detail);
   const normalizedRisk = normalizeRisk(risk);
@@ -1001,8 +1001,15 @@ export function discoverWorkflowRoutes({
       score: item.score,
       ...formatter(item.workflow),
     })),
+    nextSelection: dynamicToolPacks && selected[0]
+      ? {
+          tool: 'select_enfyra_workflow',
+          input: { surface: selected[0].workflow.key, mode: 'replace' },
+        }
+      : undefined,
     surfaces: normalizedDetail === 'summary' ? availableSurfaces : undefined,
     guidance: [
+      ...(dynamicToolPacks ? ['Call select_enfyra_workflow with nextSelection.input before using primaryPath domain tools; do not use search_enfyra_tools for tools already named by the selected workflow.'] : []),
       'Use this as progressive disclosure: pick the closest workflow and follow primaryPath in order instead of choosing from the flat MCP tool list.',
       'For writes, call get_enfyra_required_knowledge and pass the returned acknowledgement keys into write tools.',
       'Treat avoidTools as negative routing boundaries; they prevent near-correct tool choices from crossing the wrong platform contract.',
