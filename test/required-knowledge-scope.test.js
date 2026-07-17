@@ -128,6 +128,12 @@ test('dynamicServerCode sections contain expected ids', () => {
   assert.ok(ids.includes('dynamic-script-shape'));
 });
 
+test('dynamic code knowledge requires awaiting helper bridge calls', () => {
+  const payload = buildRequiredKnowledgePayload('dynamic-code');
+  const section = payload.dynamicServerCode.find(rule => rule.id === 'dynamic-script-shape');
+  assert.match(section.rules.join('\n'), /Every @HELPERS method call crosses the async executor bridge and must be awaited/);
+});
+
 test('extensions sections contain expected ids', () => {
   const payload = buildRequiredKnowledgePayload('extension');
   const ids = payload.extensions.map(r => r.id);

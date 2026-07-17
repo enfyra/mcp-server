@@ -899,11 +899,11 @@ create_columns({
 
 // In the create/update handler or pre-hook, hash plaintext before it is encrypted.
 if (@BODY.api_token) {
-  @BODY.api_token_lookup_sha256 = @HELPERS.$crypto.sha256(@BODY.api_token)
+  @BODY.api_token_lookup_sha256 = await @HELPERS.$crypto.sha256(@BODY.api_token)
 }
 
 // Lookup by the hash, never by the encrypted field.
-const lookup = @HELPERS.$crypto.sha256(@BODY.api_token)
+const lookup = await @HELPERS.$crypto.sha256(@BODY.api_token)
 const found = await #integrations.find({
   filter: { api_token_lookup_sha256: { _eq: lookup } },
   limit: 1

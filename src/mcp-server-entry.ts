@@ -100,12 +100,13 @@ import { registerPlatformOperationTools, validateExtensionCode } from './lib/pla
 import { registerRuntimeZoneTools } from './lib/runtime-zone-tools.js';
 import { registerDynamicRepositoryBuilder } from './lib/dynamic-repository-builder.js';
 import { assertCreateHandlerRouteBoundary } from './lib/dynamic-endpoint-contract.js';
-import { parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
+import { assertGenericRecordMutationAllowed, parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource, validateScriptSourceIfPresent } from './lib/mutation-guards.js';
 import {
   assertDynamicCodeKnowledgeAck,
   assertDynamicCodeKnowledgeAckIf,
   assertExtensionKnowledgeAckIf,
   assertGlobalRulesAck,
+  acknowledgeRequiredKnowledge,
   buildRequiredKnowledgePayload,
   dynamicCodeKnowledgeAckParam,
   extensionKnowledgeAckParam,
@@ -117,7 +118,7 @@ import { startMcpUsageTelemetry } from './lib/mcp-usage-telemetry.js';
 import { startRuntimeCacheSocket } from './lib/runtime-cache-socket.js';
 import { executeSequentialBatch } from './lib/sequential-batch.js';
 import { compactSourceFields, writeSourceArtifact } from './lib/source-artifacts.js';
-import { installToolsetFilter, normalizeMcpToolset, summarizeToolsetForInstructions } from './lib/toolset-filter.js';
+import { installToolsetFilter, normalizeMcpProfile, normalizeMcpToolset, summarizeToolsetForInstructions } from './lib/toolset-filter.js';
 import {
   findRoutePermission,
   mergeMethodNames,
@@ -133,6 +134,7 @@ import {
 // Initialize auth module
 initAuth(ENFYRA_API_URL, ENFYRA_API_TOKEN);
 const MCP_TOOLSET = normalizeMcpToolset(process.env.ENFYRA_MCP_TOOLSET);
+const MCP_PROFILE = normalizeMcpProfile(process.env.ENFYRA_MCP_PROFILE);
 
 const CAPABILITY_AREAS = [
   {
@@ -913,13 +915,13 @@ const server = new McpServer(
   },
   {
     instructions: buildMcpServerInstructions(ENFYRA_API_URL, {
-      toolsetSummary: summarizeToolsetForInstructions(MCP_TOOLSET),
+      toolsetSummary: summarizeToolsetForInstructions(MCP_TOOLSET, MCP_PROFILE),
     }),
   },
 );
 installColumnarToolFormatter(server);
-installToolsetFilter(server, MCP_TOOLSET);
-startMcpUsageTelemetry(ENFYRA_API_URL, MCP_TOOLSET);
+installToolsetFilter(server, MCP_TOOLSET, MCP_PROFILE);
+startMcpUsageTelemetry(ENFYRA_API_URL, `${MCP_TOOLSET}:${MCP_PROFILE}`);
 
 // ============================================================================
 // METADATA TOOLS
@@ -933,9 +935,13 @@ server.tool(
     'Pass scope to only load rules for the current task domain: "schema" (table/data/route/permission/guard work), "dynamic-code" (handler/hook/websocket/resolver scripts), "extension" (admin UI/menu/shell), or "flow". Omitting scope returns all rules.',
   ].join(' '),
   {
-    scope: z.enum(['schema', 'dynamic-code', 'extension', 'flow']).optional().describe('Limit knowledge to one domain. Omit to load all rules.'),
+    scope: z.enum(['full', 'schema', 'dynamic-code', 'extension', 'flow']).optional().describe('Limit knowledge to one domain. Use full or omit scope to load all rules.'),
   },
-  async ({ scope }) => jsonContent(buildRequiredKnowledgePayload(scope)),
+  async ({ scope }) => {
+    const payload = buildRequiredKnowledgePayload(scope);
+    const sessionAcknowledgement = acknowledgeRequiredKnowledge(scope);
+    return jsonContent({ ...payload, sessionAcknowledgement });
+  },
 );
 
 server.tool('get_all_metadata', 'Get a lightweight table catalog. Use get_table_metadata or inspect_table to fetch one table schema.', {
@@ -1024,7 +1030,7 @@ server.tool(
     detail: z.enum(['summary', 'plan', 'full']).optional().default('summary').describe('summary lists candidate workflows; plan adds tool sequence and avoidTools; full also includes matching keywords.'),
     limit: z.number().int().positive().max(10).optional().default(5).describe('Maximum workflows to return.'),
   },
-  async (input) => jsonContent(discoverWorkflowRoutes(input)),
+  async (input) => jsonContent(discoverWorkflowRoutes(input, MCP_PROFILE)),
 );
 
 server.tool(
@@ -1105,7 +1111,7 @@ server.tool(
       adminTesting: {
         runAdminTest: 'run_admin_test wraps POST /admin/test/run for flow_step, websocket_event, and websocket_connection scripts.',
         testFlowStep: 'test_flow_step also wraps POST /admin/test/run with kind=flow_step.',
-        triggerFlow: 'trigger_flow wraps POST /admin/flow/trigger/:id and enqueues a flow execution.',
+        triggerFlow: 'trigger_flow resolves a saved enabled flow, then wraps POST /admin/flow/trigger/:id. Use test_flow_step for disabled flows.',
       },
       graphql: {
         endpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`,
@@ -1380,9 +1386,9 @@ server.tool(
         },
         throws: '@THROW maps to $ctx.$throw. Numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message). Numeric helper details must be an object/array, e.g. @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut. Use @THROW.http(status, message, details?) for dynamic status codes. Use @THROW.notFound(resource, id?) and @THROW.duplicate(resource, field, value) only when you intentionally want Enfyra-formatted semantic messages.',
         helpers: {
-          core: '$ctx.$helpers includes $bcrypt.hash/compare, autoSlug(text), $fetch, $sleep(ms) capped by the runtime, and $crypto. HTTP and GraphQL contexts also expose $jwt through $ctx.$helpers.',
+          core: '$ctx.$helpers includes $bcrypt.hash/compare, autoSlug(text), $fetch, $sleep(ms) capped by the runtime, and $crypto. HTTP and GraphQL contexts also expose $jwt through $ctx.$helpers. Every helper method crosses the async executor bridge: await its result before property access, interpolation, concatenation, or persistence.',
           fetch: '@FETCH maps to $ctx.$helpers.$fetch for outbound HTTP calls from server scripts. Keep secrets in encrypted fields instead of embedding them in sourceCode.',
-          crypto: '$ctx.$helpers.$crypto exposes bounded runtime crypto helpers: randomUUID(), randomBytes(size, encoding), sha256(value, encoding), hmacSha256(value, secret, encoding), and generateSshKeyPair(comment). Use generateSshKeyPair for SSH key material. Do not use legacy $ctx.$helpers.$ssh.',
+          crypto: '$ctx.$helpers.$crypto exposes bounded runtime crypto helpers: randomUUID(), randomBytes(size, encoding), sha256(value, encoding), hmacSha256(value, secret, encoding), and generateSshKeyPair(comment). Await every call, including helpers whose host implementation is synchronous, for example const id = await @HELPERS.$crypto.randomUUID(). Use generateSshKeyPair for SSH key material. Do not use legacy $ctx.$helpers.$ssh.',
           files: '$ctx.$storage.$upload and $ctx.$storage.$update accept file: @UPLOADED_FILE for request uploads and stream from the server temp file path. $ctx.$storage.$registerFile creates a enfyra_file record for an object that already exists in storage without uploading bytes. Use buffer only for small generated/transformed files; do not use @UPLOADED_FILE.buffer.',
         },
         env: '$ctx.$env exposes a sanitized process env snapshot with exact sensitive keys removed: DB_URI, DB_REPLICA_URIS, REDIS_URI, SECRET_KEY, and ADMIN_PASSWORD. Store app secrets in unpublished isEncrypted fields instead of reading them from $env.',
@@ -1688,6 +1694,7 @@ server.tool('create_records', 'Create one or more route-backed records. Always p
 }, async ({ tableName, records, queryParams, maxRecords, globalRulesAckKey, knowledgeAckKey, extensionKnowledgeAckKey }) => {
   assertGlobalRulesAck(globalRulesAckKey);
   validateTableName(tableName);
+  assertGenericRecordMutationAllowed('create', tableName);
   const parsedRecords = parseRecordBatchData(records);
   if (parsedRecords.length > maxRecords) {
     throw new Error(`create_records received ${parsedRecords.length} records, above maxRecords=${maxRecords}. Split the batch deliberately.`);
@@ -1750,6 +1757,7 @@ server.tool('update_records', 'Update one or more records in one MCP call. Pass 
 }, async ({ tableName, items, maxItems, globalRulesAckKey, knowledgeAckKey, extensionKnowledgeAckKey }) => {
   assertGlobalRulesAck(globalRulesAckKey);
   validateTableName(tableName);
+  assertGenericRecordMutationAllowed('update', tableName);
   const parsedItems = parseBulkItemsArg('items', items);
   assertMaxBulkItems('update_records', parsedItems, maxItems);
   assertNoDuplicateBulkIds('update_records', parsedItems);
@@ -1973,6 +1981,7 @@ server.tool('delete_records', 'Delete one or more route-backed records in one MC
   globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
 }, async ({ tableName, items, maxItems, confirm, skipNotFound, globalRulesAckKey }) => {
   validateTableName(tableName);
+  assertGenericRecordMutationAllowed('delete', tableName);
   const parsedItems = parseBulkItemsArg('items', items);
   assertMaxBulkItems('delete_records', parsedItems, maxItems);
   assertNoDuplicateBulkIds('delete_records', parsedItems);
@@ -2212,7 +2221,7 @@ server.tool(
   ].join(' '),
   {
     kind: z.enum(['script', 'flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
-    body: z.string().describe('JSON body for the test. Include script and optional context for script; type/config for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
+    body: z.string().describe('JSON body for the test. Include script and optional context for script; type/config plus payload for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
   },
   async ({ kind, body }) => {
     const parsed = body ? JSON.parse(body) : {};
@@ -2230,20 +2239,29 @@ server.tool(
 
 server.tool(
   'test_flow_step',
-  'Test a single flow step without saving it. Wraps POST /admin/test/run with kind=flow_step.',
+  'Test a single flow step without saving it. Wraps POST /admin/test/run with kind=flow_step. Pass runtime @FLOW_PAYLOAD data through payload; the tool forwards it using the ESV test-run contract.',
   {
     type: z.enum(['script', 'condition', 'query', 'create', 'update', 'delete', 'http', 'trigger_flow', 'sleep', 'log']).describe('Flow step type'),
     config: z.string().describe('Step config as JSON string'),
     timeout: z.number().optional().describe('Timeout in ms'),
     key: z.string().optional().describe('Optional step key for mock flow context'),
-    mockFlow: z.string().optional().describe('Optional mockFlow JSON object'),
+    payload: z.union([z.record(z.any()), z.string()]).optional().describe('Runtime payload object exposed to the script as @FLOW_PAYLOAD. A JSON object string is accepted for compatibility.'),
+    mockFlow: z.string().optional().describe('Optional advanced mockFlow JSON object for $last/$meta or other flow context. Use payload for @FLOW_PAYLOAD.'),
   },
-  async ({ type, config, timeout, key, mockFlow }) => {
+  async ({ type, config, timeout, key, payload, mockFlow }) => {
+    const parsedConfig = JSON.parse(config);
+    const sourceCode = parsedConfig?.sourceCode ?? parsedConfig?.code;
+    if (typeof sourceCode === 'string') validatePortableScriptSource(sourceCode);
+    const parsedPayload = typeof payload === 'string' ? JSON.parse(payload) : payload;
+    if (parsedPayload !== undefined && (!parsedPayload || typeof parsedPayload !== 'object' || Array.isArray(parsedPayload))) {
+      throw new Error('payload must be a JSON object.');
+    }
     const body = {
       type,
-      config: JSON.parse(config),
+      config: parsedConfig,
       ...(timeout ? { timeout } : {}),
       ...(key ? { key } : {}),
+      ...(parsedPayload !== undefined ? { payload: parsedPayload } : {}),
       ...(mockFlow ? { mockFlow: JSON.parse(mockFlow) } : {}),
     };
     const result = await fetchAPI(ENFYRA_API_URL, '/admin/test/run', {
@@ -2256,13 +2274,24 @@ server.tool(
 
 server.tool(
   'trigger_flow',
-  'Trigger a saved flow by id or name. Wraps POST /admin/flow/trigger/:id.',
+  'Trigger an enabled saved flow by id or name. Disabled flows are not registered for execution; use test_flow_step to verify their step contract without enabling them.',
   {
     flowIdOrName: z.union([z.string(), z.number()]).describe('Flow id or name accepted by FlowService.trigger'),
     payload: z.string().optional().describe('Payload JSON object. Default {}.'),
   },
   async ({ flowIdOrName, payload }) => {
-    const result = await fetchAPI(ENFYRA_API_URL, `/admin/flow/trigger/${encodeURIComponent(String(flowIdOrName))}`, {
+    const rawIdentifier = String(flowIdOrName);
+    const filter = typeof flowIdOrName === 'number' || /^\d+$/.test(rawIdentifier)
+      ? { id: { _eq: flowIdOrName } }
+      : { name: { _eq: rawIdentifier } };
+    const lookup = await fetchAPI(ENFYRA_API_URL, `/enfyra_flow?filter=${encodeURIComponent(JSON.stringify(filter))}&limit=1&fields=id,_id,name,isEnabled`);
+    const flow = unwrapData(lookup)[0];
+    if (!flow) throw new Error(`Flow not found: ${rawIdentifier}`);
+    if (flow.isEnabled === false) {
+      throw new Error(`Flow "${flow.name || rawIdentifier}" is disabled and is not registered for execution. Use test_flow_step to verify its saved step contract, or explicitly enable the flow before trigger_flow.`);
+    }
+    const flowId = flow.id ?? flow._id;
+    const result = await fetchAPI(ENFYRA_API_URL, `/admin/flow/trigger/${encodeURIComponent(String(flowId))}`, {
       method: 'POST',
       body: JSON.stringify({ payload: payload ? JSON.parse(payload) : {} }),
     });

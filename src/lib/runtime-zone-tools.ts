@@ -4,6 +4,7 @@ import { fetchMetadataTables, fetchTableCatalog, fetchTableMetadata, fetchTableM
 import { jsonContent } from './response-format.js';
 import { writeSourceArtifact } from './source-artifacts.js';
 import { inspectExtensionLocation, searchExtensions } from './extension-search-tools.js';
+import { normalizeSnippetChars } from './tool-input-normalization.js';
 
 const RUNTIME_ZONES = [
   'admin_ui',
@@ -364,7 +365,7 @@ export async function searchRuntimeZone(apiUrl: string, input: any) {
   if (!query) throw new Error('query or path is required for this runtime zone.');
   const path = input.path ? String(input.path).trim() : '';
   const maxResults = Math.min(Math.max(Number(input.maxResults ?? 8), 1), 25);
-  const snippetChars = Math.min(Math.max(Number(input.snippetChars ?? 180), 120), 600);
+  const snippetChars = normalizeSnippetChars(input.snippetChars);
   const includeSourceArtifact = Boolean(input.includeSourceArtifact);
   const tables = ZONE_TABLES[zone as Exclude<RuntimeZone, 'admin_ui' | 'schema_data'>];
   const allResults = [];
@@ -586,7 +587,7 @@ export function registerRuntimeZoneTools(server: any, ENFYRA_API_URL: string) {
       type: z.enum(['page', 'widget', 'global']).optional().describe('Narrows extension type.'),
       includeDisabled: z.boolean().optional().default(true),
       maxResults: z.number().int().min(1).max(25).optional().default(8),
-      snippetChars: z.number().int().min(120).max(600).optional().default(180),
+      snippetChars: z.number().int().optional().default(180).transform(normalizeSnippetChars).describe('Approximate snippet characters per match. Values outside 120-600 are clamped.'),
       includeSourceArtifact: z.boolean().optional().default(false),
     },
     async (input: any) => jsonContent(await searchAdminExtensions(ENFYRA_API_URL, input)),
@@ -629,7 +630,7 @@ export function registerRuntimeZoneTools(server: any, ENFYRA_API_URL: string) {
       extensionType: z.enum(['page', 'widget', 'global']).optional().describe('Only for admin_ui zone. Narrows extension type.'),
       includeDisabled: z.boolean().optional().default(true).describe('Only for admin_ui zone. Include disabled extensions.'),
       maxResults: z.number().int().min(1).max(25).optional().default(8).describe('Maximum ranked results.'),
-      snippetChars: z.number().int().min(120).max(600).optional().default(180).describe('Approximate snippet characters per match.'),
+      snippetChars: z.number().int().optional().default(180).transform(normalizeSnippetChars).describe('Approximate snippet characters per match. Values outside 120-600 are clamped.'),
       maxMatchesPerRecord: z.number().int().min(1).max(8).optional().default(2).describe('Only for admin_ui zone. Maximum source matches per extension.'),
       includeSourceArtifact: z.boolean().optional().default(false).describe('Write matched source to /tmp and return compact source artifact metadata. Prefer false unless snippets are insufficient.'),
     },

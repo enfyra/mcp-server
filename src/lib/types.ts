@@ -77,3 +77,26 @@ export interface DynamicEndpointReviewInput {
   metadataUnavailable?: string[];
   metadataTruncated?: boolean;
 }
+
+export interface ExtensionSfcAttributeAnalysis {
+  name: string;
+  directive: string | null;
+  value: string | null;
+  dynamicArgument: boolean;
+  modifiers: string[];
+}
+
+export interface ExtensionSfcElementAnalysis {
+  tag: string;
+  attributes: ExtensionSfcAttributeAnalysis[];
+  classes: string[];
+  source: string;
+  text: string;
+}
+
+export interface ExtensionSfcAnalysis {
+  valid: boolean;
+  hasTemplate: boolean;
+  errors: string[];
+  elements: ExtensionSfcElementAnalysis[];
+}

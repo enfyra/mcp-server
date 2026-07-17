@@ -100,6 +100,7 @@ npx @enfyra/mcp-server@latest config [options]
 | `ENFYRA_API_URL` | Runtime API base written into MCP config | Derived from the app URL |
 | `ENFYRA_API_TOKEN` | Programmatic token from the Enfyra admin UI `/me` | Required |
 | `ENFYRA_MCP_TOOLSET` | `guided` for the normal curated toolset or `full` for low-level debugging tools | `guided` |
+| `ENFYRA_MCP_PROFILE` | Guided domain surface: `all`, `extension`, `schema`, `runtime`, or `operations`; ignored by `full` | `all` |
 
 The API token is exchanged for a short-lived access token at runtime. It is not sent directly as a Bearer token.
 

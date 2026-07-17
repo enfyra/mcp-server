@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const DEFAULT_PREVIEW_CHARS = 1200;
+const DEFAULT_PREVIEW_CHARS = 480;
 const DEFAULT_INLINE_LIMIT = 1400;
 const SOURCE_FIELD_NAMES = new Set([
   'sourceCode',
@@ -37,6 +37,7 @@ function safePart(value: unknown) {
 
 function extensionForField(fieldName: string) {
   if (fieldName === 'code') return '.vue';
+  if (fieldName.endsWith('.diff') || fieldName === 'diff') return '.diff';
   return '.js';
 }
 

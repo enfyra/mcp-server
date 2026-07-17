@@ -1,5 +1,6 @@
 import type { ToolResult, UnknownRecord } from "./types.js";
 import { recordMcpToolUsage } from './mcp-usage-telemetry.js';
+import { afterMcpToolExecution, beforeMcpToolExecution } from './session-safety.js';
 
 const RESPONSE_FORMAT = 'json+columnar-v1';
 const COLUMNAR_FORMAT = 'columnar-v1';
@@ -93,21 +94,6 @@ function buildCompressionStats(originalPayload: unknown, candidatePayload: unkno
   };
 }
 
-function attachCompressionStats(originalPayload: unknown, candidatePayload: unknown, selectedPayload: UnknownRecord, applied: boolean) {
-  if (!applied) return selectedPayload;
-  if (
-    isPlainObject(selectedPayload)
-    && selectedPayload.responseFormat === RESPONSE_FORMAT
-    && selectedPayload[COMPRESSION_STATS_FIELD]
-  ) {
-    return selectedPayload;
-  }
-  return {
-    ...selectedPayload,
-    [COMPRESSION_STATS_FIELD]: buildCompressionStats(originalPayload, candidatePayload, selectedPayload, applied),
-  };
-}
-
 function wrapPayload(payload: unknown): UnknownRecord {
   if (!isPlainObject(payload)) {
     return {
@@ -121,13 +107,17 @@ function wrapPayload(payload: unknown): UnknownRecord {
   };
 }
 
-export function formatJsonPayload(payload: unknown): UnknownRecord {
-  if (
-    isPlainObject(payload)
-    && payload.responseFormat === RESPONSE_FORMAT
-    && payload[COMPRESSION_STATS_FIELD]
-  ) {
-    return payload;
+function formatJsonPayloadDetailed(payload: unknown) {
+  if (isPlainObject(payload) && payload.responseFormat === RESPONSE_FORMAT) {
+    const compressionStats = isPlainObject(payload[COMPRESSION_STATS_FIELD])
+      ? payload[COMPRESSION_STATS_FIELD]
+      : undefined;
+    if (compressionStats) {
+      const output = { ...payload };
+      delete output[COMPRESSION_STATS_FIELD];
+      return { payload: output, compressionStats };
+    }
+    return { payload, compressionStats: undefined };
   }
 
   const originalPayload = wrapPayload(payload);
@@ -136,15 +126,26 @@ export function formatJsonPayload(payload: unknown): UnknownRecord {
   const candidateTokens = estimateTokens(safeJsonStringify(columnarPayload));
   const shouldApplyColumnar = candidateTokens < originalTokens;
   const selectedPayload: UnknownRecord = shouldApplyColumnar ? columnarPayload : originalPayload;
-  return attachCompressionStats(originalPayload, columnarPayload, selectedPayload, shouldApplyColumnar);
+  return {
+    payload: selectedPayload,
+    compressionStats: shouldApplyColumnar
+      ? buildCompressionStats(originalPayload, columnarPayload, selectedPayload, true)
+      : undefined,
+  };
+}
+
+export function formatJsonPayload(payload: unknown): UnknownRecord {
+  return formatJsonPayloadDetailed(payload).payload;
 }
 
 export function jsonContent(payload: unknown, { pretty = false }: { pretty?: boolean } = {}): ToolResult {
+  const formatted = formatJsonPayloadDetailed(payload);
   return {
     content: [{
       type: 'text',
-      text: JSON.stringify(formatJsonPayload(payload), null, pretty ? 2 : 0),
+      text: JSON.stringify(formatted.payload, null, pretty ? 2 : 0),
     }],
+    ...(formatted.compressionStats ? { _meta: { enfyraCompression: formatted.compressionStats } } : {}),
   };
 }
 
@@ -160,20 +161,28 @@ function tryParseJson(text: unknown) {
 }
 
 function formatContentItem(item: any) {
-  if (!item || item.type !== 'text') return item;
+  if (!item || item.type !== 'text') return { item, compressionStats: undefined };
   const parsed = tryParseJson(item.text);
-  if (!parsed) return item;
+  if (!parsed) return { item, compressionStats: undefined };
+  const formatted = formatJsonPayloadDetailed(parsed);
   return {
-    ...item,
-    text: JSON.stringify(formatJsonPayload(parsed)),
+    item: {
+      ...item,
+      text: JSON.stringify(formatted.payload),
+    },
+    compressionStats: formatted.compressionStats,
   };
 }
 
 export function formatToolResult(result: any) {
   if (!result || !Array.isArray(result.content)) return result;
+  const formattedItems = result.content.map(formatContentItem);
+  const compressionStats = result?._meta?.enfyraCompression
+    || formattedItems.find((entry) => entry.compressionStats)?.compressionStats;
   return {
     ...result,
-    content: result.content.map(formatContentItem),
+    content: formattedItems.map((entry) => entry.item),
+    ...(compressionStats ? { _meta: { ...(result._meta || {}), enfyraCompression: compressionStats } } : {}),
   };
 }
 
@@ -186,7 +195,9 @@ export function installColumnarToolFormatter(server: any) {
     return registerTool(name, description, schema, async (...args) => {
       const startedAt = Date.now();
       try {
+        beforeMcpToolExecution(name, args[0]);
         const result = await handler(...args);
+        afterMcpToolExecution(name, args[0]);
         const formatted = formatToolResult(result);
         recordMcpToolUsage(name, startedAt, args, formatted);
         return formatted;

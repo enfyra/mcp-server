@@ -1,23 +1,54 @@
 export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONES::SCHEMA-DESIGN-CONTEXT::RECORD-BATCH::20260704H';
-export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::RUNTIME-SURFACE-CONTRACTS::20260716D';
-export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260708A';
+export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::ASYNC-HELPER-BRIDGE::20260717A';
+export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-16.runtime-surface-contracts';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-07-17.async-helper-contract';
+
+type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
+
+const acknowledgedDomains = new Set<KnowledgeDomain>();
+
+function hasExplicitAckKey(key: unknown) {
+  return key !== undefined && key !== null;
+}
+
+export function resetRequiredKnowledgeSession() {
+  acknowledgedDomains.clear();
+}
+
+export function getRequiredKnowledgeSessionState() {
+  return {
+    acknowledgedDomains: ['globalRules', 'dynamicServerCode', 'extensions']
+      .filter((domain) => acknowledgedDomains.has(domain as KnowledgeDomain)),
+  };
+}
+
+export function acknowledgeRequiredKnowledge(scope: string = 'full') {
+  const resolvedScope = requireScope(scope);
+  acknowledgedDomains.add('globalRules');
+  if (resolvedScope === 'full' || resolvedScope === 'dynamic-code' || resolvedScope === 'flow') {
+    acknowledgedDomains.add('dynamicServerCode');
+  }
+  if (resolvedScope === 'full' || resolvedScope === 'extension') {
+    acknowledgedDomains.add('extensions');
+  }
+  return getRequiredKnowledgeSessionState();
+}
 
 export function globalRulesAckParam(z) {
-  return z.string().describe('Required global-rules acknowledgement key from get_enfyra_required_knowledge. Call that tool, read the global Enfyra MCP rules, then pass globalRulesAckKey exactly.');
+  return z.string().optional().describe('Backward-compatible explicit acknowledgement key. Omit after get_enfyra_required_knowledge has loaded global rules in this MCP process session.');
 }
 
 export function dynamicCodeKnowledgeAckParam(z) {
-  return z.string().describe('Required dynamic-code acknowledgement key from get_enfyra_required_knowledge. Call that tool, read the dynamic server code knowledge, then pass dynamicCodeAckKey exactly.');
+  return z.string().optional().describe('Backward-compatible explicit acknowledgement key. Omit after get_enfyra_required_knowledge has loaded dynamic-code or flow rules in this MCP process session.');
 }
 
 export function extensionKnowledgeAckParam(z) {
-  return z.string().describe('Required extension acknowledgement key from get_enfyra_required_knowledge. Call that tool, read the extension/theme knowledge, then pass extensionAckKey exactly.');
+  return z.string().optional().describe('Backward-compatible explicit acknowledgement key. Omit after get_enfyra_required_knowledge has loaded extension rules in this MCP process session.');
 }
 
 export function assertGlobalRulesAck(key) {
-  if (key !== GLOBAL_RULES_ACK_KEY) {
+  if (!acknowledgedDomains.has('globalRules') && (!hasExplicitAckKey(key) || key !== GLOBAL_RULES_ACK_KEY)) {
     throw new Error('Missing or invalid global-rules acknowledgement. Call get_enfyra_required_knowledge, read the global Enfyra MCP rules, then pass globalRulesAckKey as globalRulesAckKey.');
   }
 }
@@ -27,7 +58,7 @@ export function assertGlobalRulesAckIf(condition, key) {
 }
 
 export function assertDynamicCodeKnowledgeAck(key) {
-  if (key !== DYNAMIC_CODE_KNOWLEDGE_ACK_KEY) {
+  if (!acknowledgedDomains.has('dynamicServerCode') && (!hasExplicitAckKey(key) || key !== DYNAMIC_CODE_KNOWLEDGE_ACK_KEY)) {
     throw new Error('Missing or invalid dynamic-code knowledge acknowledgement. Call get_enfyra_required_knowledge, read the dynamic server code contracts, then pass dynamicCodeAckKey as knowledgeAckKey.');
   }
 }
@@ -37,7 +68,7 @@ export function assertDynamicCodeKnowledgeAckIf(condition, key) {
 }
 
 export function assertExtensionKnowledgeAck(key) {
-  if (key !== EXTENSION_KNOWLEDGE_ACK_KEY) {
+  if (!acknowledgedDomains.has('extensions') && (!hasExplicitAckKey(key) || key !== EXTENSION_KNOWLEDGE_ACK_KEY)) {
     throw new Error('Missing or invalid extension knowledge acknowledgement. Call get_enfyra_required_knowledge, read the extension/theme contracts, then pass extensionAckKey as extensionKnowledgeAckKey.');
   }
 }
@@ -95,8 +126,9 @@ const GLOBAL_RULES_SECTIONS = [
   {
     id: 'mutations-are-intentional',
     rules: [
+      'Call get_enfyra_api_context before the first mutation in each MCP process and verify the connected API base. The MCP rejects writes until this target confirmation succeeds.',
       'Prefer business operation tools over generic CRUD when a specific tool exists.',
-      'Destructive operations are preview-first; pass confirm=true only after explicit user approval.',
+      'Destructive operations are preview-first. A confirmed delete must match a successful preview from the same MCP process session; pass confirm=true only after inspecting that preview and receiving explicit user approval.',
       'Do not manually reload caches unless natural partial reload is proven stale or a concrete reload error requires it.',
       'Never fabricate ids, field names, relation names, paths, package names, or permission scopes.',
     ],
@@ -108,6 +140,7 @@ const GLOBAL_RULES_SECTIONS = [
       'Then call get_enfyra_examples with category=schema-relations only for reasoning patterns, not for domain-specific table names.',
       'Use plural mutation tools for writes: create_tables/update_tables/delete_tables, create_columns/update_columns/delete_columns, create_relations/delete_relations, and create_records/update_records/delete_records. Pass native JSON arrays; use one item in the array for a single mutation.',
       'Create entity tables with scalar columns first, then add relations once target tables exist. create_tables defers relation creation until all tables in the same batch exist.',
+      'Enfyra table names are lowercase. create_tables lowercases names and matching same-batch relation targets before writing and reports the normalization; use aliases for human-facing labels.',
       'Do not declare id, _id, createdAt, or updatedAt columns; Enfyra manages them automatically.',
       'For one-pass relation-based unique/index constraints, declare the owning relations in the same create_tables item as the constraints. If relations already exist or will be created separately, add those constraints afterward with update_tables.',
       'Use live Enfyra column types, not SQL dialect names. Common safe choices: varchar for short text, text/richtext for long prose, float for price/amount/rating/decimal-like values, int/bigint for counts, boolean, date/datetime/timestamp, enum, simple-json for structured objects/arrays when listed by live metadata, and code for source fields.',
@@ -116,6 +149,7 @@ const GLOBAL_RULES_SECTIONS = [
       'If the app must deep-read a parent with child collections, create the child owning relation with inversePropertyName from the start; otherwise parent.deepChild queries will fail until an inverse relation is added.',
       'When inserting/updating records with relations, use relation propertyName values in the body, not hidden physical FK columns. Inspect the table to learn propertyName values.',
       'For record writes, always use create_records/update_records/delete_records with native array inputs; these tools validate every item against live metadata before posting/patching/deleting sequentially.',
+      'Generic record CRUD cannot mutate domain-owned structure rows in enfyra_table, enfyra_column, enfyra_relation, or enfyra_route. Use the table/column/relation tools or API endpoint/route tools so physical changes, dependencies, reloads, and previews stay correct.',
       'For reads, query_table accepts native object filter/deep/aggregate values. Deep keys are relation names; query_table auto-adds missing top-level deep relation keys to fields so nested records can appear. Inside deep, use fields/filter/sort/limit/page/deep; never use _fields.',
       'Filters use Enfyra operators, not SQL operators. Use _contains, _starts_with, or _ends_with for text matching; do not use _like.',
       'This auto-add behavior is MCP query_table only. Inside dynamic server scripts, repository find({ deep }) requires the relation property to also be present in top-level fields, otherwise row.<relation> may be undefined.',
@@ -195,10 +229,13 @@ const DYNAMIC_CODE_SECTIONS = [
       'Use @REPOS.main for the route main table and #secure.table_name or @REPOS.secure.table_name for explicit user-facing table access. Reserve #table_name/@REPOS.table_name for trusted internal work that intentionally bypasses field permissions.',
       'When using repository find({ deep }) in handlers/hooks/flows, include each deep relation name in top-level fields, then choose nested fields under deep.<relation>.fields.',
       'Repository calls are async. Always await secure and trusted repository find/create/update/delete/exists calls; reads return { data: [...], meta? }.',
+      'Every @HELPERS method call crosses the async executor bridge and must be awaited before property access, string interpolation, concatenation, or persistence. Example: const id = await @HELPERS.$crypto.randomUUID().',
       'Create/update repository calls return collection-shaped data arrays; read result.data?.[0] for a single row.',
       '@LOGS is a callable function: use @LOGS(message, details?). It has no .info/.warn/.error/.debug methods.',
       '@SOCKET has no generic emit() method. Bound websocket scripts use reply, emitToCurrentRoom, or broadcastToRoom; global HTTP/flow scripts use emitToGateway, emitToRoom, emitToUser, or broadcast.',
       'ESV fixed flow step configs are static host-side objects. Do not put @FLOW_PAYLOAD, @FLOW_LAST, or @FLOW inside query/create/update/delete/http/sleep/trigger/log config; use a focused script step when runtime values are required.',
+      'trigger_flow only executes enabled flows. Verify a disabled flow with test_flow_step; enable it explicitly before testing the real queue/runtime trigger path.',
+      'For test_flow_step, pass runtime @FLOW_PAYLOAD values through the payload object. mockFlow is only for advanced $last/$meta flow context.',
       'For intentional HTTP errors, numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message).',
       'When numeric helpers include details, pass an object or array such as @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut.',
       'Use @THROW.http(status, message, details?) for dynamic status codes. Use @THROW.notFound(resource, id?) and @THROW.duplicate(resource, field, value) only when you intentionally want Enfyra-formatted semantic messages.',
@@ -235,14 +272,18 @@ const EXTENSION_SECTIONS = [
       'Do not call resolveComponent() in extension SFCs. Use auto-injected components such as <UButton>, <UBadge>, <PermissionGate>, and <Widget> directly in the template so the app/compiler resolves them correctly.',
       'Load app packages with getPackages(["package-name"]) inside extension runtime code.',
       'For generated high-contract UI in guided mode, call build_extension_ui with the matching kind after reading this acknowledgement; it lazy-dispatches drawer, modal, page shell, permission gate, empty state, resource list, resource grid, form editor, widget, menu notification, account panel item, tabs, upload modal, notify, confirm, runtime review, theme classes, theme review, or full review contracts without loading every builder tool at startup.',
-      'For extension useApi code, call build_extension_api_usage with operation=list, find_one, create, update, delete, batch_update, or batch_delete. Do not write useApi path/id/body shapes from memory.',
+      'For extension useApi code in guided mode, call build_extension_ui kind=api_usage with operation=list, find_one, create, update, delete, batch_update, or batch_delete. Do not write useApi path/id/body shapes from memory.',
       'For an ordinary destructive action, call build_extension_ui kind=confirm. It generates useConfirm() -> accepted mutation -> refresh; do not use window.confirm, window.alert, alert, or prompt. Use CommonModal directly only for richer confirmation content or form fields.',
       'CommonResourceListFrame is supported in extension runtime and renders its default slot when loading is false and hasItems is true. Do not remove it to speculate about swallowed slots; inspect the source artifact, hasItems/items expressions, and API response shape first.',
       'Use build_extension_ui kind=resource_grid for workboards, catalogs, dashboards, and card collections. It owns eapp-page-constrained-wide, CommonResourceListFrame variant="plain", one/two/three-column responsive breakpoints, semantic card surfaces, and list loading/empty behavior; use resource_list for dense operational rows.',
+      'For ordinary operator inventories, use build_extension_ui kind=resource_list and review/save with uiPattern="resource_list". Keep search/filter controls in a separate compact surface, constrain the inventory with eapp-page-constrained-wide, and let CommonResourceListFrame own loading, empty, total, and pagination state.',
+      'Use disabled buttons for temporarily unavailable actions, not completed terminal states. Render completed/granted/handled state as a badge or metadata and omit the unavailable action.',
       'Dynamic extension templates expose the app empty-state component as <EmptyState>, not <CommonEmptyState>. Prefer the empty_state, resource_list, or resource_grid builder instead of writing either tag from memory.',
       'For theme choices, call build_extension_ui kind=theme_classes with an intent such as neutral_surface, primary_identity, primary_soft_icon_tile, status_success, primary_action, secondary_action, divider, or text instead of inventing classes from memory.',
       'Use build_extension_ui kind=runtime_review, theme_review, or review before saving generated snippets that include useApi, useNotify, theme classes, drawers, modals, fields, lists, tabs, upload modals, shell registry code, or native buttons.',
       'For same-version edits to an existing extension, inspect the extension first and use the generated /tmp/enfyra-mcp-sources artifact when snippets are not enough. Edit that artifact and apply its contents with update_extension_code, or use patch_extension_code for a focused exact patch. Do not regenerate the full Vue SFC for a small bug fix, styling adjustment, or contract correction unless the user explicitly asks for a rewrite or version-changing redesign.',
+      'patch_extension_code apply=true requires expectedSha256 and writes a bounded .diff artifact. update_extension_code accepts expectedSha256 for stale full-replacement protection.',
+      'ensure_*_extension, update_extension_code, and patch_extension_code apply=true automatically re-read and verify the exact saved source, expected hash, server compilation, static UI/theme/runtime contracts, and page menu wiring. Use verify_extension_runtime for an additional independent recheck. browserRender=not_run means signed-in browser QA is still required for component execution, live data shape, console errors, and responsive layout.',
       'Extension validation rejects UInput/UTextarea/USelect/USelectMenu/UInputMenu/UInputNumber/UInputTags/UInputTime/UInputDate without class="w-full" unless the field is explicitly marked data-compact or data-inline.',
       'PermissionGate is operator UX only; backend route permissions and owner checks remain authoritative.',
     ],
@@ -251,7 +292,7 @@ const EXTENSION_SECTIONS = [
     id: 'extension-app-composables',
     rules: [
       'Call useApi() as a top-level setup composable. It returns data/error/pending/status refs plus execute/refresh; call or await execute()/refresh() from onMounted, watchers, or user actions when the request should run.',
-      'Do not write useApi shapes from memory. Call build_extension_api_usage for known-good list/find_one/create/update/delete/batch snippets.',
+      'Do not write useApi shapes from memory. Call build_extension_ui kind=api_usage for known-good list/find_one/create/update/delete/batch snippets.',
       'Do not write useNotify shapes from memory. Call build_extension_ui kind=notify for known-good notification snippets.',
       'Call build_extension_ui kind=runtime_review or kind=review before saving extension code that includes useApi, useNotify, getPackages, or package loading.',
       'Extension validation rejects static imports, useToast/useNotify.add misuse, JSON.stringify useApi options, unused execute aliases, incorrect modal v-model bindings, unavailable runtime aliases, and script-block callbacks that reassign const refs instead of mutating ref.value. Template expressions remain Vue-auto-unwrapped.',
@@ -279,12 +320,12 @@ export function buildRequiredKnowledgePayload(scope: string = 'full') {
     purpose: SCOPED_PURPOSES[resolvedScope],
     includedDomains: ['globalRules', ...(includeDynamic ? ['dynamicServerCode'] : []), ...(includeExtensions ? ['extensions'] : [])],
     excludedDomains: [...(!includeDynamic ? ['dynamicServerCode'] : []), ...(!includeExtensions ? ['extensions'] : [])],
-    note: 'Ack keys (globalRulesAckKey, dynamicCodeAckKey, extensionAckKey) are always returned so you can use them when needed. Only domains listed in includedDomains have rules loaded. Domains in excludedDomains have NO rules in this response.',
+    note: 'Reading this response acknowledges included domains for the current MCP process session. Write tools accept the returned keys for backward compatibility, but callers may omit them for acknowledged domains. Only includedDomains rules are loaded.',
     globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
     dynamicCodeAckKey: DYNAMIC_CODE_KNOWLEDGE_ACK_KEY,
     extensionAckKey: EXTENSION_KNOWLEDGE_ACK_KEY,
     usage: [
-      'Pass globalRulesAckKey exactly as globalRulesAckKey when calling MCP tools that mutate Enfyra metadata, schema, routes, permissions, menus, packages, cache state, dynamic code, or extension UI.',
+      'After this response, omit globalRulesAckKey in the same MCP process session or pass it explicitly for backward compatibility.',
     ],
     globalRules: includeGlobal ? GLOBAL_RULES_SECTIONS : undefined,
     dynamicServerCode: includeDynamic ? DYNAMIC_CODE_SECTIONS : undefined,
@@ -292,10 +333,10 @@ export function buildRequiredKnowledgePayload(scope: string = 'full') {
   };
 
   if (includeDynamic) {
-    payload.usage.push('Pass dynamicCodeAckKey exactly as knowledgeAckKey when calling MCP tools that create or update dynamic server code.');
+    payload.usage.push('After this response, omit knowledgeAckKey in the same MCP process session or pass dynamicCodeAckKey explicitly for backward compatibility.');
   }
   if (includeExtensions) {
-    payload.usage.push('Pass extensionAckKey exactly as extensionKnowledgeAckKey when calling MCP tools that create or update Enfyra extension code.');
+    payload.usage.push('After this response, omit extensionKnowledgeAckKey in the same MCP process session or pass extensionAckKey explicitly for backward compatibility.');
   }
 
   // Strip undefined keys

@@ -80,6 +80,13 @@ export function reviewDynamicEndpointContract(input: DynamicEndpointReviewInput)
   const warnings: DynamicEndpointReviewFinding[] = [];
   const info: DynamicEndpointReviewFinding[] = [];
 
+  if (/\bexport\s+default\b|\bmodule\.exports\b|\bexports\s*\./u.test(sourceCode)) {
+    errors.push(finding(
+      'module_wrapper_not_supported',
+      'Dynamic endpoint sourceCode is the handler body. Remove export default, module.exports, or exports.* wrappers before saving.',
+    ));
+  }
+
   if (input.routeKind === 'custom' && usesMainRepository) {
     errors.push(finding(
       'custom_route_main_repository',

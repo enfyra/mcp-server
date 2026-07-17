@@ -83,7 +83,7 @@ test('extension local validation rejects manual component resolution mistakes', 
 
   assert.deepEqual(
     validateExtensionCodeLocally('<template><UButton>Save</UButton></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
+    { vueSfcAst: 'passed', componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.throws(
     () => validateExtensionCodeLocally('<template><UInput v-model="name" /></template>'),
@@ -91,11 +91,11 @@ test('extension local validation rejects manual component resolution mistakes', 
   );
   assert.deepEqual(
     validateExtensionCodeLocally('<template><UInput v-model="name" class="w-full" /></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
+    { vueSfcAst: 'passed', componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.deepEqual(
     validateExtensionCodeLocally('<template><UInput v-model="name" data-compact /></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
+    { vueSfcAst: 'passed', componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.throws(
     () => validateExtensionCodeLocally('<script setup>const query = { sort: ["isPinned:DESC", "updatedAt:DESC"] }</script>'),
@@ -128,7 +128,7 @@ test('extension local validation rejects manual component resolution mistakes', 
   );
   assert.deepEqual(
     validateExtensionCodeLocally('<template><section class="eapp-surface-card eapp-divider border"><p class="eapp-text-primary">Ok</p></section></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
+    { vueSfcAst: 'passed', componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.throws(
     () => validateExtensionCodeLocally('<script setup>import { debounce } from "lodash-es"</script><template><div /></template>'),
@@ -164,11 +164,11 @@ test('extension local validation rejects manual component resolution mistakes', 
   );
   assert.deepEqual(
     validateExtensionCodeLocally('<script setup>const modalOpen = ref(false); const action = { onClick: () => (modalOpen.value = true) }; const { execute: loadNotes } = useApi("/notes"); onMounted(() => loadNotes())</script><template><CommonModal v-model:open="modalOpen" :cancel-action="{ label: \'Cancel\', onClick: () => (modalOpen = false) }"><template #body><EmptyState title="No notes" /></template></CommonModal></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
+    { vueSfcAst: 'passed', componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.deepEqual(
     validateExtensionCodeLocally('<script setup>const notes = await useApi("/notes")</script><template><div /></template>'),
-    { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
+    { vueSfcAst: 'passed', componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
 });
 
@@ -669,7 +669,7 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
   assert.ok(extension.primaryPath.some((step) => step.tool === 'extension_workflow or patch_extension_code/update_extension_code'));
   assert.ok(extension.advancedTools.includes('reorder_menus'));
   assert.ok(extension.advancedTools.includes('ensure_global_extension'));
-  assert.ok(extension.verifyPath.some((step) => step.tool === 'validate_extension_code'));
+  assert.ok(extension.verifyPath.some((step) => step.tool === 'verify_extension_runtime'));
   assert.match(JSON.stringify(extension.avoidTools), /destination domain lists/);
   assert.match(JSON.stringify(extension.avoidTools), /destination-page fetch on click/);
 
@@ -1859,7 +1859,7 @@ test('mcp server exposes metadata usage tracing for production script edits', ()
   assert.match(entry, /gateway\.path/);
 });
 
-test('code-writing tools require required-knowledge acknowledgement without blocking discovery or validation', () => {
+test('code-writing tools require session or explicit required-knowledge acknowledgement without blocking discovery or validation', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
   const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.ts', import.meta.url), 'utf8');
   const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
@@ -1879,7 +1879,8 @@ test('code-writing tools require required-knowledge acknowledgement without bloc
   assert.match(requiredKnowledge, /theme-contract-first/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(instructions, /discover_enfyra_workflows/);
-  assert.match(instructions, /one-shot done/);
+  assert.match(instructions, /known non-destructive task/);
+  assert.match(instructions, /Session acknowledgement removes repeated ack-key boilerplate/);
 
   assert.match(entry, /server\.tool\(\s*['"]create_records['"]/);
   assert.match(entry, /server\.tool\(\s*['"]update_records['"]/);
@@ -1915,7 +1916,7 @@ test('code-writing tools require required-knowledge acknowledgement without bloc
 
   assert.match(platformTools, /validate_dynamic_script[\s\S]*sourceCode: z\.string/);
   assert.doesNotMatch(platformTools, /validate_dynamic_script[\s\S]{0,500}knowledgeAckKey/);
-  assert.match(platformTools, /validate_extension_code[\s\S]*code: z\.string/);
+  assert.match(platformTools, /validate_extension_code[\s\S]*code: z\.preprocess\(normalizeEscapedVueSource, z\.string\(\)\)/);
   assert.doesNotMatch(platformTools, /validate_extension_code[\s\S]{0,500}extensionKnowledgeAckKey/);
 });
 
@@ -2056,8 +2057,6 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(routing, /build_extension_ui/);
   assert.match(routing, /FormEditor, Widget, shell registries, tabs, upload modal, api usage, notify, runtime review, theme classes, theme review, or full review/);
   assert.match(routing, /kind: drawer, modal, page shell/);
-  assert.match(instructions, /build_extension_ui/);
-  assert.match(instructions, /build_extension_ui only when the requested UI needs those contracts/);
   assert.match(platformTools, /Use build_extension_ui kind=drawer for generated drawer\/editing snippets/);
   assert.match(platformTools, /Use build_extension_ui kind=modal for generated modal\/confirmation snippets/);
   assert.match(platformTools, /Unrestricted menu permission is null/);
@@ -2111,8 +2110,8 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(examples, /grid gap-4 md:grid-cols-3/);
   assert.doesNotMatch(examples, /bg-\[var\(--eapp-surface-muted\)\]/);
   assert.doesNotMatch(examples, /hover:eapp-surface-muted/);
-  assert.match(instructions, /Prefer the most specific business operation tool over raw metadata CRUD/);
-  assert.match(instructions, /lazy-load by domain/);
+  assert.match(instructions, /most specific operation tool/);
+  assert.match(instructions, /lazily/);
   assert.match(instructions, /discover_enfyra_workflows/);
   assert.match(routing, /ensure_websocket_event/);
   assert.match(routing, /extension_workflow/);
@@ -2124,7 +2123,6 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(routing, /add_route_methods/);
   assert.match(routing, /enable_route/);
   assert.match(routing, /ensure_page_extension/);
-  assert.match(instructions, /get_extension_theme_contract/);
 });
 
 test('test_flow_step uses unified admin test runner', () => {
@@ -2179,13 +2177,12 @@ test('server instructions stay compact and route details to tools', () => {
   const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const routing = readFileSync(new URL('../src/lib/tool-routing.ts', import.meta.url), 'utf8');
 
-  assert.ok(Buffer.byteLength(instructions, 'utf8') < 12000);
-  assert.match(instructions, /goal or tool path is ambiguous/);
-  assert.match(instructions, /avoidTools/);
-  assert.match(instructions, /Load examples with `get_enfyra_examples` only for an unfamiliar pattern/);
+  assert.ok(Buffer.byteLength(instructions, 'utf8') < 4000);
+  assert.match(instructions, /path is ambiguous/);
   assert.match(instructions, /get_enfyra_api_context/);
-  assert.match(instructions, /Do not run broad discovery after the target is known/);
-  assert.match(instructions, /Never load broad discovery, full knowledge, or a full reference merely as a precaution/);
+  assert.match(instructions, /inspect only the table, route, extension, or runtime artifact/);
+  assert.match(instructions, /never preload broad context/);
+  assert.match(instructions, /Session acknowledgement/);
   assert.match(routing, /progressive disclosure/);
   assert.match(routing, /query_table on destination domain lists/);
 	  assert.match(routing, /notification summary\/realtime shell signal plus destination-page fetch on click/);
@@ -2259,7 +2256,6 @@ test('dynamic script guidance documents repository deep projection contract', ()
   const platformTools = readFileSync(new URL('../src/lib/platform-operation-tools.ts', import.meta.url), 'utf8');
 
   assert.match(entry, /For repository find\(\{ deep \}\) in scripts, include relation property names in top-level fields/);
-  assert.match(instructions, /discover_script_contexts/);
   assert.match(requiredKnowledge, /Inside dynamic server scripts, repository find\(\{ deep \}\) requires the relation property to also be present in top-level fields/);
   assert.match(examples, /Workflow handler with relation read and side effects/);
   assert.match(examples, /fields: \["id", "title", "status", "requester"\]/);
@@ -2291,20 +2287,16 @@ test('dynamic endpoint guidance distinguishes canonical policy from custom endpo
 });
 
 test('guidance rejects sql-like filter operators', () => {
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
-  assert.match(instructions, /discover_query_capabilities/);
   assert.match(requiredKnowledge, /do not use _like/);
 });
 
 test('schema design context warns about column relation namespace clashes', () => {
   const tableTools = readFileSync(new URL('../src/lib/table-tools.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
   assert.match(tableTools, /Column names and relation propertyName values share one table namespace/);
   assert.match(tableTools, /Relation propertyName must be unique among both relation names and scalar column names/);
   assert.match(tableTools, /parent detail\/read must deep-load a child collection/);
-  assert.match(instructions, /get_schema_design_context/);
   assert.match(requiredKnowledge, /deep-read a parent with child collections/);
 });
 
@@ -2319,7 +2311,6 @@ test('dynamic script guidance rejects physical relation filter names', () => {
 
 test('list query tools require explicit limit or all intent except bounded locator search', () => {
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   const schemaSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-schema-data/SKILL.md', import.meta.url), 'utf8');
 
@@ -2329,19 +2320,16 @@ test('list query tools require explicit limit or all intent except bounded locat
   assert.match(entry, /query_table accepts either all=true or limit, not both/);
   assert.match(entry, /get_all_routes accepts either all=true or limit, not both/);
   assert.match(entry, /all: z\.boolean\(\)\.optional\(\)\.default\(false\)\.describe\('Return all matching rows by sending REST limit=0/);
-  assert.match(instructions, /domain-specific rule/);
   assert.match(examples, /pass all: true instead of choosing an arbitrary page size such as 30 or 50/);
   assert.match(schemaSkill, /Locator searches on `get_all_routes` and `get_all_tables` may omit `limit`/);
 });
 
 test('delete_tables accepts tableName or tableId and schema rules mention full-batch preflight', () => {
   const tableTools = readFileSync(new URL('../src/lib/table-tools.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
 
   assert.match(tableTools, /Native JSON array of delete items: \[\{ tableId \}\] or \[\{ tableName \}\]/);
   assert.match(tableTools, /items\[\$\{index\}\] requires tableId or tableName/);
-  assert.match(instructions, /get_schema_design_context/);
   assert.match(requiredKnowledge, /create_tables preflights all items before posting tables/);
 });
 
@@ -2400,7 +2388,7 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260704H$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-07-16.runtime-surface-contracts');
+  assert.equal(payload.version, '2026-07-17.async-helper-contract');
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);
@@ -2432,7 +2420,6 @@ test('SSR app examples include Nuxt Next and Angular connection patterns', () =>
 
 test('OAuth setup examples guide provider console callback configuration', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
 
   assert.match(examples, /'oauth-setup'/);
   assert.match(examples, /Google OAuth setup workflow/);
@@ -2441,7 +2428,6 @@ test('OAuth setup examples guide provider console callback configuration', () =>
   assert.match(examples, /\/api\/auth\/google\/callback/);
   assert.match(examples, /enfyra_oauth_config/);
   assert.match(examples, /Do not ask the user to choose or type the callback URL manually/);
-  assert.match(instructions, /get_enfyra_examples/);
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {
@@ -2466,22 +2452,18 @@ test('query examples distinguish relation fields from deep relation query option
 
 test('query guidance documents fields exclusion mode', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const schemaSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-schema-data/SKILL.md', import.meta.url), 'utf8');
   assert.match(examples, /fields=-compiledCode/);
   assert.match(examples, /fields=id,-compiledCode returns all readable fields except compiledCode/);
   assert.match(examples, /Dotted exclusions and deep relation fields use the same exclude-mode rule/);
-  assert.match(instructions, /discover_query_capabilities/);
   assert.match(schemaSkill, /`fields=-compiledCode` excludes that field/);
   assert.match(schemaSkill, /`fields=-owner\.avatar`/);
 });
 
 test('operator guidance avoids speculative warnings and physical FK generated code', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
   const dynamicSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-dynamic-code/SKILL.md', import.meta.url), 'utf8');
   const schemaSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-schema-data/SKILL.md', import.meta.url), 'utf8');
-  assert.match(instructions, /domain-specific rule/);
   assert.match(examples, /conversationId is accepted only as the room\/business identifier; persistence uses relation properties conversation and sender/);
   assert.match(examples, /Do not ask the client for senderId\. The sender relation is derived from @USER\.id/);
   assert.match(dynamicSkill, /`compiledCode` is generated from source and may differ textually/);
@@ -2491,7 +2473,6 @@ test('operator guidance avoids speculative warnings and physical FK generated co
 test('schema examples guide live types and relation mutation without stale update_table relation payloads', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
   const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
 
   assert.match(examples, /Bulk schema creation with one-item-or-many arrays/);
   assert.match(examples, /amount.*type: "float"/s);
@@ -2500,14 +2481,13 @@ test('schema examples guide live types and relation mutation without stale updat
   assert.match(requiredKnowledge, /call get_schema_design_context first/);
   assert.match(examples, /create_tables creates tables\/columns first, then creates requested relations after all batch tables exist/);
   assert.doesNotMatch(examples, /update_tables\(\{[\s\S]*relations: JSON\.stringify/);
-  assert.match(instructions, /get_schema_design_context/);
 });
 
 test('RLS guidance preserves caller projection and pagination', () => {
   const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
-  const instructions = readFileSync(new URL('../src/lib/mcp-instructions.ts', import.meta.url), 'utf8');
+  const requiredKnowledge = readFileSync(new URL('../src/lib/required-knowledge.ts', import.meta.url), 'utf8');
   const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
-  assert.match(instructions, /merge row scope only into `@QUERY\.filter`/);
+  assert.match(requiredKnowledge, /merge security filters into @QUERY\.filter/);
   assert.match(examples, /keep projection and pagination client-owned/);
   assert.match(entry, /preserve client-controlled query shape/);
   assert.match(entry, /pass through client fields\/deep\/sort\/page\/limit\/meta\/aggregate\/debugMode/);

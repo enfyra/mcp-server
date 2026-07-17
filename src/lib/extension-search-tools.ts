@@ -1,5 +1,6 @@
 import { fetchAPI } from './fetch.js';
 import { writeSourceArtifact } from './source-artifacts.js';
+import { normalizeSnippetChars } from './tool-input-normalization.js';
 
 type ExtensionRecord = Record<string, any>;
 type MenuRecord = Record<string, any>;
@@ -286,7 +287,7 @@ export async function searchExtensions(apiUrl: string, input: any) {
   const path = normalizePath(input.path);
   const type = input.type;
   const maxResults = Math.min(Math.max(Number(input.maxResults ?? 4), 1), 25);
-  const snippetChars = Math.min(Math.max(Number(input.snippetChars ?? 180), 120), 600);
+  const snippetChars = normalizeSnippetChars(input.snippetChars);
   const maxMatchesPerExtension = Math.min(Math.max(Number(input.maxMatchesPerExtension ?? 2), 1), 8);
   const includeDisabled = input.includeDisabled !== false;
   const includeSourceArtifact = Boolean(input.includeSourceArtifact);

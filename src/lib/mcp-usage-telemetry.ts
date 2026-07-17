@@ -106,9 +106,10 @@ function compactOutputStats(result: any) {
     : [];
   const text = texts.join('\n');
   const parsed = tryParseJson(texts[0]);
-  const compressionStats = parsed && typeof parsed === 'object' && parsed.compressionStats && typeof parsed.compressionStats === 'object'
-    ? parsed.compressionStats
-    : undefined;
+  const compressionStats = result?._meta?.enfyraCompression
+    || (parsed && typeof parsed === 'object' && parsed.compressionStats && typeof parsed.compressionStats === 'object'
+      ? parsed.compressionStats
+      : undefined);
   const review = parsed && typeof parsed === 'object' && parsed.contractReview && typeof parsed.contractReview === 'object'
     ? parsed.contractReview
     : undefined;

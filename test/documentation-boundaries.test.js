@@ -17,6 +17,8 @@ test('README stays focused on install and configuration', () => {
   assert.match(readme, /## Install and Configure/);
   assert.match(readme, /## Manual Configuration/);
   assert.match(readme, /## Environment/);
+  assert.doesNotMatch(readme, /## Model Tiers|\| T[0-3] \||recommended tier|Current recommendation status/i);
+  assert.doesNotMatch(readme, /GPT-5\.6 Terra|Claude Opus|DeepSeek V4|GLM-5 Turbo/);
   assert.doesNotMatch(readme, /## Runtime Safety|## Query Notes|## Tool Summary|## Metadata Contract/);
 });
 

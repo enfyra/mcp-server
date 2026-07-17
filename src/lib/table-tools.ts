@@ -11,6 +11,7 @@ import {
 } from './metadata-client.js';
 import { jsonContent } from './response-format.js';
 import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
+import { normalizeTableName } from './tool-input-normalization.js';
 
 type AnyRecord = Record<string, any>;
 type ConstraintGroup = string[];
@@ -366,6 +367,36 @@ function preflightCreateTableDefinitions(items: AnyRecord[]) {
         'For relation-based unique pairs added after create, first create the relations, then call update_tables with the unique group.',
       );
     }
+  });
+}
+
+export function normalizeCreateTableDefinitions(items: AnyRecord[]) {
+  const batchNameMap = new Map(
+    items
+      .map((item) => String(item?.name ?? ''))
+      .filter(Boolean)
+      .map((name) => [name.toLowerCase(), normalizeTableName(name)]),
+  );
+  return items.map((item) => {
+    const originalName = String(item?.name ?? '');
+    const name = normalizeTableName(originalName);
+    const relations = Array.isArray(item?.relations)
+      ? item.relations.map((relation) => {
+        const target = relation?.targetTable ?? relation?.targetTableId;
+        if (typeof target !== 'string') return relation;
+        const normalizedTarget = batchNameMap.get(target.toLowerCase());
+        if (!normalizedTarget || normalizedTarget === target) return relation;
+        return relation?.targetTable !== undefined
+          ? { ...relation, targetTable: normalizedTarget }
+          : { ...relation, targetTableId: normalizedTarget };
+      })
+      : item?.relations;
+    return {
+      ...item,
+      name,
+      ...(relations !== undefined ? { relations } : {}),
+      ...(name !== originalName ? { _requestedTableName: originalName } : {}),
+    };
   });
 }
 
@@ -1031,6 +1062,10 @@ export function registerTableTools(server, ENFYRA_API_URL, options: { toolset?: 
     const idColumn = buildPrimaryColumnForDbType(metadataContext.dbType);
 	    const { columns: userColumnsWithoutAuto, skippedAutoColumns } = stripAutoManagedColumns(userColumns);
 	    const { columns: normalizedUserColumns, normalizations } = normalizeColumnsForLiveMetadata(userColumnsWithoutAuto, supportedTypes);
+	    const schemaNormalizations = [
+	      ...(args._requestedTableName ? [{ field: 'name', from: args._requestedTableName, to: args.name, reason: 'Enfyra table names are lowercase.' }] : []),
+	      ...normalizations,
+	    ];
 	    const deferredRelations = arrayValue('relations', args.relations).map(normalizeRelationForTablePatch);
 	    const relationNames = new Set(deferredRelations.map((relation) => relation.propertyName).filter(Boolean));
 	    assertNoColumnRelationNameCollision(
@@ -1071,7 +1106,7 @@ export function registerTableTools(server, ENFYRA_API_URL, options: { toolset?: 
 	        uniqueGroupCount: uniques.length,
 	        deferredConstraintCount: splitIndexes.deferred.length + splitUniques.deferred.length,
 	      },
-      schemaNormalization: normalizations,
+      schemaNormalization: schemaNormalizations,
       skippedAutoColumns,
       schema: {
         intended: {
@@ -1418,7 +1453,7 @@ export function registerTableTools(server, ENFYRA_API_URL, options: { toolset?: 
     async ({ items, tables, maxItems, globalRulesAckKey }) => {
       assertGlobalRulesAck(globalRulesAckKey);
       if (items !== undefined && tables !== undefined) throw new Error('Pass either items or tables to create_tables, not both.');
-	      const parsedItems = parseBulkItemsParam('items', items ?? tables);
+	      const parsedItems = normalizeCreateTableDefinitions(parseBulkItemsParam('items', items ?? tables));
 	      assertBulkLimit('create_tables', parsedItems, maxItems);
 	      preflightCreateTableDefinitions(parsedItems);
 	      const recordDeleteOrder = computeBatchCleanupOrder(parsedItems);
@@ -1491,9 +1526,16 @@ export function registerTableTools(server, ENFYRA_API_URL, options: { toolset?: 
 	          recordRule: 'If you delete seeded records before deleting test tables, delete record batches sequentially in recordDeleteOrder; do not parallelize parent/child deletes.',
 	          tableRule: 'For full test cleanup, prefer delete_tables with tableDeleteOrder after deleting custom routes/flows; table deletion removes the remaining table data.',
 	        },
-	        created,
-	        createdRelations,
-	        appliedDeferredConstraints,
+	        created: toolset === 'full' ? created : created.map(({ result, supportedColumnTypes, schema, ...item }) => ({
+	          ...item,
+	          schema: {
+	            intended: schema?.intended,
+	            liveMetadataAvailable: schema?.liveMetadataAvailable,
+	            liveMetadataError: schema?.liveMetadataError,
+	          },
+	        })),
+	        createdRelations: toolset === 'full' ? createdRelations : createdRelations.map(({ result, responseFormat, ...item }) => item),
+	        appliedDeferredConstraints: toolset === 'full' ? appliedDeferredConstraints : appliedDeferredConstraints.map(({ result, ...item }) => item),
 	      });
 	    }
 	  );

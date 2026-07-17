@@ -18,6 +18,7 @@ test('writeSourceArtifact stores full source in tmp and returns compact metadata
   assert.equal(artifact.length, source.length);
   assert.equal(readFileSync(artifact.tmpFile, 'utf8'), source);
   assert.notEqual(artifact.preview, source);
+  assert.ok(artifact.preview.length <= 600);
 });
 
 test('compactSourceFields replaces long source fields with tmp artifact references', () => {

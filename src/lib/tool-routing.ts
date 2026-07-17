@@ -63,6 +63,15 @@ type WorkflowRouteOptions = {
   limit?: number;
 };
 
+type WorkflowProfile = 'all' | 'extension' | 'schema' | 'runtime' | 'operations';
+
+export const WORKFLOW_SURFACES_BY_PROFILE: Record<Exclude<WorkflowProfile, 'all'>, readonly WorkflowSurface[]> = {
+  extension: ['extension'],
+  schema: ['schema', 'record-data'],
+  runtime: ['api-endpoint', 'dynamic-script', 'route-access', 'guards-permissions-rules', 'flow', 'websocket', 'graphql'],
+  operations: ['storage-file', 'identity-access', 'platform-config', 'package', 'cache', 'logs-debug', 'auth-context'],
+};
+
 export const TOOL_WORKFLOWS = [
   {
     key: 'api-endpoint',
@@ -121,9 +130,9 @@ export const TOOL_WORKFLOWS = [
     keywords: ['extension', 'menu', 'account panel', 'notification', 'chip', 'badge', 'sidebar', 'shell', 'page ui', 'widget'],
     firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'search_admin_extensions'],
     inspectTools: ['search_admin_extensions(mode=search)', 'search_admin_extensions(mode=inspect)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
-    knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'get_theme_class_reference', 'build_extension_ui'],
+    knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'build_extension_ui'],
     writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension'],
-    verifyTools: ['build_extension_ui(kind=runtime_review|theme_review|review)', 'validate_extension_code', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
+    verifyTools: ['verify_extension_runtime', 'build_extension_ui(kind=runtime_review|theme_review|review)', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     avoidTools: [
       {
         tool: 'create_records/update_records on enfyra_extension',
@@ -713,7 +722,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(4, 'search_admin_extensions', 'Inspect the selected admin UI artifact with mode=inspect using nextInspect.input.'),
         step(5, 'build_extension_ui', 'After acknowledgement, generate or review high-contract extension UI lazily by kind: drawer, modal, page shell, permission gate, empty state, resource list, FormEditor, Widget, shell registries, tabs, upload modal, api usage, notify, runtime review, theme classes, theme review, or full review.'),
         step(6, 'extension_workflow or patch_extension_code/update_extension_code', 'Use extension_workflow for create/wire flows, patch_extension_code for focused edits, or update_extension_code for full replacements.'),
-        step(7, 'validate_extension_code', 'Validate only when the chosen write tool did not already validate and save atomically.'),
+        step(7, 'verify_extension_runtime', 'Verify saved metadata, source hash, server compilation, UI/theme/runtime policy, and page menu wiring; run browser QA separately when browserRender is not_run.'),
       ];
     case 'schema':
       return [
@@ -756,7 +765,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(1, 'get_enfyra_required_knowledge', 'Read flow/dynamic-code contracts.'),
         step(2, 'discover_script_contexts', 'Load flow-step macros only when a script or condition step is needed.'),
         step(3, 'flow_workflow', 'For a fully specified non-destructive flow, apply the flow and all steps sequentially in one call. Use apply=false only when step selection is unresolved.'),
-        step(5, 'test_flow_step or trigger_flow', 'Verify a step or enqueue the flow intentionally.'),
+        step(5, 'test_flow_step or trigger_flow', 'Use test_flow_step for disabled flows. Use trigger_flow only for an enabled flow when intentionally verifying the real queue/runtime path.'),
       ];
     case 'websocket':
       return [
@@ -928,23 +937,42 @@ export function discoverWorkflowRoutes({
   risk = 'unknown',
   detail = 'summary',
   limit = 5,
-}: WorkflowRouteOptions = {}) {
+}: WorkflowRouteOptions = {}, profile: WorkflowProfile = 'all') {
   const normalizedSurface = surface ? normalize(surface) : undefined;
   const normalizedDetail = normalizeDetail(detail);
   const normalizedRisk = normalizeRisk(risk);
+  const availableSurfaces = profile === 'all' ? WORKFLOW_SURFACES : WORKFLOW_SURFACES_BY_PROFILE[profile];
+  if (normalizedSurface && !availableSurfaces.includes(normalizedSurface as WorkflowSurface)) {
+    return {
+      action: 'enfyra_workflows_discovered',
+      profile,
+      intent: intent || null,
+      requestedSurface: surface || null,
+      risk: normalizedRisk,
+      detail: normalizedDetail,
+      matchedWorkflowCount: 0,
+      workflows: [],
+      surfaces: availableSurfaces,
+      guidance: [
+        `The ${profile} profile does not expose the ${normalizedSurface} workflow. Reconnect with ENFYRA_MCP_PROFILE=all or the owning domain profile.`,
+      ],
+    };
+  }
   const formatter = normalizedDetail === 'full'
     ? fullWorkflow
     : normalizedDetail === 'plan'
       ? planWorkflow
       : compactWorkflow;
-  const scored = TOOL_WORKFLOWS
+  const availableWorkflows = TOOL_WORKFLOWS.filter((workflow) => availableSurfaces.includes(workflow.key));
+  const scored = availableWorkflows
     .map((workflow) => ({ workflow, score: scoreWorkflow(workflow, { intent, surface: normalizedSurface, risk: normalizedRisk }) }))
     .filter((item) => !normalizedSurface || item.workflow.key === normalizedSurface || item.score > 0)
     .sort((a, b) => b.score - a.score || a.workflow.key.localeCompare(b.workflow.key));
-  const selected = (scored.length ? scored : TOOL_WORKFLOWS.map((workflow) => ({ workflow, score: 0 })))
+  const selected = (scored.length ? scored : availableWorkflows.map((workflow) => ({ workflow, score: 0 })))
     .slice(0, Math.max(1, Math.min(Number(limit) || 5, 10)));
   return {
     action: 'enfyra_workflows_discovered',
+    profile,
     intent: intent || null,
     requestedSurface: surface || null,
     risk: normalizedRisk,
@@ -954,7 +982,7 @@ export function discoverWorkflowRoutes({
       score: item.score,
       ...formatter(item.workflow),
     })),
-    surfaces: normalizedDetail === 'summary' ? WORKFLOW_SURFACES : undefined,
+    surfaces: normalizedDetail === 'summary' ? availableSurfaces : undefined,
     guidance: [
       'Use this as progressive disclosure: pick the closest workflow and follow primaryPath in order instead of choosing from the flat MCP tool list.',
       'For writes, call get_enfyra_required_knowledge and pass the returned acknowledgement keys into write tools.',

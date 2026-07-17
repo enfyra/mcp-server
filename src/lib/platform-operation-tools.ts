@@ -10,6 +10,16 @@ import {
   reviewDynamicEndpointContract,
 } from './dynamic-endpoint-contract.js';
 import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
+import { writeSourceArtifact } from './source-artifacts.js';
+import {
+  normalizeEscapedVueSource,
+  normalizeStrictBoolean,
+} from './tool-input-normalization.js';
+import {
+  analyzeExtensionSfc,
+  extensionElementAttributeValue,
+  extensionElementHasAttribute,
+} from './extension-sfc-analyzer.js';
 import {
   assertDynamicCodeKnowledgeAck,
   assertDynamicCodeKnowledgeAckIf,
@@ -123,6 +133,29 @@ function sameId(a, b) {
 
 function firstDataRecord(result) {
   return Array.isArray(result?.data) ? result.data[0] : result;
+}
+
+export function summarizeWorkflowOperation(operation: AnyRecord) {
+  const record = firstDataRecord(operation?.result) || {};
+  const selectedRecord = Object.fromEntries(
+    ['id', '_id', 'name', 'key', 'path', 'label', 'title', 'state', 'severity', 'type', 'isEnabled', 'version', 'jobId', 'flowId']
+      .filter((key) => record?.[key] !== undefined)
+      .map((key) => [key, record[key]]),
+  );
+  return {
+    action: operation?.action || null,
+    result: {
+      statusCode: operation?.result?.statusCode ?? null,
+      message: operation?.result?.message ?? null,
+      ...(Object.keys(selectedRecord).length ? { record: selectedRecord } : {}),
+    },
+    ...(operation?.routeReload ? {
+      routeReload: {
+        attempted: Boolean(operation.routeReload.attempted),
+        succeeded: operation.routeReload.succeeded === true,
+      },
+    } : {}),
+  };
 }
 
 function normalizeRestPath(path) {
@@ -687,12 +720,16 @@ export function buildExtensionResourceListSnippet(input) {
   const stats = input.statsExpression ? `\n      :stats="${input.statsExpression}"` : '';
   const actions = input.actionsExpression ? `\n      :actions="${input.actionsExpression}"` : '';
   const topBadge = input.topBadgeExpression ? `\n      :top-badge="${input.topBadgeExpression}"` : '';
-  const snippet = [
-    '<CommonResourceListFrame',
+  const itemsPerPageExpression = input.itemsPerPageExpression || '0';
+  const pageModel = String(itemsPerPageExpression) !== '0'
+    ? `\n  v-model:page="${input.pageExpression || 'page'}"`
+    : '';
+  const frame = [
+    `<CommonResourceListFrame${pageModel}`,
     `  :loading="${input.loadingExpression || 'pending'}"`,
     `  :has-items="${itemsExpression}.length > 0"`,
     `  :total="${input.totalExpression || `${itemsExpression}.length`}"`,
-    `  :items-per-page="${input.itemsPerPageExpression || '0'}"`,
+    `  :items-per-page="${itemsPerPageExpression}"`,
     `  empty-title="${String(input.emptyTitle || 'No items found').replace(/"/g, '&quot;')}"`,
     `  empty-description="${String(input.emptyDescription || '').replace(/"/g, '&quot;')}"`,
     `  empty-icon="${input.emptyIcon || 'lucide:inbox'}"`,
@@ -708,6 +745,9 @@ export function buildExtensionResourceListSnippet(input) {
     '  />',
     '</CommonResourceListFrame>',
   ].join('\n');
+  const snippet = input.constrained === false
+    ? frame
+    : ['<section class="eapp-page-constrained-wide space-y-4">', indentLines(frame, 2), '</section>'].join('\n');
   return {
     action: 'extension_resource_list_built',
     components: ['CommonResourceListFrame', 'CommonResourceListItem'],
@@ -716,6 +756,8 @@ export function buildExtensionResourceListSnippet(input) {
       'Use CommonResourceListFrame and CommonResourceListItem for operational lists instead of ad hoc cards.',
       'CommonResourceListFrame supports extension default slots. It renders rows when loading is false and hasItems is true; inspect the source artifact, hasItems/items expressions, and API response shape before replacing it.',
       'Keep first-load skeleton, empty state, and pagination owned by the frame.',
+      'Keep search and filter controls in a separate compact surface before the list; do not wrap filters and all rows in one oversized card.',
+      'Keep operational list pages constrained with eapp-page-constrained-wide unless the workflow intentionally owns a full-bleed canvas.',
       'Use explicit bounded list data and natural pagination/search outside this snippet when the domain list can grow.',
     ],
   };
@@ -1183,49 +1225,129 @@ export function buildExtensionConfirmSnippet(input: AnyRecord = {}) {
   };
 }
 
-export function reviewExtensionUiContract(code) {
+export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
   const source = String(code || '');
+  const pattern = String(options.pattern || 'auto');
   const issues: Array<{ severity: 'error' | 'warning'; rule: string; message: string; suggestion: string }> = [];
   const push = (severity, rule, message, suggestion) => issues.push({ severity, rule, message, suggestion });
+  const analysis = analyzeExtensionSfc(source);
+  const elements = analysis.elements;
+  const byTag = (tag: string) => elements.filter((element) => element.tag === tag);
+  const hasStaticOrBound = (element, name: string) => (
+    extensionElementHasAttribute(element, name, null) || extensionElementHasAttribute(element, name, 'bind')
+  );
+  const drawers = byTag('CommonDrawer');
+  const modals = [...byTag('CommonModal'), ...byTag('UModal')];
+  const allClasses = new Set(elements.flatMap((element) => element.classes));
 
-  if (/<CommonDrawer\b[^>]*(?:\s:title=|\stitle=)/.test(source)) {
+  if (!analysis.valid) {
+    push('error', 'vue-sfc-parse', `Vue SFC parsing failed: ${analysis.errors[0]}`, 'Fix the malformed SFC/template before reviewing UI policy.');
+  }
+  if (drawers.some((element) => hasStaticOrBound(element, 'title'))) {
     push('error', 'common-drawer-slots', 'CommonDrawer should not use title/:title props in generated extensions.', 'Use #header with a heading, and #body for content.');
   }
-  if (/<(?:CommonModal|UModal)\b[^>]*(?:\s:title=|\stitle=)/.test(source)) {
+  if (modals.some((element) => hasStaticOrBound(element, 'title'))) {
     push('error', 'common-modal-slots', 'CommonModal/UModal should not use title/:title props in generated extensions.', 'Use #header with a heading, and #body for content.');
   }
-  if (/<CommonDrawer\b/.test(source) && !/primary-action=/.test(source)) {
+  if (drawers.some((element) => !hasStaticOrBound(element, 'primary-action') && !hasStaticOrBound(element, 'primaryAction'))) {
     push('warning', 'drawer-primary-action', 'CommonDrawer has no primaryAction.', 'Editing/create drawers should wire Save/Create through primaryAction.');
   }
-  if (/<CommonDrawer\b/.test(source) && !/cancel-action=/.test(source)) {
+  if (drawers.some((element) => !hasStaticOrBound(element, 'cancel-action') && !hasStaticOrBound(element, 'cancelAction'))) {
     push('warning', 'drawer-cancel-action', 'CommonDrawer has no cancelAction.', 'Use cancelAction for the ordinary Cancel footer button unless the workflow intentionally has no cancel.');
   }
-  if (/<(?:CommonModal|UModal)\b/.test(source) && /delete|remove|confirm|cannot be undone/i.test(source) && !/danger-action=/.test(source)) {
+  if (modals.some((element) => /delete|remove|confirm|cannot be undone/i.test(element.text) && !hasStaticOrBound(element, 'danger-action') && !hasStaticOrBound(element, 'dangerAction'))) {
     push('warning', 'modal-danger-action', 'Destructive/confirmation modal has no dangerAction.', 'Wire the final destructive action through dangerAction.');
   }
-  const fieldPattern = /<(UInput|UTextarea|USelectMenu|USelect)(\s[^<>]*?)\/?>/g;
-  let fieldMatch;
-  while ((fieldMatch = fieldPattern.exec(source))) {
-    const [, tag, attrs] = fieldMatch;
-    const classMatch = attrs.match(/\bclass="([^"]*)"/);
-    if (!classMatch || !classMatch[1].split(/\s+/).includes('w-full')) {
-      push('warning', 'modal-drawer-field-width', `${tag} is missing class="w-full".`, 'Use class="w-full" for form controls inside modal/drawer body forms unless intentionally inline.');
+  for (const element of elements.filter((item) => ['UInput', 'UTextarea', 'USelectMenu', 'USelect'].includes(item.tag))) {
+    const intentionallyCompact = extensionElementHasAttribute(element, 'data-compact', null)
+      || extensionElementHasAttribute(element, 'data-inline', null);
+    if (!intentionallyCompact && !element.classes.includes('w-full')) {
+      push('warning', 'modal-drawer-field-width', `${element.tag} is missing class="w-full".`, 'Use class="w-full" for form controls inside modal/drawer body forms unless intentionally inline.');
     }
   }
-  const buttonPattern = /<button(\s[^>]*)?>/g;
-  let buttonMatch;
-  while ((buttonMatch = buttonPattern.exec(source))) {
-    if (!/\btype=/.test(buttonMatch[1] || '')) {
+  for (const element of byTag('button')) {
+    if (!hasStaticOrBound(element, 'type')) {
       push('warning', 'native-button-type', 'Native button is missing type="button".', 'Add type="button" unless the button intentionally submits a form.');
     }
   }
+
+  if (pattern === 'resource_list') {
+    const frames = byTag('CommonResourceListFrame');
+    if (frames.length === 0) {
+      push('error', 'resource-list-frame-required', 'Operational resource lists must use CommonResourceListFrame.', 'Use build_extension_ui kind=resource_list so loading, empty state, total, and pagination stay list-owned.');
+    }
+    if (byTag('CommonResourceListItem').length === 0) {
+      push('error', 'resource-list-item-required', 'Operational resource rows must use CommonResourceListItem.', 'Move title, description, badge, stats, metadata, navigation, and row actions into CommonResourceListItem.');
+    }
+    if (elements.some((element) => ['UCard', 'article'].includes(element.tag) && extensionElementHasAttribute(element, 'for', 'for'))) {
+      push('error', 'resource-list-ad-hoc-cards', 'A resource-list screen still renders inventory rows as repeated cards.', 'Use CommonResourceListItem for homogeneous operational rows; reserve resource_grid for workboards and catalogs.');
+    }
+    if (elements.some((element) => ['table', 'UTable'].includes(element.tag))) {
+      push('error', 'resource-list-ad-hoc-table', 'A resource-list screen still renders its primary inventory as a table.', 'Use CommonResourceListItem so row metadata and actions remain responsive on narrow screens.');
+    }
+    const frame = frames[0];
+    if (frame && !hasStaticOrBound(frame, 'loading')) {
+      push('error', 'resource-list-loading-owned', 'CommonResourceListFrame is missing its loading contract.', 'Bind :loading to the first-load state.');
+    }
+    if (frame && !hasStaticOrBound(frame, 'has-items') && !hasStaticOrBound(frame, 'hasItems')) {
+      push('error', 'resource-list-empty-owned', 'CommonResourceListFrame is missing its has-items contract.', 'Bind :has-items and keep the empty state owned by the frame.');
+    }
+    if (frame && !hasStaticOrBound(frame, 'empty-title') && !hasStaticOrBound(frame, 'emptyTitle')) {
+      push('error', 'resource-list-empty-copy', 'CommonResourceListFrame is missing an empty-state title.', 'Provide concise empty-title and, when useful, empty-description and empty-icon.');
+    }
+    const itemsPerPage = frame
+      ? extensionElementAttributeValue(frame, 'items-per-page', 'bind') ?? extensionElementAttributeValue(frame, 'itemsPerPage', 'bind')
+      : null;
+    if (itemsPerPage && itemsPerPage !== '0' && !extensionElementHasAttribute(frame, 'page', 'model')) {
+      push('error', 'resource-list-pagination-owned', 'A paginated CommonResourceListFrame is missing its page model.', 'Bind v-model:page on the frame so pagination state stays list-owned.');
+    }
+    if (!allClasses.has('eapp-page-constrained-wide')) {
+      push('warning', 'resource-list-width', 'The operational list is not constrained for wide admin viewports.', 'Wrap the page inventory in eapp-page-constrained-wide unless this extension intentionally owns a full-bleed canvas.');
+    }
+    const frameIndex = frame ? elements.indexOf(frame) : elements.length;
+    const beforeFrame = elements.slice(0, frameIndex);
+    const hasSearchOrFilterControl = beforeFrame.some((element) => (
+      ['UInput', 'UInputMenu', 'USelect', 'USelectMenu'].includes(element.tag)
+      && element.attributes.some((attribute) => /search|filter/i.test(`${attribute.name} ${attribute.value || ''}`))
+    ));
+    const hasFilterSurface = beforeFrame.some((element) => element.classes.some((name) => ['eapp-surface-card', 'eapp-surface-muted'].includes(name)));
+    if (hasSearchOrFilterControl && !hasFilterSurface) {
+      push('warning', 'resource-list-filter-surface', 'Search or filter controls are not in a separate compact surface before the list.', 'Place controls in a compact eapp-surface-card or eapp-surface-muted block, separate from CommonResourceListFrame.');
+    }
+  }
+
+  if (pattern === 'resource_grid') {
+    const frame = byTag('CommonResourceListFrame')[0];
+    if (!frame || extensionElementAttributeValue(frame, 'variant', null) !== 'plain') {
+      push('error', 'resource-grid-frame', 'Resource grids must use CommonResourceListFrame variant="plain".', 'Use build_extension_ui kind=resource_grid so loading and empty state remain list-owned without duplicate contained chrome.');
+    }
+    if (!allClasses.has('md:grid-cols-2') || !allClasses.has('xl:grid-cols-3')) {
+      push('error', 'resource-grid-breakpoints', 'Resource grids must use the admin-shell one/two/three-column breakpoints.', 'Use one column by default, md:grid-cols-2, and xl:grid-cols-3.');
+    }
+    if (!allClasses.has('eapp-page-constrained-wide')) {
+      push('warning', 'resource-grid-width', 'The resource grid is not constrained for the admin shell.', 'Keep eapp-page-constrained-wide unless the workflow intentionally owns a full-bleed canvas.');
+    }
+  }
+
+  if (pattern === 'auto'
+    && elements.some((element) => ['UCard', 'article'].includes(element.tag) && extensionElementHasAttribute(element, 'for', 'for'))
+    && byTag('CommonResourceListFrame').length === 0) {
+    push('warning', 'ad-hoc-inventory', 'Repeated cards were found without a shared list frame.', 'Choose resource_list for dense operational rows or resource_grid for a workboard/catalog, then use the matching builder contract.');
+  }
+
+  if (byTag('UButton').some((element) => hasStaticOrBound(element, 'disabled') && /Already|Completed|Granted|Handled/i.test(element.text))) {
+    push('warning', 'disabled-terminal-action', 'A terminal state appears as a disabled action button.', 'Render terminal state as a badge or metadata and omit the unavailable action.');
+  }
   return {
     action: 'extension_ui_contract_reviewed',
+    pattern,
     valid: issues.every((issue) => issue.severity !== 'error'),
     issueCount: issues.length,
     issues,
     nextSteps: issues.length
-      ? ['Use build_extension_ui with kind=drawer or kind=modal for replacement snippets, then apply with patch_extension_code/update_extension_code.']
+      ? [pattern === 'resource_list' || pattern === 'resource_grid'
+        ? `Use build_extension_ui kind=${pattern} for the canonical layout, then apply with patch_extension_code/update_extension_code.`
+        : 'Use the matching build_extension_ui contract, then apply with patch_extension_code/update_extension_code.']
       : ['Snippet matches the checked modal/drawer contract rules. Still validate the final SFC before saving.'],
   };
 }
@@ -1234,6 +1356,7 @@ function collectExtensionRuntimeIssues(code) {
   const source = String(code || '');
   const issues: Array<{ severity: 'error' | 'warning'; rule: string; message: string; suggestion: string }> = [];
   const push = (severity, rule, message, suggestion) => issues.push({ severity, rule, message, suggestion });
+  const analysis = analyzeExtensionSfc(source);
 
   if (/(?:^|[>\n;])\s*import(?:\s.+?\sfrom\s+|\s*['"])/m.test(source)) {
     push('error', 'static-import', 'Static import statements are not allowed in enfyra_extension.code.', 'Use injected globals/components directly, or load app packages with getPackages(["package-name"]) inside runtime code.');
@@ -1250,10 +1373,13 @@ function collectExtensionRuntimeIssues(code) {
   if (/\b(?:query|body|filter|deep|aggregate)\s*:\s*JSON\.stringify\s*\(/.test(source)) {
     push('error', 'use-api-json-stringify-options', 'useApi query/body/filter/deep/aggregate options must be plain objects or computed objects, not JSON strings.', 'Pass the object directly to useApi or execute().');
   }
-  if (/<(?:CommonModal|UModal)\b[^>]*\bv-model\s*=/.test(source)) {
+  if (analysis.elements.some((element) => (
+    ['CommonModal', 'UModal'].includes(element.tag)
+    && extensionElementHasAttribute(element, 'model', 'model')
+  ))) {
     push('error', 'modal-open-model', 'CommonModal/UModal must bind v-model:open, not the default v-model contract.', 'Call build_extension_ui kind=modal and preserve its v-model:open binding.');
   }
-  if (/<CommonEmptyState\b/.test(source)) {
+  if (analysis.elements.some((element) => element.tag === 'CommonEmptyState')) {
     push('error', 'unavailable-common-empty-state', 'CommonEmptyState is not registered in the dynamic extension runtime.', 'Use the injected EmptyState alias or build_extension_ui kind=empty_state/resource_list/resource_grid.');
   }
   const scriptBlocks = [...source.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]);
@@ -1543,7 +1669,7 @@ export function buildExtensionUiSnippet(kind: string, input: AnyRecord = {}) {
       if (!input?.code) {
         throw new Error('build_extension_ui kind=review requires input.code.');
       }
-      const uiReview = reviewExtensionUiContract(input.code);
+      const uiReview = reviewExtensionUiContract(input.code, { pattern: input.pattern });
       const themeReview = reviewExtensionThemeContract(input.code);
       const runtimeReview = reviewExtensionRuntimeContract(input.code);
       result = {
@@ -1822,39 +1948,46 @@ function findInvalidExtensionSortSyntax(code) {
   return null;
 }
 
-export function validateExtensionCodeLocally(code) {
+export function validateExtensionCodeLocally(code, options: AnyRecord = {}) {
+  const analysis = analyzeExtensionSfc(code);
+  if (!analysis.valid) {
+    throw new Error(`Invalid Vue SFC: ${analysis.errors[0] || 'template parsing failed.'}`);
+  }
   if (/\bresolveComponent\s*\(/.test(String(code || ''))) {
     throw new Error('Invalid extension component resolution: do not call resolveComponent() in Enfyra extensions. Use auto-injected components such as <UButton> directly in the template so the app/compiler resolves them correctly.');
   }
 
   const invalidSortSyntax = findInvalidExtensionSortSyntax(code);
   if (invalidSortSyntax) {
-    throw new Error(`Invalid extension sort contract: ${invalidSortSyntax} Use build_extension_api_usage with structured sort entries; Enfyra REST requires one comma-separated string such as "-isPinned,-updatedAt".`);
+    throw new Error(`Invalid extension sort contract: ${invalidSortSyntax} Use build_extension_ui kind=api_usage with structured sort entries; Enfyra REST requires one comma-separated string such as "-isPinned,-updatedAt".`);
   }
 
-  const violations = [];
-  for (const template of readTemplateBlocks(code)) {
-    let index = 0;
-    while (index < template.length) {
-      const tagStart = template.indexOf('<', index);
-      if (tagStart === -1) break;
-      const tagName = readTemplateTagName(template, tagStart);
-      if (tagName && tagName === tagName.toLowerCase() && !tagName.includes('-')) {
-        const expected = AUTO_INJECTED_EXTENSION_COMPONENT_BY_LOWERCASE.get(tagName);
-        if (expected) violations.push({ tag: tagName, expected });
-      }
-      index = tagStart + 1;
-    }
-  }
+  const violations = analysis.elements.flatMap((element) => {
+    const tagName = element.tag;
+    if (tagName !== tagName.toLowerCase() || tagName.includes('-')) return [];
+    const expected = AUTO_INJECTED_EXTENSION_COMPONENT_BY_LOWERCASE.get(tagName);
+    return expected ? [{ tag: tagName, expected }] : [];
+  });
   if (violations.length) {
     const first = violations[0];
     throw new Error(`Invalid extension component casing: use <${first.expected}> instead of <${first.tag}>. Enfyra/Nuxt UI auto-injected components must keep PascalCase in extension templates; lowercase tags render as unresolved DOM elements.`);
   }
 
-  const missingFullWidthFields = findMissingFullWidthFieldControls(code);
+  const missingFullWidthFields = analysis.elements
+    .filter((element) => FULL_WIDTH_EXTENSION_FIELD_TAGS.includes(element.tag))
+    .filter((element) => !extensionElementHasAttribute(element, 'data-compact', null))
+    .filter((element) => !extensionElementHasAttribute(element, 'data-inline', null))
+    .filter((element) => !element.classes.includes('w-full'))
+    .map((element) => ({ tag: element.tag, snippet: element.source }));
   if (missingFullWidthFields.length) {
     const first = missingFullWidthFields[0];
     throw new Error(`Invalid extension field width: <${first.tag}> must include class="w-full" in Enfyra extensions unless it is intentionally compact with data-compact or data-inline. First offending snippet: ${first.snippet}`);
+  }
+
+  const uiReview = reviewExtensionUiContract(code, { pattern: options.uiPattern });
+  const firstUiError = uiReview.issues.find((issue) => issue.severity === 'error');
+  if (firstUiError) {
+    throw new Error(`Invalid extension UI contract: ${firstUiError.message} Rule: ${firstUiError.rule}. ${firstUiError.suggestion}`);
   }
 
   const themeReview = reviewExtensionThemeContract(code);
@@ -1869,11 +2002,11 @@ export function validateExtensionCodeLocally(code) {
     throw new Error(`Invalid extension runtime contract: ${firstRuntimeError.message} Rule: ${firstRuntimeError.rule}. ${firstRuntimeError.suggestion}`);
   }
 
-  return { componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' };
+  return { vueSfcAst: 'passed', componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' };
 }
 
-export async function validateExtensionCode(apiUrl, code, name) {
-  const localChecks = validateExtensionCodeLocally(code);
+export async function validateExtensionCode(apiUrl, code, name, options: AnyRecord = {}) {
+  const localChecks = validateExtensionCodeLocally(code, options);
   const result = await fetchAPI(apiUrl, '/enfyra_extension/preview', {
     method: 'POST',
     body: JSON.stringify({ code, name }),
@@ -1889,6 +2022,80 @@ export async function validateExtensionCode(apiUrl, code, name) {
   };
 }
 
+function summarizeExtensionSaveResult(result, fallback: AnyRecord = {}) {
+  const record = unwrapData(result)[0] || (result?.data && !Array.isArray(result.data) ? result.data : null) || {};
+  return {
+    id: getId(record) ?? fallback.id ?? null,
+    name: record.name ?? fallback.name ?? null,
+    type: record.type ?? fallback.type ?? null,
+    isEnabled: record.isEnabled ?? fallback.isEnabled ?? null,
+    version: record.version ?? fallback.version ?? null,
+    updatedAt: record.updatedAt ?? null,
+  };
+}
+
+export function buildExtensionRuntimeVerification({ extension, code, validation, uiPattern, expectedSha256 }) {
+  const source = String(code || '');
+  const currentSha256 = sha256Text(source);
+  const review = buildExtensionUiSnippet('review', { code: source, pattern: uiPattern });
+  const rawMenu = Array.isArray(extension?.menu) ? extension.menu[0] : extension?.menu;
+  const isPage = String(extension?.type || '').toLowerCase() === 'page';
+  const savedRecordPassed = getId(extension) !== null;
+  const menuWiringPassed = !isPage || Boolean(getId(rawMenu) !== null && rawMenu?.path);
+  const hashMatches = !expectedSha256 || expectedSha256 === currentSha256;
+  const compilerPassed = validation?.valid === true;
+  const valid = savedRecordPassed && compilerPassed && review.valid && menuWiringPassed && hashMatches;
+
+  return {
+    action: 'extension_runtime_verified',
+    valid,
+    extension: {
+      id: getId(extension),
+      name: extension?.name || null,
+      type: extension?.type || null,
+      isEnabled: extension?.isEnabled ?? null,
+      version: extension?.version ?? null,
+      sha256: currentSha256,
+      length: source.length,
+    },
+    checks: {
+      savedRecord: { status: savedRecordPassed ? 'passed' : 'failed' },
+      expectedHash: { status: hashMatches ? 'passed' : 'failed', expectedSha256: expectedSha256 || null, currentSha256 },
+      serverCompile: { status: compilerPassed ? 'passed' : 'failed', compiledLength: validation?.compiledLength ?? null },
+      uiContract: { status: review.ui.valid ? 'passed' : 'failed', issueCount: review.ui.issueCount, pattern: review.ui.pattern },
+      themeContract: { status: review.theme.valid ? 'passed' : 'failed', issueCount: review.theme.issueCount },
+      runtimeContract: { status: review.runtime.valid ? 'passed' : 'failed', issueCount: review.runtime.issueCount },
+      menuWiring: {
+        status: menuWiringPassed ? 'passed' : 'failed',
+        applicable: isPage,
+        menu: rawMenu ? { id: getId(rawMenu), label: rawMenu.label || null, path: rawMenu.path || null } : null,
+      },
+      browserRender: {
+        status: 'not_run',
+        reason: 'MCP can verify saved metadata, server compilation, static runtime/UI/theme contracts, and page menu wiring. A signed-in browser is still required to prove component execution, API data shape, console errors, and responsive layout.',
+      },
+    },
+    contractReview: review.valid
+      ? { valid: true, issueCount: 0, pattern: review.ui.pattern }
+      : review,
+    coverage: {
+      verified: ['saved metadata', 'expected source hash', 'server Vue compilation', 'static UI/theme/runtime contracts', ...(isPage ? ['page menu wiring'] : [])],
+      browserRequiredForFullRuntimeProof: true,
+    },
+  };
+}
+
+export async function verifyExtensionRuntime(apiUrl, { id, name, uiPattern, expectedSha256 }) {
+  if (!id && !name) throw new Error('Provide id or name to verify an existing extension.');
+  const existing = id
+    ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,isEnabled,version,updatedAt,menu.id,menu.label,menu.path,code')
+    : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,isEnabled,version,updatedAt,menu.id,menu.label,menu.path,code');
+  if (!existing) throw new Error(`Extension not found: ${id || name}`);
+  const code = String(existing.code || '');
+  const validation = await validateExtensionCode(apiUrl, code, existing.name || String(id || name), { uiPattern });
+  return buildExtensionRuntimeVerification({ extension: existing, code, validation, uiPattern, expectedSha256 });
+}
+
 async function updateExtensionCode(apiUrl, {
   id,
   name,
@@ -1896,6 +2103,8 @@ async function updateExtensionCode(apiUrl, {
   description,
   isEnabled,
   version,
+  expectedSha256,
+  uiPattern,
   globalRulesAckKey,
   extensionKnowledgeAckKey,
 }) {
@@ -1903,11 +2112,16 @@ async function updateExtensionCode(apiUrl, {
   assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
   if (!id && !name) throw new Error('Provide id or name to update an existing extension.');
   const existing = id
-    ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,menu.id')
-    : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,menu.id');
+    ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,isEnabled,version,menu.id,code')
+    : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,isEnabled,version,menu.id,code');
   if (!existing) throw new Error(`Extension not found: ${id || name}`);
   const extensionId = getId(existing);
-  const validation = await validateExtensionCode(apiUrl, code, name || existing.name || extensionId);
+  const currentSha256 = sha256Text(existing.code || '');
+  if (expectedSha256 && expectedSha256 !== currentSha256) {
+    throw new Error(`Extension code hash mismatch. Expected ${expectedSha256}, got ${currentSha256}. Re-read the extension before replacing it.`);
+  }
+  const validation = await validateExtensionCode(apiUrl, code, name || existing.name || extensionId, { uiPattern });
+  const contractReview = buildExtensionUiSnippet('review', { code, pattern: uiPattern });
   const body: AnyRecord = {
     code,
     ...(description !== undefined ? { description } : {}),
@@ -1918,13 +2132,34 @@ async function updateExtensionCode(apiUrl, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+  const nextSha256 = sha256Text(code);
+  const verification = await verifyExtensionRuntime(apiUrl, {
+    id: extensionId,
+    name: undefined,
+    uiPattern,
+    expectedSha256: nextSha256,
+  });
   return {
     action: 'extension_code_updated',
     id: extensionId,
     name: existing.name || name || null,
     type: existing.type || null,
-    result,
+    previousSha256: currentSha256,
+    sha256: nextSha256,
+    saved: summarizeExtensionSaveResult(result, {
+      id: extensionId,
+      name: existing.name || name,
+      type: existing.type,
+      isEnabled: isEnabled ?? existing.isEnabled,
+      version: version ?? existing.version,
+    }),
     validation,
+    contractReview: {
+      valid: contractReview.valid,
+      issueCount: contractReview.issueCount,
+      pattern: contractReview.ui?.pattern,
+    },
+    verification,
   };
 }
 
@@ -2047,6 +2282,31 @@ export function applyExtensionCodePatches(code, patches) {
   return { code: nextCode, patches: normalizedPatches, results };
 }
 
+function patchDiffLines(value, prefix) {
+  const lines = String(value ?? '').split('\n');
+  return lines.map((line) => `${prefix}${line}`).join('\n');
+}
+
+export function buildExtensionPatchDiffArtifact({ id, name, currentSha256, nextSha256, patches }) {
+  const hunks = (patches || []).map((patch, index) => [
+    `@@ patch ${index + 1} (${patch.searchMode || 'exact'}${patch.replaceAll ? ', all matches' : ''}) @@`,
+    patchDiffLines(patch.search, '-'),
+    patchDiffLines(patch.replace, '+'),
+  ].join('\n'));
+  const content = [
+    `--- ${name || id || 'extension'}@${currentSha256 || 'unknown'}`,
+    `+++ ${name || id || 'extension'}@${nextSha256 || 'unknown'}`,
+    ...hunks,
+    '',
+  ].join('\n');
+  return writeSourceArtifact({
+    tableName: 'enfyra_extension',
+    id: id || name || 'extension',
+    fieldName: 'patch.diff',
+    source: content,
+  });
+}
+
 async function patchExtensionCode(apiUrl, {
   id,
   name,
@@ -2060,6 +2320,7 @@ async function patchExtensionCode(apiUrl, {
   description,
   isEnabled,
   version,
+  uiPattern,
   globalRulesAckKey,
   extensionKnowledgeAckKey,
 }) {
@@ -2073,6 +2334,9 @@ async function patchExtensionCode(apiUrl, {
   const extensionId = getId(existing);
   const currentCode = String(existing.code ?? '');
   const currentSha256 = sha256Text(currentCode);
+  if (apply && !expectedSha256) {
+    throw new Error('expectedSha256 is required when apply=true. Preview the patch or inspect the extension first, then retry with the current code hash.');
+  }
   if (expectedSha256 && expectedSha256 !== currentSha256) {
     throw new Error(`Extension code hash mismatch. Expected ${expectedSha256}, got ${currentSha256}. Re-read the extension before patching.`);
   }
@@ -2080,6 +2344,13 @@ async function patchExtensionCode(apiUrl, {
   const nextCode = patchResult.code;
   const nextSha256 = sha256Text(nextCode);
   const occurrences = patchResult.results.reduce((total, item) => total + item.occurrences, 0);
+  const diff = buildExtensionPatchDiffArtifact({
+    id: extensionId,
+    name: existing.name || name,
+    currentSha256,
+    nextSha256,
+    patches: patchResult.patches,
+  });
   const nextStepPatchInput = patchResult.patches.length === 1
     ? {
       search: patchResult.patches[0].search,
@@ -2099,6 +2370,7 @@ async function patchExtensionCode(apiUrl, {
     nextLength: nextCode.length,
     occurrences,
     patchResults: patchResult.results,
+    diff,
     atomic: patchResult.patches.length > 1,
     apply: Boolean(apply),
   };
@@ -2118,6 +2390,8 @@ async function patchExtensionCode(apiUrl, {
     description,
     isEnabled,
     version,
+    expectedSha256: currentSha256,
+    uiPattern,
     globalRulesAckKey,
     extensionKnowledgeAckKey,
   });
@@ -2301,13 +2575,21 @@ async function ensureExtension(apiUrl, {
     isEnabled,
     version,
   });
+  const extensionId = operation.id || getId(existing);
+  const verification = await verifyExtensionRuntime(apiUrl, {
+    id: extensionId,
+    name: extensionId ? undefined : name,
+    uiPattern: undefined,
+    expectedSha256: sha256Text(code),
+  });
   return {
-    id: operation.id || getId(existing),
+    id: extensionId,
     name,
     type,
     action: operation.action,
-    operation,
+    operation: { action: operation.action, id: extensionId },
     validation,
+    verification,
   };
 }
 
@@ -2611,10 +2893,26 @@ async function runFlowWorkflow(apiUrl, opts) {
   return {
     action: 'flow_workflow_applied',
     flow: flowResult.flow,
-    flowResult,
+    flowResult: {
+      action: flowResult.action,
+      flow: flowResult.flow,
+      reload: flowResult.reload,
+    },
     stepCount: plan.length,
-    plan,
-    operations,
+    plan: plan.map(({ sourceCode, ...step }) => ({
+      ...step,
+      ...(sourceCode ? { source: { length: sourceCode.length, sha256: sha256Text(sourceCode) } } : {}),
+    })),
+    operations: operations.map((operation) => ({
+      index: operation.index,
+      key: operation.key,
+      type: operation.type,
+      action: operation.result.action,
+      flow: operation.result.flow,
+      step: operation.result.step,
+      validation: operation.result.validation,
+      reload: operation.result.reload,
+    })),
     sequential: true,
     nextSteps: [
       'Use test_flow_step for script, condition, or high-risk steps before triggering the flow.',
@@ -2991,7 +3289,7 @@ async function runApiEndpointWorkflow(apiUrl, opts) {
     scriptValidation: latestState.scriptValidation,
     contractReview: latestState.contractReview,
     steps: latestSteps,
-    operations,
+    operations: operations.map(summarizeWorkflowOperation),
     complete: latestSteps.every((item) => ['completed', 'skipped'].includes(item.status)),
     nextSteps,
     cleanupHints: latestState.endpoint.routeId
@@ -3243,30 +3541,49 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       'Call get_extension_theme_contract first when generating or reviewing UI.',
     ].join(' '),
     {
-      code: z.string().describe('Vue SFC or compiled extension bundle code.'),
+      code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC or compiled extension bundle code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
       name: z.string().optional().describe('Optional extension name/id used by the preview compiler.'),
+      uiPattern: z.enum(['resource_list', 'resource_grid', 'master_detail', 'form', 'custom']).optional().describe('Optional intended UI pattern. resource_list/resource_grid enable deterministic layout policy checks.'),
     },
-    async ({ code, name }) => jsonText({
+    async ({ code, name, uiPattern }) => jsonText({
       action: 'extension_code_validated',
-      validation: await validateExtensionCode(ENFYRA_API_URL, code, name),
+      validation: await validateExtensionCode(ENFYRA_API_URL, code, name, { uiPattern }),
     }),
+  );
+
+  server.tool(
+    'verify_extension_runtime',
+    [
+      'Verify one saved Enfyra extension through the strongest checks available inside MCP.',
+      'It checks the saved record and expected hash, runs local UI/theme/runtime policy review, calls the server Vue compiler, and verifies page menu wiring.',
+      'It explicitly reports browserRender=not_run because signed-in component execution, real API data shape, console errors, and responsive layout require browser automation outside this MCP server.',
+    ].join(' '),
+    {
+      id: z.union([z.string(), z.number()]).optional().describe('Saved extension id. Provide id or name.'),
+      name: z.string().optional().describe('Saved extension unique name. Provide id or name.'),
+      expectedSha256: z.string().optional().describe('Optional expected saved source hash from inspect/update/patch output.'),
+      uiPattern: z.enum(['resource_list', 'resource_grid', 'master_detail', 'form', 'custom']).optional().describe('Optional intended UI pattern for deterministic layout policy checks.'),
+    },
+    async (input) => jsonText(await verifyExtensionRuntime(ENFYRA_API_URL, input)),
   );
 
   server.tool(
     'update_extension_code',
     [
       'Business operation: update an existing Enfyra admin extension code by id or name.',
-      'It runs local extension guards and /enfyra_extension/preview first, then saves the code in the same call only when validation succeeds.',
+      'It runs local extension guards and /enfyra_extension/preview first, saves only when validation succeeds, then re-reads and verifies the exact saved source in the same call.',
       'Use this instead of validate_extension_code followed by update_record when editing an existing page/widget/global extension.',
       'Call get_extension_theme_contract first when generating or reviewing UI.',
     ].join(' '),
     {
       id: z.union([z.string(), z.number()]).optional().describe('Existing extension id. Provide id or name.'),
       name: z.string().optional().describe('Existing extension unique name. Provide id or name.'),
-      code: z.string().describe('Vue SFC extension code.'),
+      code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
       description: z.string().optional().describe('Optional replacement extension description. Omit to preserve.'),
       isEnabled: z.boolean().optional().describe('Optional enabled state. Omit to preserve.'),
       version: z.string().optional().describe('Optional extension version. Omit to preserve.'),
+      expectedSha256: z.string().optional().describe('Optional SHA-256 of current extension code. Rejects stale full replacements.'),
+      uiPattern: z.enum(['resource_list', 'resource_grid', 'master_detail', 'form', 'custom']).optional().describe('Optional intended UI pattern. Enforces deterministic layout policy before saving.'),
       globalRulesAckKey: globalRulesAckParam(z),
       extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
     },
@@ -3281,7 +3598,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       'For edits that temporarily unbalance Vue tags or slots, pass patches=[{search,replace},...] so all patches are applied in memory, then the final SFC is validated and saved atomically when apply=true.',
       'Default searchMode="exact"; use searchMode="whitespace" only when indentation/newline variation is the problem.',
       'Default replaceAll=false requires exactly one match; set replaceAll=true only after preview confirms the match count.',
-      'It hash-checks the current code, validates with /enfyra_extension/preview, and saves only when apply=true.',
+      'It hash-checks the current code, validates with /enfyra_extension/preview, saves only when apply=true, then re-reads and verifies the exact saved source.',
       'Default apply=false returns a preview and nextStep input.',
     ].join(' '),
     {
@@ -3297,11 +3614,12 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
         searchMode: z.enum(['exact', 'whitespace']).optional().default('exact').describe('Patch matching mode. Use whitespace only for indentation/newline variation.'),
         replaceAll: z.boolean().optional().default(false).describe('Patch replace-all mode. false requires exactly one match for this patch.'),
       })).optional().describe('Atomic multi-patch list. Patches apply sequentially in memory and only the final SFC is validated/saved when apply=true. Use this for slot/tag pairs that would be invalid as intermediate states.'),
-      expectedSha256: z.string().optional().describe('Optional SHA-256 of current extension code from a prior inspect/read. Rejects stale patches.'),
+      expectedSha256: z.string().optional().describe('SHA-256 of current extension code from preview/inspect. Required when apply=true and rejects stale patches.'),
       apply: z.boolean().optional().default(false).describe('Preview by default. Set true to validate and save.'),
       description: z.string().optional().describe('Optional replacement extension description. Omit to preserve.'),
       isEnabled: z.boolean().optional().describe('Optional enabled state. Omit to preserve.'),
       version: z.string().optional().describe('Optional extension version. Omit to preserve.'),
+      uiPattern: z.enum(['resource_list', 'resource_grid', 'master_detail', 'form', 'custom']).optional().describe('Optional intended UI pattern. Enforces deterministic layout policy before saving.'),
       globalRulesAckKey: globalRulesAckParam(z),
       extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
     },
@@ -3356,7 +3674,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
         'theme_review',
         'review',
       ]).describe('Which extension UI contract builder/reviewer to run.'),
-      input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=api_usage, pass { path, resource, method? }; for kind=confirm, pass { resource, executeName?, refreshName?, recordName?, idExpression? }; for kind=notify, pass { kind, title, description? }. For kind=theme_classes, pass { intent }. For kind=runtime_review/theme_review/review, pass { code }.'),
+      input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=api_usage, pass { path, resource, method? }; for kind=confirm, pass { resource, executeName?, refreshName?, recordName?, idExpression? }; for kind=notify, pass { kind, title, description? }. For kind=theme_classes, pass { intent }. For kind=runtime_review/theme_review/review, pass { code, pattern? }, where pattern may be resource_list or resource_grid for deterministic layout policy.'),
       extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
     },
     async ({ kind, input, extensionKnowledgeAckKey }) => {
@@ -3458,7 +3776,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
       'This is a static contract review, not a compiler validation; still validate the final SFC before saving.',
     ].join(' '),
     {
-      code: z.string().describe('Vue SFC or template snippet to review.'),
+      code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC or template snippet to review.'),
     },
     async ({ code }) => jsonText(reviewExtensionUiContract(code)),
   );
@@ -3704,7 +4022,7 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       name: z.string().describe('Extension unique name.'),
       type: z.enum(['page', 'global', 'widget']).optional().default('page').describe('Extension type. Page extensions need a menu. Global extensions are for shell-wide registration.'),
-      code: z.string().describe('Vue SFC extension code.'),
+      code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
       menuId: z.union([z.string(), z.number()]).optional().describe('Existing menu id for a page extension. Provide this or menuLabel/menuPath.'),
       menuLabel: z.string().optional().describe('Menu label to create or update for a page extension when menuId is not provided.'),
       menuPath: z.string().optional().describe('Admin app route path for the page menu, e.g. /cloud/support.'),
@@ -3907,10 +4225,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode for a custom route, which has no main table. Use #secure.table_name or @REPOS.secure.table_name for user-facing explicit-table access. Repository calls are async and reads return result.data. Passing @BODY as create/update data is valid TypeORM-style usage; enforce endpoint-specific owner/tenant/business rules in code. Reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
+      sourceCode: z.string().describe('Handler body sourceCode for a custom route, which has no main table. Do not wrap it in export default/module.exports. Use #secure.table_name or @REPOS.secure.table_name for user-facing explicit-table access. Repository calls are async and reads return result.data. Passing @BODY as create/update data is valid TypeORM-style usage; enforce endpoint-specific owner/tenant/business rules in code. Reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
       anonymousAccess: z.enum(['public', 'private']).optional().default('private').describe('public adds the method to publicMethods; private removes this method from publicMethods.'),
-      public: z.boolean().optional().describe('Compatibility alias for anonymousAccess. true means public, false means private.'),
+      public: z.preprocess(normalizeStrictBoolean, z.boolean()).optional().describe('Compatibility alias for anonymousAccess. Accepts boolean true/false and exact string "true"/"false"; false means private.'),
       roleId: z.union([z.string(), z.number()]).optional().describe('Optional role id for authenticated route permission.'),
       roleName: z.string().optional().describe('Optional role name for authenticated route permission, e.g. user.'),
       allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Optional user id scope for authenticated route permission.'),
@@ -3942,9 +4260,9 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
     {
       path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
       method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-      sourceCode: z.string().describe('Handler sourceCode for a custom route, which has no main table. Use #secure.table_name or @REPOS.secure.table_name for user-facing explicit-table access. Repository calls are async and reads return result.data. Passing @BODY as create/update data is valid TypeORM-style usage; enforce endpoint-specific owner/tenant/business rules in code. Reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
+      sourceCode: z.string().describe('Handler body sourceCode for a custom route, which has no main table. Do not wrap it in export default/module.exports. Use #secure.table_name or @REPOS.secure.table_name for user-facing explicit-table access. Repository calls are async and reads return result.data. Passing @BODY as create/update data is valid TypeORM-style usage; enforce endpoint-specific owner/tenant/business rules in code. Reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
       scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
-      public: z.boolean().optional().default(false).describe('When true, the method is added to publicMethods for anonymous access.'),
+      public: z.preprocess(normalizeStrictBoolean, z.boolean()).optional().default(false).describe('When true, the method is added to publicMethods for anonymous access. Exact string "true"/"false" is normalized for weak clients.'),
       description: z.string().optional().describe('Route description.'),
       timeout: z.number().int().positive().optional().describe('Optional handler timeout in ms.'),
       overwrite: z.boolean().optional().default(false).describe('If a handler already exists for route+method, false fails; true updates its sourceCode.'),
@@ -4789,10 +5107,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'ensure_page_extension',
-    'Business operation: create or update one page extension attached to an existing menu. Validates extension code before save. Call get_extension_theme_contract first for UI work.',
+    'Business operation: create or update one page extension attached to an existing menu. Validates before save, then re-reads and verifies the exact saved source and menu wiring. Call get_extension_theme_contract first for UI work.',
     {
       name: z.string().describe('Extension unique name.'),
-      code: z.string().describe('Vue SFC extension code.'),
+      code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
       menuId: z.union([z.string(), z.number()]).describe('Existing menu id for this page extension.'),
       description: z.string().optional().describe('Extension description.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
@@ -4808,10 +5126,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'ensure_global_extension',
-    'Business operation: create or update one global shell extension. Validates extension code before save and rejects menu coupling. Call get_extension_theme_contract first for UI work.',
+    'Business operation: create or update one global shell extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Call get_extension_theme_contract first for UI work.',
     {
       name: z.string().describe('Extension unique name.'),
-      code: z.string().describe('Vue SFC extension code.'),
+      code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
       description: z.string().optional().describe('Extension description.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
       version: z.string().optional().default('1.0.0').describe('Extension version.'),
@@ -4826,10 +5144,10 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'ensure_widget_extension',
-    'Business operation: create or update one widget extension. Validates extension code before save and rejects menu coupling. Call get_extension_theme_contract first for UI work.',
+    'Business operation: create or update one widget extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Call get_extension_theme_contract first for UI work.',
     {
       name: z.string().describe('Extension unique name.'),
-      code: z.string().describe('Vue SFC extension code.'),
+      code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
       description: z.string().optional().describe('Extension description.'),
       isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
       version: z.string().optional().default('1.0.0').describe('Extension version.'),

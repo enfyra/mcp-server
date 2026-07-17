@@ -30,6 +30,37 @@ const FORBIDDEN_RELATION_DEFINITION_KEYS = new Set([
   'junctionTargetColumn',
 ]);
 
+const DOMAIN_OWNED_RECORD_MUTATIONS = {
+  enfyra_table: {
+    create: 'create_tables',
+    update: 'update_tables',
+    delete: 'delete_tables',
+  },
+  enfyra_column: {
+    create: 'create_columns',
+    update: 'update_columns',
+    delete: 'delete_columns',
+  },
+  enfyra_relation: {
+    create: 'create_relations',
+    update: 'delete_relations followed by create_relations',
+    delete: 'delete_relations',
+  },
+  enfyra_route: {
+    create: 'api_endpoint_workflow',
+    update: 'api_endpoint_workflow or the route access/public-method tools',
+    delete: 'delete_route',
+  },
+};
+
+export function assertGenericRecordMutationAllowed(operation, tableName) {
+  const owner = DOMAIN_OWNED_RECORD_MUTATIONS[String(tableName || '')]?.[operation];
+  if (!owner) return;
+  throw new Error(
+    `Generic ${operation}_records is blocked for domain-owned metadata table "${tableName}". Use ${owner} so Enfyra applies dependency checks, physical schema/runtime changes, reloads, and destructive previews correctly.`,
+  );
+}
+
 export function parseRecordData(data) {
   const parsed = typeof data === 'string' ? JSON.parse(data) : data;
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {

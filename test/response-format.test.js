@@ -14,9 +14,7 @@ test('formatJsonPayload encodes arrays of objects as columnar rows', () => {
   });
 
   assert.equal(formatted.responseFormat, 'json+columnar-v1');
-  assert.equal(formatted.compressionStats.applied, true);
-  assert.equal(typeof formatted.compressionStats.savedPercent, 'number');
-  assert.equal(typeof formatted.compressionStats.savedTokens, 'number');
+  assert.equal(formatted.compressionStats, undefined);
   assert.deepEqual(formatted.data.columns, ['id', 'name', 'status', 'owner']);
   assert.equal(formatted.data.rowCount, 12);
   assert.deepEqual(formatted.data.rows[0], [1, 'Item 1', 'active', 'codex']);
@@ -45,4 +43,19 @@ test('formatToolResult rewrites JSON text content without changing plain text', 
   assert.equal(parsed.compressionStats, undefined);
   assert.deepEqual(parsed.data, [{ id: 1, name: 'Alpha' }]);
   assert.equal(result.content[1].text, 'Saved successfully.');
+});
+
+test('formatToolResult keeps compression telemetry in MCP metadata instead of model-visible JSON', () => {
+  const result = formatToolResult({
+    content: [{
+      type: 'text',
+      text: JSON.stringify({
+        data: Array.from({ length: 12 }, (_, index) => ({ id: index, status: 'active', owner: 'codex' })),
+      }),
+    }],
+  });
+  const parsed = JSON.parse(result.content[0].text);
+  assert.equal(parsed.compressionStats, undefined);
+  assert.equal(result._meta.enfyraCompression.applied, true);
+  assert.equal(typeof result._meta.enfyraCompression.savedTokens, 'number');
 });

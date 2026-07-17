@@ -41,6 +41,17 @@ test('custom endpoint review blocks @REPOS.main because custom routes have no ma
   assert.throws(() => assertCustomEndpointRoute({ path: '/orders/submit', mainTable: { name: 'orders' } }), /canonical table route/i);
 });
 
+test('custom endpoint review rejects module wrappers before metadata is written', () => {
+  const review = reviewDynamicEndpointContract({
+    routeKind: 'custom',
+    method: 'POST',
+    sourceCode: 'export default async function handler() { return { ok: true } }',
+  });
+
+  assert.equal(review.status, 'blocked');
+  assert.deepEqual(review.errorCodes, ['module_wrapper_not_supported']);
+});
+
 test('custom endpoint review preserves TypeORM-style raw body with a secure explicit repository', () => {
   const review = reviewDynamicEndpointContract({
     routeKind: 'custom',
