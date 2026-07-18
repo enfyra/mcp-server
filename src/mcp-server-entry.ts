@@ -2,9 +2,6 @@
  * Enfyra MCP — stdio server (loaded by index.ts / dist/index.js).
  */
 
-import { config } from 'dotenv';
-config();
-
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
@@ -50,6 +47,14 @@ function bulkObjectArrayParam(z, label: string) {
 
 function jsonObjectParam(z, label: string) {
   return z.record(z.any()).describe(`${label} as a native JSON object. Do not JSON.stringify this value.`);
+}
+
+function parseJsonObjectInput(value: unknown, label: string): Record<string, any> {
+  const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+  return parsed as Record<string, any>;
 }
 
 function normalizeSortParam(sort?: string) {
@@ -2299,10 +2304,10 @@ server.tool(
   ].join(' '),
   {
     kind: z.enum(['script', 'flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
-    body: z.string().describe('JSON body for the test. Include script and optional context for script; type/config plus payload for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
+    body: z.union([z.record(z.any()), z.string()]).describe('Test body as a native JSON object. A JSON string is accepted for compatibility. Include script and optional context for script; type/config plus payload for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
   },
   async ({ kind, body }) => {
-    const parsed = body ? JSON.parse(body) : {};
+    const parsed = parseJsonObjectInput(body, 'body');
     const sourceCode = kind === 'flow_step'
       ? parsed?.config?.sourceCode ?? parsed?.config?.code
       : parsed?.script ?? parsed?.sourceCode;
@@ -2320,14 +2325,14 @@ server.tool(
   'Test a single flow step without saving it. Wraps POST /admin/test/run with kind=flow_step. Pass runtime @FLOW_PAYLOAD data through payload; the tool forwards it using the ESV test-run contract.',
   {
     type: z.enum(['script', 'condition', 'query', 'create', 'update', 'delete', 'http', 'trigger_flow', 'sleep', 'log']).describe('Flow step type'),
-    config: z.string().describe('Step config as JSON string'),
+    config: z.union([z.record(z.any()), z.string()]).describe('Step config as a native JSON object. A JSON string is accepted for compatibility.'),
     timeout: z.number().optional().describe('Timeout in ms'),
     key: z.string().optional().describe('Optional step key for mock flow context'),
     payload: z.union([z.record(z.any()), z.string()]).optional().describe('Runtime payload object exposed to the script as @FLOW_PAYLOAD. A JSON object string is accepted for compatibility.'),
-    mockFlow: z.string().optional().describe('Optional advanced mockFlow JSON object for $last/$meta or other flow context. Use payload for @FLOW_PAYLOAD.'),
+    mockFlow: z.union([z.record(z.any()), z.string()]).optional().describe('Optional advanced mockFlow object for $last/$meta or other flow context. A JSON string is accepted for compatibility. Use payload for @FLOW_PAYLOAD.'),
   },
   async ({ type, config, timeout, key, payload, mockFlow }) => {
-    const parsedConfig = JSON.parse(config);
+    const parsedConfig = parseJsonObjectInput(config, 'config');
     const sourceCode = parsedConfig?.sourceCode ?? parsedConfig?.code;
     if (typeof sourceCode === 'string') validatePortableScriptSource(sourceCode);
     const parsedPayload = typeof payload === 'string' ? JSON.parse(payload) : payload;
@@ -2340,7 +2345,7 @@ server.tool(
       ...(timeout ? { timeout } : {}),
       ...(key ? { key } : {}),
       ...(parsedPayload !== undefined ? { payload: parsedPayload } : {}),
-      ...(mockFlow ? { mockFlow: JSON.parse(mockFlow) } : {}),
+      ...(mockFlow ? { mockFlow: parseJsonObjectInput(mockFlow, 'mockFlow') } : {}),
     };
     const result = await fetchAPI(ENFYRA_API_URL, '/admin/test/run', {
       method: 'POST',
@@ -2355,7 +2360,7 @@ server.tool(
   'Trigger an enabled saved flow by id or name. Disabled flows are not registered for execution; use test_flow_step to verify their step contract without enabling them.',
   {
     flowIdOrName: z.union([z.string(), z.number()]).describe('Flow id or name accepted by FlowService.trigger'),
-    payload: z.string().optional().describe('Payload JSON object. Default {}.'),
+    payload: z.union([z.record(z.any()), z.string()]).optional().describe('Payload as a native JSON object. A JSON string is accepted for compatibility. Default {}.'),
   },
   async ({ flowIdOrName, payload }) => {
     const rawIdentifier = String(flowIdOrName);
@@ -2371,7 +2376,9 @@ server.tool(
     const flowId = flow.id ?? flow._id;
     const result = await fetchAPI(ENFYRA_API_URL, `/admin/flow/trigger/${encodeURIComponent(String(flowId))}`, {
       method: 'POST',
-      body: JSON.stringify({ payload: payload ? JSON.parse(payload) : {} }),
+      body: JSON.stringify({
+        payload: payload ? parseJsonObjectInput(payload, 'payload') : {},
+      }),
     });
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   },
@@ -3541,6 +3548,7 @@ server.tool('login', 'Force authentication to Enfyra and get a new access token'
 }, async ({ apiToken }) => {
   const token = apiToken || ENFYRA_API_TOKEN;
   if (token) {
+    initAuth(ENFYRA_API_URL, token);
     await exchangeApiToken(ENFYRA_API_URL, token);
     const expiry = getTokenExpiry();
     const expiryLabel = expiry === Infinity ? 'no expiration' : new Date(expiry).toISOString();

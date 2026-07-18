@@ -10,7 +10,8 @@ let accessToken = null;
 let refreshToken = null;
 let tokenExpiry = null; // expTime từ server (milliseconds)
 let isRefreshing = false;
-let exchangePromise = null;
+let exchangePromise: { revision: number; promise: Promise<string> } | null = null;
+let authRevision = 0;
 
 // Config
 let API_URL = 'http://localhost:3000/api';
@@ -36,6 +37,8 @@ function normalizeExpiry(expTime) {
 export function initAuth(apiUrl, apiToken = '') {
   API_URL = apiUrl;
   API_TOKEN = apiToken;
+  authRevision += 1;
+  resetTokens();
   clearRuntimeCache();
 }
 
@@ -75,9 +78,10 @@ export async function exchangeApiToken(url, apiToken) {
     throw new Error('API token required');
   }
 
-  if (exchangePromise) return exchangePromise;
+  const revision = authRevision;
+  if (exchangePromise?.revision === revision) return exchangePromise.promise;
 
-  exchangePromise = (async () => {
+  const promise = (async () => {
     console.error('[Auth] Exchanging API token...');
     const response = await fetch(`${apiUrl}/auth/token/exchange`, {
       method: 'POST',
@@ -90,6 +94,9 @@ export async function exchangeApiToken(url, apiToken) {
     }
 
     const data = await response.json();
+    if (revision !== authRevision) {
+      throw new Error('Authentication credentials changed during token exchange');
+    }
     accessToken = data.accessToken || data.access_token;
     refreshToken = null;
     tokenExpiry = normalizeExpiry(data.expTime ?? data.exp_time ?? data.expiresAt ?? data.expires_at);
@@ -100,11 +107,12 @@ export async function exchangeApiToken(url, apiToken) {
     console.error(`[Auth] API token exchanged, access token expires at ${expiryLabel}`);
     return accessToken;
   })();
+  exchangePromise = { revision, promise };
 
   try {
-    return await exchangePromise;
+    return await promise;
   } finally {
-    exchangePromise = null;
+    if (exchangePromise?.revision === revision) exchangePromise = null;
   }
 }
 

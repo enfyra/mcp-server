@@ -36,5 +36,5 @@ if (args[0] === 'config') {
   process.exit(0);
 }
 
-loadEnv();
+loadEnv({ quiet: true });
 await import('./mcp-server-entry.js');

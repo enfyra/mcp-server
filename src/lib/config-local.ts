@@ -1,8 +1,10 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { appendFile, chmod, readFile, writeFile, mkdir } from 'node:fs/promises';
+import { execFile as execFileCallback } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output, cwd } from 'node:process';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
+import { promisify } from 'node:util';
 
 type ClientKey = 'codex' | 'claude' | 'cursor' | 'vscode' | 'antigravity';
 type ChoiceClientKey = ClientKey | 'all';
@@ -38,6 +40,8 @@ type KeypressInfo = {
 
 const SERVER_KEY = 'enfyra';
 const MCP_PACKAGE_SPEC = '@enfyra/mcp-server@latest';
+const PRIVATE_FILE_MODE = 0o600;
+const execFile = promisify(execFileCallback);
 const forceColor = process.env.FORCE_COLOR != null && process.env.FORCE_COLOR !== '0';
 const canStyle = forceColor || (output.isTTY && process.env.NO_COLOR == null);
 const style = {
@@ -79,6 +83,58 @@ const clients: Record<ClientKey, { label: string; path: string; color: (value: s
     color: style.yellow,
   },
 };
+
+async function writePrivateFile(path: string, content: string) {
+  await writeFile(path, content, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
+  await chmod(path, PRIVATE_FILE_MODE);
+}
+
+async function ensureProjectConfigIgnored(root: string, paths: string[]) {
+  const gitignorePath = join(root, '.gitignore');
+  let gitignore = '';
+  try {
+    gitignore = await readFile(gitignorePath, 'utf8');
+  } catch (error: any) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  const existing = new Set(
+    gitignore.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
+  );
+  const entries = paths
+    .map((path) => relative(root, path).split('\\').join('/'))
+    .filter((path) => path && !existing.has(path));
+  if (!entries.length) return;
+  const prefix = gitignore && !gitignore.endsWith('\n') ? '\n' : '';
+  await appendFile(gitignorePath, `${prefix}${entries.join('\n')}\n`, {
+    encoding: 'utf8',
+    mode: PRIVATE_FILE_MODE,
+  });
+}
+
+async function assertProjectConfigUntracked(root: string, paths: string[]) {
+  const entries = paths
+    .map((path) => relative(root, path).split('\\').join('/'))
+    .filter(Boolean);
+  if (!entries.length) return;
+  try {
+    const { stdout } = await execFile('git', [
+      '-C',
+      root,
+      'ls-files',
+      '--',
+      ...entries,
+    ]);
+    const tracked = stdout.trim().split(/\r?\n/).filter(Boolean);
+    if (tracked.length) {
+      throw new Error(
+        `Refusing to write tracked MCP config files: ${tracked.join(', ')}. Remove them from Git tracking before storing a token.`,
+      );
+    }
+  } catch (error: any) {
+    if (error?.code === 128) return;
+    throw error;
+  }
+}
 
 function statusIcon(kind: 'success' | 'warn' | string) {
   if (kind === 'success') return canStyle ? style.green('✓') : 'Done';
@@ -255,7 +311,7 @@ async function mergeMcpFile(absPath: string, serverEntry: ServerEntry) {
   data.mcpServers = { ...data.mcpServers, [SERVER_KEY]: serverEntry };
   const dir = dirname(absPath);
   await mkdir(dir, { recursive: true });
-  await writeFile(absPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  await writePrivateFile(absPath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 async function mergeVscodeMcpFile(absPath: string, serverEntry: ServerEntry) {
@@ -280,7 +336,7 @@ async function mergeVscodeMcpFile(absPath: string, serverEntry: ServerEntry) {
     },
   };
   await mkdir(dirname(absPath), { recursive: true });
-  await writeFile(absPath, `${JSON.stringify(data, null, 2)}\n`, 'utf8');
+  await writePrivateFile(absPath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 function tomlString(value: unknown) {
@@ -322,7 +378,7 @@ async function mergeCodexConfig(absPath: string, apiUrl: string, apiToken: strin
   const prefix = kept.join('\n').trimEnd();
   const next = prefix ? `${prefix}\n\n${buildCodexTomlBlock(apiUrl, apiToken)}` : buildCodexTomlBlock(apiUrl, apiToken);
   await mkdir(dirname(absPath), { recursive: true });
-  await writeFile(absPath, next, 'utf8');
+  await writePrivateFile(absPath, next);
 }
 
 function parseTomlString(value: unknown) {
@@ -691,6 +747,14 @@ export async function runLocalConfig(argv: string[]) {
 
   const serverEntry = buildServerEntry(apiUrl, apiToken);
   const written = [];
+  const selectedPaths = [
+    ...(writeCodex ? [getClientPath('codex', root)] : []),
+    ...(writeClaude ? [getClientPath('claude', root)] : []),
+    ...(writeCursor ? [getClientPath('cursor', root)] : []),
+    ...(writeVscode ? [getClientPath('vscode', root)] : []),
+    ...(writeAntigravity ? [getClientPath('antigravity', root)] : []),
+  ];
+  await assertProjectConfigUntracked(root, selectedPaths);
 
   if (writeCodex) {
     const p = getClientPath('codex', root);
@@ -717,6 +781,8 @@ export async function runLocalConfig(argv: string[]) {
     await mergeMcpFile(p, serverEntry);
     written.push({ client: 'antigravity', path: p });
   }
+
+  await ensureProjectConfigIgnored(root, written.map((entry) => entry.path));
 
   console.log(`${statusIcon('success')} ${style.bold(style.green('Enfyra MCP config updated'))} ${style.dim('(project)')}\n`);
   for (const entry of written) {
