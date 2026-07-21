@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { readSourceTree } from '../test-support/source-tree.js';
 
 import { initAuth, resetTokens } from '../dist/lib/auth.js';
 import { debugFieldExposure, searchAdminExtensions, searchRuntimeZone } from '../dist/lib/runtime-zone-tools.js';
@@ -266,7 +267,7 @@ test('debugFieldExposure resolves unpublished deep field paths and returns escal
 });
 
 test('mcp server exposes runtime zone search as the single DB-backed locator entry point', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
+  const entry = readSourceTree();
   assert.match(entry, /registerRuntimeZoneTools/);
   assert.doesNotMatch(entry, /registerExtensionSearchTools/);
 });

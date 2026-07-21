@@ -1,8 +1,8 @@
 export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY::SCHEMA-DESIGN-CONTEXT::20260717M';
-export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::LOCATOR-FIRST::ASYNC-HELPER-BRIDGE::20260717B';
+export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-17.connect-credentials-seed-callback-order';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-07-20.dynamic-script-runtime-types';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -237,6 +237,7 @@ const DYNAMIC_CODE_SECTIONS = [
       'Use sourceCode and scriptLanguage; never send compiledCode.',
       'Locate script-backed records with search_runtime_zone and inspect the returned nextInspect.input before source reads. Inspection already returns exact source artifacts with process-scoped enfyra-source resource URIs; never guess or probe ids with get_script_source.',
       'Prefer macros such as @BODY, @QUERY, @PARAMS, @USER, @REQ, @RES, @REPOS, @HELPERS, @STORAGE, @SOCKET, and @THROW* when available.',
+      'Call discover_script_contexts and treat its runtimeTypes section as the authoritative script-visible ESV contract. Do not add typeof, Array.isArray, existence, or callable guards around documented containers, services, methods, or repository result envelopes; validate user-controlled business fields and documented nullable values instead.',
       'Call build_dynamic_repository_usage for list, find-one, create, update, or delete code instead of composing secure/trusted repository syntax and result shapes from memory.',
       'An enfyra_oauth_config sourceCode script runs before a new OAuth user insert, has no authenticated @USER, and must return a plain object of additional user fields. Provider identity fields are merged afterward and take precedence.',
       'Repository reads use filter, not where.',

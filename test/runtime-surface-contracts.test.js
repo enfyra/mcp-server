@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { readSourceTree } from '../test-support/source-tree.js';
 
 import { assertFixedFlowStepConfigIsStatic } from '../dist/lib/platform-operation-tools.js';
 import { validatePortableScriptSource } from '../dist/lib/mutation-guards.js';
@@ -34,9 +35,9 @@ test('dynamic scripts reject method-style log calls and accept the callable log 
 });
 
 test('runtime guidance distinguishes admin-test capture and executable storage limits', () => {
-  const entry = readFileSync(new URL('../src/mcp-server-entry.ts', import.meta.url), 'utf8');
-  const routing = readFileSync(new URL('../src/lib/tool-routing.ts', import.meta.url), 'utf8');
-  const examples = readFileSync(new URL('../src/lib/mcp-examples.ts', import.meta.url), 'utf8');
+  const entry = readSourceTree();
+  const routing = entry;
+  const examples = entry;
 
   assert.match(entry, /@LOGS is a callable function/);
   assert.match(entry, /kind=script captures logs but not socket emitted calls/);

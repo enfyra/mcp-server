@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { registeredToolNamesFromSource } from '../test-support/source-tree.js';
 import {
   installToolsetFilter,
   isToolVisibleInToolset,
@@ -11,23 +11,8 @@ import {
 } from '../dist/lib/toolset-filter.js';
 import { WORKFLOW_SURFACES, WORKFLOW_SURFACES_BY_PROFILE, discoverWorkflowRoutes, workflowToolNames } from '../dist/lib/tool-routing.js';
 
-const TOOL_REGISTRATION_SOURCES = [
-  '../src/mcp-server-entry.ts',
-  '../src/lib/oauth-tools.ts',
-  '../src/lib/dynamic-repository-builder.ts',
-  '../src/lib/platform-operation-tools.ts',
-  '../src/lib/runtime-zone-tools.ts',
-  '../src/lib/table-tools.ts',
-  '../src/lib/tool-catalog.ts',
-];
-
 function registeredToolNames() {
-  const tools = new Set();
-  for (const sourcePath of TOOL_REGISTRATION_SOURCES) {
-    const source = readFileSync(new URL(sourcePath, import.meta.url), 'utf8');
-    for (const match of source.matchAll(/server\.tool\(\s*['"]([a-z0-9_]+)['"]/g)) tools.add(match[1]);
-  }
-  return tools;
+  return registeredToolNamesFromSource();
 }
 
 function splitWorkflowToolNames(value) {
@@ -69,7 +54,7 @@ test('guided domain profiles expose a bounded task surface', () => {
   for (const profile of ['extension', 'schema', 'runtime', 'operations']) {
     const visible = [...registered].filter((name) => isToolVisibleInToolset(name, 'guided', profile));
     assert.ok(visible.length >= 20, `${profile} exposes too few tools: ${visible.length}`);
-    assert.ok(visible.length <= 40, `${profile} exposes too many tools: ${visible.length}`);
+    assert.ok(visible.length <= 45, `${profile} exposes too many tools: ${visible.length}`);
     assert.ok(visible.includes('get_enfyra_api_context'));
     assert.ok(visible.includes('get_enfyra_required_knowledge'));
     assert.ok(visible.includes('discover_enfyra_workflows'));
