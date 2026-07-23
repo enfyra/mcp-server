@@ -20,8 +20,28 @@ function inputJsonSchema(tool: RegisteredToolDefinition) {
   });
 }
 
-function searchableText(tool: RegisteredToolDefinition) {
+function searchableText(tool: Pick<RegisteredToolDefinition, 'name' | 'description'>) {
   return `${tool.name} ${tool.description}`.toLowerCase();
+}
+
+function searchTerms(value: string) {
+  return [...new Set(value.toLowerCase().split(/[^a-z0-9]+/g).filter((term) => term.length >= 3))];
+}
+
+export function scoreToolSearch(
+  tool: Pick<RegisteredToolDefinition, 'name' | 'description'>,
+  query: string,
+) {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return 1;
+  const text = searchableText(tool);
+  const normalizedName = tool.name.toLowerCase().replace(/_/g, ' ');
+  let score = text.includes(normalizedQuery) ? 100 : 0;
+  for (const term of searchTerms(normalizedQuery)) {
+    if (normalizedName.includes(term)) score += 4;
+    else if (text.includes(term)) score += 1;
+  }
+  return score;
 }
 
 function riskMatches(tool: RegisteredToolDefinition, risk: string) {
@@ -70,8 +90,11 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
       const candidates = state.listTools()
         .filter((tool) => tool.name !== 'search_enfyra_tools' && tool.name !== 'execute_enfyra_tool')
         .filter((tool) => scope === 'all' || !tool.visible)
-        .filter((tool) => !normalizedQuery || searchableText(tool).includes(normalizedQuery))
-        .filter((tool) => riskMatches(tool, risk));
+        .map((tool) => ({ tool, searchScore: scoreToolSearch(tool, normalizedQuery) }))
+        .filter(({ searchScore }) => searchScore > 0)
+        .filter(({ tool }) => riskMatches(tool, risk))
+        .sort((left, right) => right.searchScore - left.searchScore)
+        .map(({ tool }) => tool);
       const availability = resolveAvailability
         ? await resolveAvailability(candidates.map((tool) => tool.name))
         : defaultAvailability(candidates.map((tool) => tool.name));

@@ -129,6 +129,7 @@ function buildCodexTomlBlock(apiUrl: string, apiToken: string) {
     '[mcp_servers.enfyra.env]',
     `ENFYRA_API_URL = ${tomlString(apiUrl)}`,
     `ENFYRA_API_TOKEN = ${tomlString(apiToken)}`,
+    'ENFYRA_MCP_DYNAMIC_TOOLS = "off"',
     '',
   ].join('\n');
 }
