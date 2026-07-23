@@ -25,6 +25,7 @@ import { registerRuntimeZoneTools } from './runtime-zone-tools.js';
 import { registerOAuthProviderTools } from './oauth-tools.js';
 import { registerDynamicRepositoryBuilder } from './dynamic-repository-builder.js';
 import { buildDynamicScriptContextTypeContract } from './dynamic-script-context-contract.js';
+import { destructivePreviewContent } from './destructive-preview.js';
 import { assertCreateHandlerRouteBoundary } from './dynamic-endpoint-contract.js';
 import { assertGenericRecordMutationAllowed, parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
 import {
@@ -184,14 +185,15 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'delete_method',
-    'Preview or delete a enfyra_method record. Only delete unused custom methods; system/default methods should be kept.',
+    'Preview or delete one enfyra_method record, then verify absence by primary key. System/default methods are rejected; only delete unused custom methods.',
     {
       id: z.string().optional().describe('Method record id. If omitted, method is used to find the record.'),
       method: z.string().optional().describe('Method name to find when id is omitted.'),
+      expectedId: z.string().optional().describe('Required when confirm=true. Pass the exact method id returned by the preview.'),
       confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
       globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
     },
-    async ({ id, method, confirm, globalRulesAckKey }) => {
+    async ({ id, method, expectedId, confirm, globalRulesAckKey }) => {
       let targetId = id;
       let target = null;
       if (!targetId) {
@@ -200,33 +202,71 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
         if (!target) throw new Error(`Method ${method} was not found.`);
         targetId = getId(target);
       }
+      const primaryKey = await getPrimaryFieldName('enfyra_method');
+      if (!target) {
+        const filter = encodeURIComponent(JSON.stringify({ [primaryKey]: { _eq: targetId } }));
+        const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_method?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
+        target = unwrapData(result)[0] || null;
+      }
+      if (!target) throw new Error(`Method id ${targetId} was not found.`);
       if (!confirm) {
-        if (!target) {
-          const primaryKey = await getPrimaryFieldName('enfyra_method');
-          const filter = encodeURIComponent(JSON.stringify({ [primaryKey]: { _eq: targetId } }));
-          const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_method?filter=${filter}&limit=1&fields=id,_id,name,buttonColor,textColor,isSystem`);
-          target = unwrapData(result)[0] || null;
-        }
-        return { content: [{ type: 'text', text: JSON.stringify({
+        return destructivePreviewContent('delete_method', {
           action: 'delete_method_preview',
           id: targetId,
-          name: target?.name,
-          isSystem: target?.isSystem === true,
+          name: target.name,
+          isSystem: target.isSystem === true,
           destructive: true,
+          postcondition: {
+            verificationMethod: 'not_run_preview',
+            confirmedAbsent: false,
+            remainingMethods: [{ id: targetId, name: target.name }],
+          },
           warning: 'Only delete unused custom methods. Deleting a method can affect route method relations.',
-          next: 'Call delete_method again with confirm=true to delete.',
-        }, null, 2) }] };
+          next: `Call delete_method again with the same locator, expectedId=${String(targetId)}, and confirm=true to delete.`,
+        }, 1);
       }
       assertGlobalRulesAck(globalRulesAckKey);
+      if (!expectedId) {
+        throw new Error('expectedId is required when confirm=true. Pass the exact method id returned by the preview.');
+      }
+      if (String(expectedId) !== String(targetId)) {
+        throw new Error(`Method id mismatch: resolved ${targetId}, expected ${expectedId}.`);
+      }
+      if (target.isSystem === true) {
+        throw new Error(`Method ${target.name || targetId} is system-owned and cannot be deleted.`);
+      }
       const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_method/${encodeURIComponent(String(targetId))}`, { method: 'DELETE' });
       invalidateMethodMap();
-      return { content: [{ type: 'text', text: JSON.stringify({
-        action: 'deleted',
+      let postcondition;
+      try {
+        const filter = encodeURIComponent(JSON.stringify({ [primaryKey]: { _eq: targetId } }));
+        const verification = await fetchAPI(ENFYRA_API_URL, `/enfyra_method?filter=${filter}&limit=1&fields=id,_id,name`);
+        const remainingMethods = unwrapData(verification).map((record) => ({
+          id: getId(record),
+          name: record.name,
+        }));
+        postcondition = {
+          verificationMethod: 'method_read_by_primary_key',
+          confirmedAbsent: remainingMethods.length === 0,
+          remainingMethods,
+        };
+      } catch (error) {
+        postcondition = {
+          verificationMethod: 'method_read_by_primary_key',
+          confirmedAbsent: false,
+          remainingMethods: [],
+          verificationError: String((error as any)?.message || error),
+        };
+      }
+      const content = jsonContent({
+        action: postcondition.confirmedAbsent ? 'deleted' : 'delete_method_unverified',
         tableName: 'enfyra_method',
         id: targetId,
         statusCode: result?.statusCode,
         success: result?.success,
-      }, null, 2) }] };
+        postcondition,
+      });
+      return postcondition.confirmedAbsent ? content : { ...content, isError: true };
     },
   );
 

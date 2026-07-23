@@ -229,7 +229,7 @@ export function installColumnarToolFormatter(server: any) {
       try {
         beforeMcpToolExecution(name, handlerArgs[0]);
         const result = await handler(...handlerArgs);
-        afterMcpToolExecution(name, handlerArgs[0]);
+        afterMcpToolExecution(name, handlerArgs[0], result);
         const formatted = formatToolResult(result, { toolName: name });
         recordMcpToolUsage(name, startedAt, handlerArgs, formatted);
         return formatted;

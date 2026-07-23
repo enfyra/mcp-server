@@ -5,6 +5,7 @@ import { formatToolResult, jsonContent } from './response-format.js';
 import { paginateResults } from './pagination.js';
 import { getToolContract, isCatalogExecutable } from './tool-contracts.js';
 import { isToolVisibleInToolset } from './toolset-filter.js';
+import { workflowSurfaceForTool } from './tool-routing.js';
 import type { RegisteredToolDefinition, ToolAvailability, ToolsetRegistrationState } from './types.js';
 
 type ToolAvailabilityResolver = (toolNames: string[]) => Promise<Record<string, ToolAvailability>>;
@@ -56,7 +57,14 @@ function invocationFor(tool: RegisteredToolDefinition, state: ToolsetRegistratio
   if (tool.visible) return { mode: 'direct', tool: tool.name };
   if (isCatalogExecutable(tool.name)) return { mode: 'catalog', tool: 'execute_enfyra_tool', name: tool.name };
   if (state.dynamic && isToolVisibleInToolset(tool.name, state.toolset as any, state.profile as any)) {
-    return { mode: 'workflow_selection_required', tool: 'select_enfyra_workflow' };
+    const surface = workflowSurfaceForTool(tool.name);
+    if (surface) {
+      return {
+        mode: 'workflow_selection_required',
+        tool: 'select_enfyra_workflow',
+        input: { surface, mode: 'replace' },
+      };
+    }
   }
   return { mode: 'full_toolset_required', env: 'ENFYRA_MCP_TOOLSET=full' };
 }
@@ -74,7 +82,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
     [
       'Search the live Enfyra MCP tool registry when a specialized tool is not visible in the current guided profile.',
       'Returns exact input schemas, standard annotations, PAT capability status when statically knowable, and the supported invocation path.',
-      'Hidden read-only builders, validators, and inspectors may run through execute_enfyra_tool. Hidden mutations require the full toolset so their own safety contract remains visible.',
+      'Hidden read-only builders, validators, and inspectors may run through execute_enfyra_tool. Hidden guided mutations return their owning workflow selection; low-level escape hatches require the full toolset.',
     ].join(' '),
     {
       query: z.string().optional().describe('Tool name, task phrase, domain term, or contract keyword. Omit to list the first bounded page.'),
@@ -134,7 +142,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
     'execute_enfyra_tool',
     [
       'Execute one hidden long-tail tool returned by search_enfyra_tools with invocation.mode=catalog.',
-      'This gateway accepts read-only, non-destructive tools only. Call visible tools directly and reconnect with ENFYRA_MCP_TOOLSET=full for hidden mutations.',
+      'This gateway accepts read-only, non-destructive tools only. Call visible tools directly, select the owning workflow for guided mutations, and use ENFYRA_MCP_TOOLSET=full only for low-level escape hatches.',
     ].join(' '),
     {
       name: z.string().describe('Exact hidden tool name returned by search_enfyra_tools.'),
@@ -157,7 +165,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
       const parsed = z.object(tool.inputSchema as z.ZodRawShape).parse(toolArguments ?? {});
       beforeMcpToolExecution(name, parsed);
       const result = await tool.handler(parsed, extra);
-      afterMcpToolExecution(name, parsed);
+      afterMcpToolExecution(name, parsed, result);
       const formatted = formatToolResult(result, { toolName: name });
       const text = Array.isArray(formatted?.content)
         ? formatted.content.filter((item: any) => item?.type === 'text').map((item: any) => item.text).join('\n')

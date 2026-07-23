@@ -43,9 +43,20 @@ export const TOOL_WORKFLOWS = [
     ],
     keywords: ['endpoint', 'api', 'route handler', 'handler', 'webhook', 'custom route', 'rest path', 'third-party api', 'third party api', 'external integration'],
     firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'inspect_route'],
-    inspectTools: ['inspect_route', 'get_all_routes', 'trace_metadata_usage'],
+    inspectTools: ['inspect_route', 'get_all_routes', 'list_methods', 'trace_metadata_usage'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts'],
-    writeTools: ['api_endpoint_workflow', 'create_api_endpoint', 'enable_route', 'public_route_methods', 'private_route_methods', 'ensure_route_access'],
+    writeTools: [
+      'api_endpoint_workflow',
+      'create_api_endpoint',
+      'create_method',
+      'update_method',
+      'delete_method',
+      'delete_route',
+      'enable_route',
+      'public_route_methods',
+      'private_route_methods',
+      'ensure_route_access',
+    ],
     verifyTools: ['test_rest_endpoint', 'run_admin_test'],
     avoidTools: [
       {

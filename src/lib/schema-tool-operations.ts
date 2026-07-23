@@ -155,7 +155,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         .filter(col => String(getId(col)) !== String(columnId))
   
       const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { columns });
-      await verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
+      const afterColumns = await verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
         action: 'delete',
         columnId,
       });
@@ -165,6 +165,13 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         tableId,
         columnId,
         result,
+        postcondition: {
+          verificationMethod: 'table_schema_column_ids',
+          confirmedAbsent: !afterColumns.some((column) => String(getId(column)) === String(columnId)),
+          remainingColumnIds: afterColumns
+            .filter((column) => String(getId(column)) === String(columnId))
+            .map(getId),
+        },
       });
       });
     }
@@ -201,7 +208,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         .filter(rel => String(getId(rel)) !== String(relationId))
   
       const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { relations });
-      await verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
+      const afterRelations = await verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
         action: 'delete',
         relationId,
       });
@@ -211,6 +218,13 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         tableId,
         relationId,
         result,
+        postcondition: {
+          verificationMethod: 'table_schema_relation_ids',
+          confirmedAbsent: !afterRelations.some((relation) => String(getId(relation)) === String(relationId)),
+          remainingRelationIds: afterRelations
+            .filter((relation) => String(getId(relation)) === String(relationId))
+            .map(getId),
+        },
       });
       });
     }
@@ -428,8 +442,14 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       };
     }
 
-  async function deleteOneTable({ tableId, tableName, confirm }) {
+  async function deleteOneTable({ tableId, tableName, expectedTableId, confirm }) {
       const resolvedTableId = tableId ?? resolveTableIdentifierFromMetadata(await fetchTableCatalog(ENFYRA_API_URL), tableName, 'delete_tables item tableName');
+      if (confirm && tableName && !tableId && !expectedTableId) {
+        throw new Error(`expectedTableId is required when confirming tableName "${tableName}". Pass the tableId returned by the preview.`);
+      }
+      if (confirm && expectedTableId && String(expectedTableId) !== String(resolvedTableId)) {
+        throw new Error(`Table id mismatch: resolved ${resolvedTableId}, expected ${expectedTableId}.`);
+      }
       const tableData = await fetchTableWithDetails(ENFYRA_API_URL, resolvedTableId);
       if (!confirm) {
         return {
@@ -444,11 +464,34 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${resolvedTableId}`, {
         method: 'DELETE',
       });
+      let postcondition;
+      try {
+        const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+        const remainingTables = catalog
+          .filter((table) => (
+            String(getId(table)) === String(resolvedTableId)
+            || table.name === tableData.name
+          ))
+          .map((table) => ({ id: getId(table), name: table.name }));
+        postcondition = {
+          verificationMethod: 'table_catalog_by_id_and_name',
+          confirmedAbsent: remainingTables.length === 0,
+          remainingTables,
+        };
+      } catch (error) {
+        postcondition = {
+          verificationMethod: 'table_catalog_by_id_and_name',
+          confirmedAbsent: false,
+          remainingTables: [],
+          verificationError: String((error as any)?.message || error),
+        };
+      }
       return {
         action: 'table_deleted',
         tableId: resolvedTableId,
         tableName: tableData.name,
         result,
+        postcondition,
       };
     }
 

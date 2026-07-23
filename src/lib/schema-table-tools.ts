@@ -26,9 +26,12 @@ import {
   normalizeRelationType,
   parseBulkItemsParam,
   preflightCreateTableDefinitions,
+  resolveTableIdentifierFromMetadata,
   withSchemaQueue,
 } from './table-tool-logic.js';
 import { createSchemaToolOperations } from './schema-tool-operations.js';
+import { destructivePreviewContent } from './destructive-preview.js';
+import { executeSequentialBatch } from './sequential-batch.js';
 
 export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { toolset?: string } = {}) {
   const toolset = options.toolset || 'guided';
@@ -325,9 +328,9 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
 
   server.tool(
       'delete_tables',
-      'Delete one or more table definitions. Always pass items as a native JSON array; for one table, pass one item. confirm=false previews every target; confirm=true deletes sequentially.',
+      'Delete one or more table definitions. Always pass items as a native JSON array; for one table, pass one item. confirm=false previews every target; confirm=true deletes sequentially and verifies catalog absence. Partial failures return a checkpoint and require a new preview before retry.',
       {
-        items: bulkObjectArrayParam(z, 'Table delete items').describe('Native JSON array of delete items: [{ tableId }] or [{ tableName }]. Names are resolved through live metadata before preview/delete.'),
+        items: bulkObjectArrayParam(z, 'Table delete items').describe('Native JSON array of delete items: [{ tableId }] or [{ tableName, expectedTableId? }]. Names are resolved through live metadata. When confirming a tableName preview, pass its returned tableId as expectedTableId.'),
         maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
         confirm: z.boolean().optional().default(false).describe('Required true to apply destructive deletes. Omit/false returns previews only.'),
         globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
@@ -335,21 +338,93 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
       async ({ items, maxItems, confirm, globalRulesAckKey }) => {
         const parsedItems = parseBulkItemsParam('items', items);
         assertBulkLimit('delete_tables', parsedItems, maxItems);
-        if (confirm) assertGlobalRulesAck(globalRulesAckKey);
-        const results: AnyRecord[] = [];
         for (const [index, item] of parsedItems.entries()) {
           if (!item.tableId && !item.tableName) throw new Error(`items[${index}] requires tableId or tableName.`);
-          const result = await withSchemaQueue(() => deleteOneTable({ tableId: item.tableId, tableName: item.tableName, confirm }));
-          results.push({ index, ...result });
         }
-        return jsonContent({
-          action: confirm ? 'tables_deleted' : 'delete_tables_preview',
+        if (confirm) {
+          assertGlobalRulesAck(globalRulesAckKey);
+          const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+          for (const [index, item] of parsedItems.entries()) {
+            if (!item.tableName || item.tableId) continue;
+            if (!item.expectedTableId) {
+              throw new Error(`items[${index}].expectedTableId is required when confirming tableName "${item.tableName}". Pass the tableId returned by the preview.`);
+            }
+            const resolvedTableId = resolveTableIdentifierFromMetadata(catalog, item.tableName, `items[${index}].tableName`);
+            if (String(resolvedTableId) !== String(item.expectedTableId)) {
+              throw new Error(`items[${index}] table id mismatch: resolved ${resolvedTableId}, expected ${item.expectedTableId}.`);
+            }
+          }
+        }
+        if (!confirm) {
+          const results: AnyRecord[] = [];
+          for (const [index, item] of parsedItems.entries()) {
+            const result = await withSchemaQueue(() => deleteOneTable({
+              tableId: item.tableId,
+              tableName: item.tableName,
+              expectedTableId: undefined,
+              confirm: false,
+            }));
+            results.push({ index, ...result });
+          }
+          const payload = {
+            action: 'delete_tables_preview',
+            requested: parsedItems.length,
+            sequential: true,
+            destructive: true,
+            results,
+            postcondition: {
+              verificationMethod: 'not_run_preview',
+              confirmedAbsent: false,
+              remainingTables: results.map((item) => ({
+                id: item.tableId,
+                name: item.tableName,
+              })),
+            },
+            next: 'Call delete_tables again with the same locators and confirm=true. For every tableName locator, add expectedTableId from its preview result.',
+          };
+          return destructivePreviewContent('delete_tables', payload, parsedItems.length);
+        }
+
+        const batch = await executeSequentialBatch(parsedItems, async (item, index) => ({
+          index,
+          ...await withSchemaQueue(() => deleteOneTable({
+            tableId: item.tableId,
+            tableName: item.tableName,
+            expectedTableId: item.expectedTableId,
+            confirm: true,
+          })),
+        }));
+        const results = batch.completed;
+        const postcondition = {
+          verificationMethod: 'table_catalog_by_id_and_name',
+          confirmedAbsent: batch.status === 'completed'
+            && results.every((item) => item.postcondition?.confirmedAbsent === true),
+          remainingTables: results.flatMap((item) => item.postcondition?.remainingTables || []),
+          verificationErrors: results
+            .map((item) => item.postcondition?.verificationError)
+            .filter(Boolean),
+        };
+        const unverified = postcondition.confirmedAbsent !== true;
+        const payload = {
+          action: batch.status === 'partial_failure'
+            ? 'delete_tables_partial_failure'
+            : unverified
+              ? 'delete_tables_unverified'
+              : 'tables_deleted',
           requested: parsedItems.length,
           sequential: true,
           destructive: true,
           results,
-          next: confirm ? undefined : 'Call delete_tables again with the same items and confirm=true to delete sequentially.',
-        });
+          postcondition,
+          ...(batch.status === 'partial_failure' ? {
+            status: 'partial_failure',
+            failure: batch.failure,
+            remainingIndexes: batch.remainingIndexes,
+            requiresNewPreview: true,
+          } : {}),
+        };
+        const result = jsonContent(payload);
+        return batch.status === 'partial_failure' || unverified ? { ...result, isError: true } : result;
       }
     );
 }

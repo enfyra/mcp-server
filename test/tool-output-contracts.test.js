@@ -97,6 +97,28 @@ test('record read and delete output contracts require deterministic receipts', (
     responseFormat: 'json-v1',
     action: 'deleted_records',
   }).success, false);
+
+  for (const toolName of ['delete_tables', 'delete_columns', 'delete_relations', 'delete_method', 'delete_route']) {
+    assert.equal(validateStructuredToolOutput(toolName, {
+      responseFormat: 'json-v1',
+      action: `${toolName}_preview`,
+      previewReceipt: {
+        version: 1,
+        valid: true,
+        toolName,
+        action: `${toolName}_preview`,
+        targetCount: 1,
+      },
+      postcondition: {
+        verificationMethod: 'not_run_preview',
+        confirmedAbsent: false,
+      },
+    }).success, true, `${toolName} preview receipt should validate`);
+    assert.equal(validateStructuredToolOutput(toolName, {
+      responseFormat: 'json-v1',
+      action: `${toolName}_deleted`,
+    }).success, false, `${toolName} must include a postcondition`);
+  }
 });
 
 test('OAuth provider output contract requires a callback handoff and runtime verification', () => {

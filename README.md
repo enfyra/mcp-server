@@ -96,12 +96,8 @@ npx @enfyra/mcp-server@latest config [options]
 
 | Variable | Description | Default |
 |---|---|---|
-| `ENFYRA_APP_URL` | App/admin URL used by setup | `http://localhost:3000` |
-| `ENFYRA_API_URL` | Runtime API base written into MCP config | Derived from the app URL |
+| `ENFYRA_API_URL` | Runtime API base written into MCP config | Required |
 | `ENFYRA_API_TOKEN` | Programmatic token from the Enfyra admin UI `/me` | Required |
-| `ENFYRA_MCP_TOOLSET` | `guided` for the normal curated toolset or `full` for low-level debugging tools | `guided` |
-| `ENFYRA_MCP_PROFILE` | Guided domain surface: `all`, `extension`, `schema`, `runtime`, or `operations`; ignored by `full` | `all` |
-| `ENFYRA_MCP_DYNAMIC_TOOLS` | `on` starts `guided/all` with a compact router and exposes exact tools after `select_enfyra_workflow`; `off` exposes the complete guided manifest immediately and is written automatically for Codex configs | `on` for `guided/all` |
 
 The API token is exchanged for a short-lived access token at runtime. It is not sent directly as a Bearer token.
 

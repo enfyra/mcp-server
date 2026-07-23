@@ -37,6 +37,7 @@ import {
 import {
   filterQuery,
 } from './platform-extension-source.js';
+import { executeSequentialBatch } from './sequential-batch.js';
 
 export function unwrapData(result) {
   return Array.isArray(result?.data) ? result.data : [];
@@ -155,7 +156,7 @@ export async function reloadRoutes(apiUrl) {
 export async function resolveRoute(apiUrl, { path, routeId }) {
   if (!path && !routeId) throw new Error('Provide path or routeId.');
   if (path && routeId) throw new Error('Provide path or routeId, not both.');
-  const routes = await fetchAll(apiUrl, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,availableMethods.*,publicMethods.*,mainTable.name');
+  const routes = await fetchAll(apiUrl, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,isSystem,availableMethods.*,publicMethods.*,mainTable.name');
   const normalizedPath = path ? normalizeRestPath(path) : null;
   const route = routes.find((item) => (routeId ? sameId(getId(item), routeId) : item.path === normalizedPath));
   if (!route) throw new Error(`Route not found: ${routeId || normalizedPath}`);
@@ -278,19 +279,62 @@ function summarizeRouteDependencies(dependencies) {
   };
 }
 
-async function deleteRows(apiUrl, tableName, rows) {
-  const deleted = [];
-  for (const row of rows) {
-    const id = getId(row);
-    if (id === null || id === undefined) continue;
-    await fetchAPI(apiUrl, `/${tableName}/${encodeURIComponent(String(id))}`, { method: 'DELETE' });
-    deleted.push(id);
+function summarizeDeletedRouteSteps(completed) {
+  const deleted = {
+    handlers: [],
+    permissions: [],
+    preHooks: [],
+    postHooks: [],
+    guards: [],
+    route: null,
+  };
+  for (const item of completed) {
+    if (item.category === 'route') {
+      deleted.route = item.id;
+    } else {
+      deleted[item.category].push(item.id);
+    }
   }
   return deleted;
 }
 
-export async function deleteRoute(apiUrl, { path, routeId, expectedPath, confirm, globalRulesAckKey }) {
+async function verifyRouteAbsent(apiUrl, routeId) {
+  try {
+    const { route } = await resolveRoute(apiUrl, { path: undefined, routeId });
+    return {
+      verificationMethod: 'route_read_by_id',
+      confirmedAbsent: false,
+      remainingRoutes: [{ id: getId(route), path: route.path }],
+    };
+  } catch (error) {
+    const message = String(error?.message || error);
+    if (message.startsWith('Route not found:')) {
+      return {
+        verificationMethod: 'route_read_by_id',
+        confirmedAbsent: true,
+        remainingRoutes: [],
+      };
+    }
+    return {
+      verificationMethod: 'route_read_by_id',
+      confirmedAbsent: false,
+      remainingRoutes: [],
+      verificationError: message,
+    };
+  }
+}
+
+export async function deleteRoute(apiUrl, { path, routeId, expectedRouteId, expectedPath, confirm, globalRulesAckKey }) {
   const { route } = await resolveRoute(apiUrl, { path, routeId });
+  if (confirm && (expectedRouteId === undefined || expectedRouteId === null)) {
+    throw new Error('expectedRouteId is required when confirm=true. Pass the exact route id returned by the preview.');
+  }
+  if (confirm && !expectedPath) {
+    throw new Error('expectedPath is required when confirm=true. Pass the exact route path returned by the preview.');
+  }
+  if (expectedRouteId !== undefined && expectedRouteId !== null && !sameId(getId(route), expectedRouteId)) {
+    throw new Error(`Route id mismatch: resolved ${getId(route)}, expected ${expectedRouteId}.`);
+  }
   if (expectedPath && route.path !== normalizeRestPath(expectedPath)) {
     throw new Error(`Route path mismatch: resolved ${route.path}, expected ${normalizeRestPath(expectedPath)}.`);
   }
@@ -298,7 +342,12 @@ export async function deleteRoute(apiUrl, { path, routeId, expectedPath, confirm
   const dependencies = await fetchRouteDependencies(apiUrl, getId(route));
   const dependencySummary = summarizeRouteDependencies(dependencies);
   const preview = {
-    route: { id: getId(route), path: route.path, isEnabled: route?.isEnabled !== false },
+    route: {
+      id: getId(route),
+      path: route.path,
+      isEnabled: route?.isEnabled !== false,
+      isSystem: route?.isSystem === true,
+    },
     dependencies: dependencySummary,
   };
 
@@ -306,31 +355,60 @@ export async function deleteRoute(apiUrl, { path, routeId, expectedPath, confirm
     return {
       action: 'delete_route_preview',
       ...preview,
-      next: 'Call delete_route again with confirm=true and expectedPath set to this route path to delete the route and related handlers/hooks/permissions/guards.',
+      postcondition: {
+        verificationMethod: 'not_run_preview',
+        confirmedAbsent: false,
+        remainingRoutes: [{ id: getId(route), path: route.path }],
+      },
+      next: 'Call delete_route again with the same locator, confirm=true, expectedRouteId set to this route id, and expectedPath set to this route path.',
     };
   }
   assertGlobalRulesAck(globalRulesAckKey);
+  if (route?.isSystem === true) {
+    throw new Error(`Route ${route.path} is system-owned and cannot be deleted.`);
+  }
 
-  await deleteRows(apiUrl, 'enfyra_route_handler', dependencies.handlers);
-  await deleteRows(apiUrl, 'enfyra_pre_hook', dependencies.preHooks);
-  await deleteRows(apiUrl, 'enfyra_post_hook', dependencies.postHooks);
-  await deleteRows(apiUrl, 'enfyra_guard', dependencies.guards);
-  await deleteRows(apiUrl, 'enfyra_route_permission', dependencies.permissions);
-  const result = await fetchAPI(apiUrl, `/enfyra_route/${encodeURIComponent(String(getId(route)))}`, { method: 'DELETE' });
+  const steps = [
+    ...dependencies.handlers.map((row) => ({ tableName: 'enfyra_route_handler', category: 'handlers', id: getId(row) })),
+    ...dependencies.preHooks.map((row) => ({ tableName: 'enfyra_pre_hook', category: 'preHooks', id: getId(row) })),
+    ...dependencies.postHooks.map((row) => ({ tableName: 'enfyra_post_hook', category: 'postHooks', id: getId(row) })),
+    ...dependencies.guards.map((row) => ({ tableName: 'enfyra_guard', category: 'guards', id: getId(row) })),
+    ...dependencies.permissions.map((row) => ({ tableName: 'enfyra_route_permission', category: 'permissions', id: getId(row) })),
+    { tableName: 'enfyra_route', category: 'route', id: getId(route) },
+  ].filter((step) => step.id !== null && step.id !== undefined);
+  const batch = await executeSequentialBatch(steps, async (step) => {
+    const result = await fetchAPI(apiUrl, `/${step.tableName}/${encodeURIComponent(String(step.id))}`, { method: 'DELETE' });
+    return {
+      category: step.category,
+      id: step.id,
+      statusCode: result?.statusCode,
+      success: result?.success,
+    };
+  });
+  const deleted = summarizeDeletedRouteSteps(batch.completed);
+  const postcondition = await verifyRouteAbsent(apiUrl, getId(route));
+  if (batch.status === 'partial_failure') {
+    return {
+      action: 'delete_route_partial_failure',
+      status: 'partial_failure',
+      ...preview,
+      deleted,
+      failure: {
+        ...batch.failure,
+        target: steps[batch.failure.index],
+      },
+      remainingIndexes: batch.remainingIndexes,
+      remainingTargets: batch.remainingIndexes.map((index) => steps[index]),
+      requiresNewPreview: true,
+      postcondition,
+    };
+  }
   const routeReload = await reloadRoutes(apiUrl);
-
   return {
     action: 'route_deleted',
     ...preview,
-    deleted: {
-      handlers: dependencies.handlers.map(getId).filter((id) => id !== null && id !== undefined),
-      permissions: dependencies.permissions.map(getId).filter((id) => id !== null && id !== undefined),
-      preHooks: dependencies.preHooks.map(getId).filter((id) => id !== null && id !== undefined),
-      postHooks: dependencies.postHooks.map(getId).filter((id) => id !== null && id !== undefined),
-      guards: dependencies.guards.map(getId).filter((id) => id !== null && id !== undefined),
-      route: getId(route),
-    },
-    result,
+    deleted,
+    postcondition,
     routeReload,
   };
 }

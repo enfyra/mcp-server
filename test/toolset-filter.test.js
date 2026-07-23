@@ -9,7 +9,14 @@ import {
   normalizeMcpToolset,
   summarizeToolsetForInstructions,
 } from '../dist/lib/toolset-filter.js';
-import { WORKFLOW_SURFACES, WORKFLOW_SURFACES_BY_PROFILE, discoverWorkflowRoutes, workflowToolNames } from '../dist/lib/tool-routing.js';
+import { isMutationTool } from '../dist/lib/tool-contracts.js';
+import {
+  WORKFLOW_SURFACES,
+  WORKFLOW_SURFACES_BY_PROFILE,
+  discoverWorkflowRoutes,
+  workflowSurfaceForTool,
+  workflowToolNames,
+} from '../dist/lib/tool-routing.js';
 
 function registeredToolNames() {
   return registeredToolNamesFromSource();
@@ -40,8 +47,9 @@ test('normalizes MCP domain profile to all by default', () => {
   assert.equal(normalizeMcpProfile('operations'), 'operations');
 });
 
-test('dynamic tool packs default on only for guided/all and keep profile fallback', () => {
-  assert.equal(normalizeDynamicToolPacks(undefined, 'guided', 'all'), true);
+test('dynamic tool packs are explicit opt-in for guided/all and keep profile fallback', () => {
+  assert.equal(normalizeDynamicToolPacks(undefined, 'guided', 'all'), false);
+  assert.equal(normalizeDynamicToolPacks('', 'guided', 'all'), false);
   assert.equal(normalizeDynamicToolPacks('off', 'guided', 'all'), false);
   assert.equal(normalizeDynamicToolPacks('on', 'guided', 'all'), true);
   assert.equal(normalizeDynamicToolPacks(undefined, 'guided', 'extension'), false);
@@ -237,6 +245,18 @@ test('every workflow pack includes its direct primary and verification tools', (
       }
     }
   }
+});
+
+test('every guided mutation belongs to at least one dynamic workflow pack', () => {
+  const packedTools = new Set(WORKFLOW_SURFACES.flatMap(workflowToolNames));
+  const orphanMutations = [...registeredToolNames()]
+    .filter((toolName) => isToolVisibleInToolset(toolName, 'guided'))
+    .filter(isMutationTool)
+    .filter((toolName) => !packedTools.has(toolName));
+
+  assert.deepEqual(orphanMutations, []);
+  assert.equal(workflowSurfaceForTool('delete_route'), 'api-endpoint');
+  assert.equal(workflowSurfaceForTool('delete_method'), 'api-endpoint');
 });
 
 test('extension workflow pack supports safe lifecycle cleanup', () => {

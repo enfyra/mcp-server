@@ -543,7 +543,8 @@ test('delete_tables accepts tableName or tableId and schema rules mention full-b
   const tableTools = readSchemaSource();
   const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
 
-  assert.match(tableTools, /Native JSON array of delete items: \[\{ tableId \}\] or \[\{ tableName \}\]/);
+  assert.match(tableTools, /Native JSON array of delete items: \[\{ tableId \}\] or \[\{ tableName, expectedTableId\? \}\]/);
+  assert.match(tableTools, /expectedTableId is required when confirming tableName/);
   assert.match(tableTools, /items\[\$\{index\}\] requires tableId or tableName/);
   assert.match(requiredKnowledge, /create_tables preflights all items before posting tables/);
 });

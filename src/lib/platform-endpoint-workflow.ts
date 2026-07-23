@@ -430,7 +430,7 @@ export async function runApiEndpointWorkflow(apiUrl, opts) {
     cleanupHints: latestState.endpoint.routeId
       ? [
         `Use delete_route({ routeId: ${JSON.stringify(latestState.endpoint.routeId)}, confirm: false }) to preview route-owned handlers, hooks, guards, and permissions before cleanup.`,
-        `Then call delete_route({ routeId: ${JSON.stringify(latestState.endpoint.routeId)}, expectedPath: ${JSON.stringify(latestState.endpoint.path)}, confirm: true }) when the route contract is no longer needed.`,
+        `Then call delete_route({ routeId: ${JSON.stringify(latestState.endpoint.routeId)}, expectedRouteId: ${JSON.stringify(latestState.endpoint.routeId)}, expectedPath: ${JSON.stringify(latestState.endpoint.path)}, confirm: true }) when the route contract is no longer needed.`,
       ]
       : [],
   };

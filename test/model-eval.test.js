@@ -58,6 +58,23 @@ test('model eval keeps recovered retries and extra calls advisory after successf
   assert.equal(score.checks.find((check) => check.key === 'tool_errors').blocking, false);
 });
 
+test('model eval blocks outcome claims after an unverified mutation error', () => {
+  const scenario = MODEL_EVAL_SCENARIOS.find((item) => item.id === 'custom-endpoint-contract');
+  const events = [
+    { tool: 'select_enfyra_workflow', arguments: { surface: 'api-endpoint' } },
+    { tool: 'get_enfyra_api_context' },
+    { tool: 'get_enfyra_required_knowledge' },
+    { tool: 'discover_script_contexts' },
+    { tool: 'api_endpoint_workflow' },
+    { tool: 'test_rest_endpoint' },
+    { tool: 'enable_route', isError: true },
+  ];
+  const score = scoreModelEvalRun({ scenarioId: scenario.id, model: 'fixture', events }, scenario);
+
+  assert.equal(score.checks.find((check) => check.key === 'failed_mutation_verification').passed, false);
+  assert.equal(score.recommended, false);
+});
+
 test('model eval rejects generic mutation execution and missing destructive preview', () => {
   const scenario = MODEL_EVAL_SCENARIOS.find((item) => item.id === 'destructive-preview-and-cleanup');
   const score = scoreModelEvalRun({
@@ -78,6 +95,30 @@ test('model eval rejects generic mutation execution and missing destructive prev
   assert.equal(score.checks.find((check) => check.key === 'destructive_preview').passed, false);
 });
 
+test('model eval rejects a destructive preview for different targets', () => {
+  const scenario = MODEL_EVAL_SCENARIOS.find((item) => item.id === 'destructive-preview-and-cleanup');
+  const score = scoreModelEvalRun({
+    scenarioId: scenario.id,
+    model: 'fixture',
+    events: [
+      { tool: 'select_enfyra_workflow', arguments: { surface: 'schema' } },
+      { tool: 'get_enfyra_api_context' },
+      { tool: 'get_enfyra_required_knowledge' },
+      { tool: 'inspect_table' },
+      {
+        tool: 'delete_tables',
+        arguments: { items: [{ tableId: 17 }], confirm: false },
+        result: { previewReceipt: { valid: true, toolName: 'delete_tables' } },
+      },
+      { tool: 'delete_tables', arguments: { items: [{ tableId: 18 }], confirm: true } },
+      { tool: 'get_all_tables' },
+    ],
+  }, scenario);
+
+  assert.equal(score.checks.find((check) => check.key === 'destructive_preview').passed, false);
+  assert.equal(score.recommended, false);
+});
+
 test('temporary extension lifecycle requires cleanup verification', () => {
   const scenario = MODEL_EVAL_SCENARIOS.find((item) => item.id === 'temporary-extension-lifecycle');
   const events = [
@@ -86,7 +127,11 @@ test('temporary extension lifecycle requires cleanup verification', () => {
     { tool: 'select_enfyra_workflow' },
     { tool: 'get_extension_theme_contract' },
     { tool: 'ensure_widget_extension' },
-    { tool: 'delete_records', arguments: { confirm: false } },
+    {
+      tool: 'delete_records',
+      arguments: { confirm: false },
+      result: { previewReceipt: { valid: true, toolName: 'delete_records' } },
+    },
     { tool: 'verify_extension_runtime' },
     { tool: 'delete_records', arguments: { confirm: true } },
     { tool: 'find_one_record', result: { data: null } },
@@ -120,7 +165,11 @@ test('temporary extension lifecycle accepts verified ensure output without a red
       tool: 'ensure_widget_extension',
       result: { extension: { verification: { valid: true } } },
     },
-    { tool: 'delete_records', arguments: { confirm: false } },
+    {
+      tool: 'delete_records',
+      arguments: { confirm: false },
+      result: { previewReceipt: { valid: true, toolName: 'delete_records' } },
+    },
     { tool: 'delete_records', arguments: { confirm: true } },
     { tool: 'find_one_record', result: { data: null } },
   ];
@@ -140,7 +189,11 @@ test('temporary extension lifecycle accepts confirmed delete postcondition witho
       tool: 'ensure_widget_extension',
       result: { extension: { verification: { valid: true } } },
     },
-    { tool: 'delete_records', arguments: { confirm: false } },
+    {
+      tool: 'delete_records',
+      arguments: { confirm: false },
+      result: { previewReceipt: { valid: true, toolName: 'delete_records' } },
+    },
     {
       tool: 'delete_records',
       arguments: { confirm: true },
@@ -163,7 +216,11 @@ test('temporary extension lifecycle rejects a non-empty cleanup search result', 
       tool: 'ensure_widget_extension',
       result: { extension: { verification: { valid: true } } },
     },
-    { tool: 'delete_records', arguments: { confirm: false } },
+    {
+      tool: 'delete_records',
+      arguments: { confirm: false },
+      result: { previewReceipt: { valid: true, toolName: 'delete_records' } },
+    },
     { tool: 'delete_records', arguments: { confirm: true } },
     { tool: 'search_admin_extensions', result: { resultCount: 26 } },
   ];

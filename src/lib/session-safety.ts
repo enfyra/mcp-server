@@ -1,9 +1,13 @@
 import { isDestructiveTool, isMutationTool } from './tool-contracts.js';
+import type { DestructivePreviewReceipt, ToolResult } from './types.js';
 
 type ToolInput = Record<string, unknown>;
 const PREVIEW_IGNORED_KEYS = new Set([
   'confirm',
+  'expectedId',
   'expectedPath',
+  'expectedRouteId',
+  'expectedTableId',
   'globalRulesAckKey',
   'maxItems',
   'skipNotFound',
@@ -35,6 +39,20 @@ function destructivePreviewKey(toolName: string, input: ToolInput) {
   return `${toolName}:${JSON.stringify(normalizeFingerprintValue(input))}`;
 }
 
+export function destructiveToolInputsMatch(left: ToolInput = {}, right: ToolInput = {}) {
+  return JSON.stringify(normalizeFingerprintValue(left)) === JSON.stringify(normalizeFingerprintValue(right));
+}
+
+function hasValidDestructivePreviewReceipt(toolName: string, result: ToolResult | undefined) {
+  if (!result || result.isError === true) return false;
+  const receipt = result._meta?.enfyraDestructivePreview as DestructivePreviewReceipt | undefined;
+  return receipt?.version === 1
+    && receipt.valid === true
+    && receipt.toolName === toolName
+    && Number.isInteger(receipt.targetCount)
+    && receipt.targetCount > 0;
+}
+
 export function resetMcpSafetySession() {
   targetConfirmed = false;
   destructivePreviews.clear();
@@ -56,19 +74,17 @@ export function beforeMcpToolExecution(toolName: string, input: ToolInput = {}) 
     if (!destructivePreviews.has(key)) {
       throw new Error(`Missing matching destructive preview for ${toolName}. Call the same tool first with confirm=false, inspect the preview, then retry with confirm=true in this MCP process session.`);
     }
+    destructivePreviews.delete(key);
   }
 }
 
-export function afterMcpToolExecution(toolName: string, input: ToolInput = {}) {
+export function afterMcpToolExecution(toolName: string, input: ToolInput = {}, result?: ToolResult) {
   if (toolName === 'get_enfyra_api_context') {
+    if (result?.isError === true) return;
     targetConfirmed = true;
     return;
   }
-  if (!isDestructiveTool(toolName)) return;
-  const key = destructivePreviewKey(toolName, input);
-  if (input.confirm === true) {
-    destructivePreviews.delete(key);
-    return;
-  }
-  destructivePreviews.add(key);
+  if (!isDestructiveTool(toolName) || input.confirm === true) return;
+  if (!hasValidDestructivePreviewReceipt(toolName, result)) return;
+  destructivePreviews.add(destructivePreviewKey(toolName, input));
 }

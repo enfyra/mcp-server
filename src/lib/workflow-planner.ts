@@ -188,6 +188,10 @@ export function workflowToolNames(surface: WorkflowSurface) {
   ])];
 }
 
+export function workflowSurfaceForTool(toolName: string): WorkflowSurface | null {
+  return WORKFLOW_SURFACES.find((surface) => workflowToolNames(surface).includes(toolName)) ?? null;
+}
+
 function advancedToolsFor(workflow: ToolWorkflow) {
   const primaryTools = new Set(primaryPathFor(workflow).flatMap((item) => splitCompositeToolName(item.tool)));
   return [...new Set([
@@ -350,4 +354,3 @@ export function discoverWorkflowRoutes({
     ],
   };
 }
-

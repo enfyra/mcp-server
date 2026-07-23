@@ -156,7 +156,7 @@ export function normalizeDynamicToolPacks(value: unknown, toolset: McpToolset, p
   const raw = String(value ?? '').trim().toLowerCase();
   if (['0', 'false', 'off', 'no'].includes(raw)) return false;
   if (['1', 'true', 'on', 'yes'].includes(raw)) return true;
-  return true;
+  return false;
 }
 
 export function isToolVisibleInToolset(toolName: string, toolset: McpToolset, profile: McpProfile = 'all'): boolean {
@@ -235,7 +235,7 @@ export function summarizeToolsetForInstructions(toolset: McpToolset, profile: Mc
     return [
       `Toolset mode: guided, domain profile: ${profile}. Only normal ${profile} workflow tools and shared discovery/context tools are visible.`,
       'Use this focused surface when the task belongs to one domain and lower context overhead is important.',
-      'Use search_enfyra_tools for hidden long-tail read-only tools; hidden mutations require the full toolset.',
+      'Use search_enfyra_tools for hidden long-tail read-only tools. Normal guided mutations remain direct; only low-level escape hatches require the full toolset.',
       'Set ENFYRA_MCP_PROFILE=all for the complete guided surface, or ENFYRA_MCP_TOOLSET=full only for expert debugging or compatibility work.',
     ].join(' ');
   }
@@ -250,7 +250,7 @@ export function summarizeToolsetForInstructions(toolset: McpToolset, profile: Mc
   return [
     'Toolset mode: guided, domain profile: all. Dynamic workflow packs start with a compact routing surface.',
     'Call select_enfyra_workflow with the task surface to expose the exact direct workflow tools for this session.',
-    'Use search_enfyra_tools for hidden long-tail read-only tools; hidden mutations require the full toolset.',
+    'Use search_enfyra_tools for hidden long-tail read-only tools. Hidden guided mutations route through their owning workflow; only low-level escape hatches require the full toolset.',
     'Set ENFYRA_MCP_DYNAMIC_TOOLS=off or use ENFYRA_MCP_PROFILE=extension, schema, runtime, or operations as a static fallback for hosts that do not refresh tools/list_changed. Low-level escape hatches require ENFYRA_MCP_TOOLSET=full.',
   ].join(' ');
 }

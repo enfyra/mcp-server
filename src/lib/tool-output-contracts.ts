@@ -93,6 +93,21 @@ const deleteRecordsOutputSchema = {
   }).passthrough(),
 } satisfies ZodRawShape;
 
+const destructiveOutputSchema = {
+  ...actionOutputSchema,
+  previewReceipt: z.object({
+    version: z.literal(1),
+    valid: z.literal(true),
+    toolName: z.string(),
+    action: z.string(),
+    targetCount: z.number().int().positive(),
+  }).passthrough().optional(),
+  postcondition: z.object({
+    verificationMethod: z.string(),
+    confirmedAbsent: z.boolean(),
+  }).passthrough(),
+} satisfies ZodRawShape;
+
 const oauthProviderOutputSchema = {
   ...actionOutputSchema,
   action: z.literal('oauth_provider_enfyra_config_saved'),
@@ -177,6 +192,9 @@ export function getToolOutputSchema(toolName: string): ZodRawShape | undefined {
   if (toolName === 'get_enfyra_api_context') return apiContextOutputSchema;
   if (toolName === 'query_table') return queryTableOutputSchema;
   if (toolName === 'delete_records') return deleteRecordsOutputSchema;
+  if (['delete_tables', 'delete_columns', 'delete_relations', 'delete_method', 'delete_route'].includes(toolName)) {
+    return destructiveOutputSchema;
+  }
   if (toolName === 'setup_oauth_provider') return oauthProviderOutputSchema;
   if (CORE_ACTION_OUTPUT_TOOLS.has(toolName)) return actionOutputSchema;
   if (BASE_OUTPUT_TOOLS.has(toolName)) return baseOutputSchema;

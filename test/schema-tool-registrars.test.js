@@ -204,6 +204,133 @@ test('create_relations resolves table names before schema patch', async () => {
   }
 });
 
+test('delete_tables returns a valid preview receipt and verifies catalog absence', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let deleted = false;
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    }
+    if (urlText.includes('/enfyra_table?')) {
+      return jsonResponse({ data: deleted ? [] : [{ id: 41, name: 'temporary_notes' }] });
+    }
+    if (urlText.endsWith('/metadata/temporary_notes')) {
+      return jsonResponse({ data: {
+        id: 41,
+        name: 'temporary_notes',
+        columns: [{ id: 1, name: 'title', type: 'varchar' }],
+        relations: [],
+      } });
+    }
+    if (urlText.endsWith('/enfyra_table/41') && init.method === 'DELETE') {
+      deleted = true;
+      return jsonResponse({ success: true, statusCode: 200 });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    const preview = await server.get('delete_tables').handler({
+      items: [{ tableName: 'temporary_notes' }],
+      confirm: false,
+    });
+    assert.equal(preview._meta.enfyraDestructivePreview.valid, true);
+    assert.equal(preview.structuredContent.previewReceipt.toolName, 'delete_tables');
+
+    await assert.rejects(
+      () => server.get('delete_tables').handler({
+        items: [{ tableName: 'temporary_notes' }],
+        confirm: true,
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      }),
+      /expectedTableId is required/,
+    );
+    assert.equal(deleted, false);
+
+    const result = await server.get('delete_tables').handler({
+      items: [{ tableName: 'temporary_notes', expectedTableId: 41 }],
+      confirm: true,
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(result.isError, undefined);
+    assert.equal(payload.action, 'tables_deleted');
+    assert.equal(payload.postcondition.confirmedAbsent, true);
+    assert.deepEqual(payload.postcondition.remainingTables, []);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('delete_tables reports completed and remaining work after a partial batch failure', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  const tables = new Map([
+    [51, 'first_temp'],
+    [52, 'second_temp'],
+  ]);
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    }
+    if (urlText.includes('/enfyra_table?')) {
+      return jsonResponse({ data: [...tables].map(([id, name]) => ({ id, name })) });
+    }
+    for (const [id, name] of tables) {
+      if (urlText.endsWith(`/metadata/${name}`)) {
+        return jsonResponse({ data: {
+          id,
+          name,
+          columns: [{ id: id * 10, name: 'title', type: 'varchar' }],
+          relations: [],
+        } });
+      }
+    }
+    if (urlText.endsWith('/enfyra_table/51') && init.method === 'DELETE') {
+      tables.delete(51);
+      return jsonResponse({ success: true, statusCode: 200 });
+    }
+    if (urlText.endsWith('/enfyra_table/52') && init.method === 'DELETE') {
+      return jsonResponse({ message: 'conflict' }, 409);
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    const result = await server.get('delete_tables').handler({
+      items: [{ tableId: 51 }, { tableId: 52 }],
+      confirm: true,
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+    const payload = JSON.parse(result.content[0].text);
+
+    assert.equal(result.isError, true);
+    assert.equal(payload.action, 'delete_tables_partial_failure');
+    assert.equal(payload.results.length, 1);
+    assert.equal(payload.failure.index, 1);
+    assert.deepEqual(payload.remainingIndexes, []);
+    assert.equal(payload.requiresNewPreview, true);
+    assert.equal(payload.postcondition.confirmedAbsent, false);
+    assert.equal(tables.has(51), false);
+    assert.equal(tables.has(52), true);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
 test('create_tables accepts tables alias and defers relation constraints until FK columns exist', async () => {
   const originalFetch = global.fetch;
   const server = createToolHarness();

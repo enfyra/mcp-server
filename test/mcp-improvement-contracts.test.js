@@ -89,13 +89,73 @@ test('destructive confirmation requires a matching successful preview', () => {
     /preview/i,
   );
   beforeMcpToolExecution('delete_records', preview);
-  afterMcpToolExecution('delete_records', preview);
+  afterMcpToolExecution('delete_records', preview, {
+    content: [{ type: 'text', text: '{"action":"delete_records_preview"}' }],
+    _meta: {
+      enfyraDestructivePreview: {
+        version: 1,
+        valid: true,
+        toolName: 'delete_records',
+        action: 'delete_records_preview',
+        targetCount: 1,
+      },
+    },
+  });
   assert.doesNotThrow(() => beforeMcpToolExecution('delete_records', confirmation));
-  afterMcpToolExecution('delete_records', confirmation);
   assert.throws(
     () => beforeMcpToolExecution('delete_records', confirmation),
     /preview/i,
   );
+
+  resetMcpSafetySession();
+});
+
+test('failed or unreceipted destructive previews never unlock confirmation', () => {
+  resetMcpSafetySession();
+  afterMcpToolExecution('get_enfyra_api_context', {}, {
+    content: [{ type: 'text', text: '{}' }],
+  });
+  const preview = { items: [{ tableId: 7 }], confirm: false };
+  const confirmation = { items: [{ tableId: '7' }], confirm: true };
+
+  afterMcpToolExecution('delete_tables', preview, {
+    content: [{ type: 'text', text: '{"action":"delete_tables_preview"}' }],
+  });
+  assert.throws(() => beforeMcpToolExecution('delete_tables', confirmation), /preview/i);
+
+  afterMcpToolExecution('delete_tables', preview, {
+    isError: true,
+    content: [{ type: 'text', text: '{"action":"delete_tables_preview"}' }],
+    _meta: { enfyraDestructivePreview: { valid: true } },
+  });
+  assert.throws(() => beforeMcpToolExecution('delete_tables', confirmation), /preview/i);
+
+  resetMcpSafetySession();
+});
+
+test('resolved identity checks are confirmation-only fingerprint fields', () => {
+  resetMcpSafetySession();
+  afterMcpToolExecution('get_enfyra_api_context', {});
+  const preview = { path: '/temporary', confirm: false };
+  afterMcpToolExecution('delete_route', preview, {
+    content: [{ type: 'text', text: '{"action":"delete_route_preview"}' }],
+    _meta: {
+      enfyraDestructivePreview: {
+        version: 1,
+        valid: true,
+        toolName: 'delete_route',
+        action: 'delete_route_preview',
+        targetCount: 1,
+      },
+    },
+  });
+
+  assert.doesNotThrow(() => beforeMcpToolExecution('delete_route', {
+    path: '/temporary',
+    expectedRouteId: 7,
+    expectedPath: '/temporary',
+    confirm: true,
+  }));
 
   resetMcpSafetySession();
 });
@@ -189,6 +249,8 @@ test('startup instructions remain a compact router because hosts may repeat them
   assert.match(instructions, /Third-app OAuth: connect first/);
   assert.match(instructions, /ask only for them and stop/);
   assert.match(instructions, /Show only the callback returned by `setup_oauth_provider`/);
+  assert.match(instructions, /partial changes may exist/);
+  assert.match(instructions, /only from a successful receipt or explicit verification/);
   assert.doesNotMatch(instructions, /### Operating Model/);
 });
 

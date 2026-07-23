@@ -22,7 +22,7 @@ function parseToolResult(result) {
   return JSON.parse(text);
 }
 
-async function connect(toolset, profile) {
+async function connect(toolset, profile, { dynamic = false } = {}) {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [serverEntry],
@@ -31,6 +31,7 @@ async function connect(toolset, profile) {
       ...rootEnv,
       ENFYRA_MCP_TOOLSET: toolset,
       ENFYRA_MCP_PROFILE: profile,
+      ENFYRA_MCP_DYNAMIC_TOOLS: dynamic ? 'on' : 'off',
       ENFYRA_MCP_USAGE_DISABLE: '1',
     },
     stderr: 'inherit',
@@ -93,7 +94,7 @@ async function main() {
     await fullConnection.transport.close();
   }
 
-  const dynamicConnection = await connect('guided', 'all');
+  const dynamicConnection = await connect('guided', 'all', { dynamic: true });
   const dynamicPacks = {};
   try {
     let listChangedNotifications = 0;

@@ -7,6 +7,16 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
 const BASELINES = [
   {
+    name: 'guided-default',
+    env: {
+      ENFYRA_MCP_TOOLSET: 'guided',
+      ENFYRA_MCP_PROFILE: 'all',
+    },
+    unsetDynamic: true,
+    count: 84,
+    hash: 'a08d7919a08303c7eeb16876312511380fb197ebca1ae1ef90b0553a06e9cabe',
+  },
+  {
     name: 'guided-dynamic',
     env: {
       ENFYRA_MCP_TOOLSET: 'guided',
@@ -14,7 +24,7 @@ const BASELINES = [
       ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
     },
     count: 13,
-    hash: 'a309d4289cb5d8559f61b058c8492ecdbc6b84236e79411b4712a613d90c328b',
+    hash: '7cf886a207311a214e2be435358574f9f44b1d9719b319455172991c5b384da0',
   },
   {
     name: 'guided-static',
@@ -24,7 +34,7 @@ const BASELINES = [
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
     count: 84,
-    hash: 'd8c13cc29d91f143fb82b79db9a27d4ef7f06c121825a6594e61d9436eb915b7',
+    hash: 'a08d7919a08303c7eeb16876312511380fb197ebca1ae1ef90b0553a06e9cabe',
   },
   {
     name: 'full',
@@ -34,15 +44,17 @@ const BASELINES = [
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
     count: 132,
-    hash: '7275e319cebf5255c7949d7d0c57534b9663707f878c7aacbf46a52e763e0e7c',
+    hash: '4adb33e277df3b116699e7882a605e395cfe616d2a66f67f27816d7729471e9b',
   },
 ];
 
 async function readManifest(baseline) {
+  const env = { ...process.env, ...baseline.env };
+  if (baseline.unsetDynamic) delete env.ENFYRA_MCP_DYNAMIC_TOOLS;
   const transport = new StdioClientTransport({
     command: 'node',
     args: ['dist/index.js'],
-    env: { ...process.env, ...baseline.env },
+    env,
     stderr: 'pipe',
   });
   const client = new Client({ name: 'tool-manifest-parity', version: '1.0.0' });

@@ -132,6 +132,8 @@ const GLOBAL_RULES_SECTIONS = [
       'Call get_enfyra_api_context before the first mutation in each MCP process and verify the connected API base. The MCP rejects writes until this target confirmation succeeds.',
       'Prefer business operation tools over generic CRUD when a specific tool exists.',
       'Destructive operations are preview-first. A confirmed delete must match a successful preview from the same MCP process session; pass confirm=true only after inspecting that preview and receiving explicit user approval.',
+      'Repeat resolved identity fields from destructive previews on confirmation: expectedRouteId plus expectedPath for routes, expectedId for methods, and expectedTableId when a table was located by name.',
+      'A mutation error does not prove the target stayed unchanged. Inspect the exact target after any failed or partial write, retry only from the returned checkpoint after a new preview, and claim saved or deleted state only from a successful postcondition or explicit verification.',
       'Do not manually reload caches unless natural partial reload is proven stale or a concrete reload error requires it.',
       'Never fabricate ids, field names, relation names, paths, package names, or permission scopes.',
     ],

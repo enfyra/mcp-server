@@ -20,6 +20,8 @@ import {
   withSchemaQueue,
 } from './table-tool-logic.js';
 import { createSchemaToolOperations } from './schema-tool-operations.js';
+import { destructivePreviewContent } from './destructive-preview.js';
+import { executeSequentialBatch } from './sequential-batch.js';
 
 export function registerSchemaColumnTools(server, ENFYRA_API_URL, options: { toolset?: string } = {}) {
   const toolset = options.toolset || 'guided';
@@ -79,7 +81,7 @@ export function registerSchemaColumnTools(server, ENFYRA_API_URL, options: { too
 
   server.tool(
       'delete_columns',
-      'Delete one or more columns. Always pass items as a native JSON array; for one column, pass one item. confirm=false previews every target; confirm=true deletes sequentially.',
+      'Delete one or more columns. Always pass items as a native JSON array; for one column, pass one item. confirm=false previews every target; confirm=true deletes sequentially and verifies schema absence. Partial failures return a checkpoint and require a new preview before retry.',
       {
         items: bulkObjectArrayParam(z, 'Column delete items').describe('Native JSON array of delete items: [{ tableId, columnId }].'),
         maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
@@ -89,22 +91,59 @@ export function registerSchemaColumnTools(server, ENFYRA_API_URL, options: { too
       async ({ items, maxItems, confirm, globalRulesAckKey }) => {
         const parsedItems = parseBulkItemsParam('items', items);
         assertBulkLimit('delete_columns', parsedItems, maxItems);
-        if (confirm) assertGlobalRulesAck(globalRulesAckKey);
-        const results: AnyRecord[] = [];
         for (const [index, item] of parsedItems.entries()) {
           if (!item.tableId) throw new Error(`items[${index}].tableId is required.`);
           if (!item.columnId) throw new Error(`items[${index}].columnId is required.`);
-          const result = await removeColumnFromTable({ ...item, confirm, globalRulesAckKey });
-          results.push({ index, ...JSON.parse(result.content[0].text) });
         }
-        return jsonContent({
-          action: confirm ? 'columns_deleted' : 'delete_columns_preview',
+        if (confirm) assertGlobalRulesAck(globalRulesAckKey);
+        if (!confirm) {
+          const results: AnyRecord[] = [];
+          for (const [index, item] of parsedItems.entries()) {
+            const result = await removeColumnFromTable({ ...item, confirm: false, globalRulesAckKey });
+            results.push({ index, ...JSON.parse(result.content[0].text) });
+          }
+          const payload = {
+            action: 'delete_columns_preview',
+            requested: parsedItems.length,
+            sequential: true,
+            destructive: true,
+            results,
+            postcondition: {
+              verificationMethod: 'not_run_preview',
+              confirmedAbsent: false,
+              remainingColumnIds: results.map((item) => item.columnId),
+            },
+            next: 'Call delete_columns again with the same items and confirm=true to delete sequentially.',
+          };
+          return destructivePreviewContent('delete_columns', payload, parsedItems.length);
+        }
+
+        const batch = await executeSequentialBatch(parsedItems, async (item, index) => {
+          const result = await removeColumnFromTable({ ...item, confirm: true, globalRulesAckKey });
+          return { index, ...JSON.parse(result.content[0].text) };
+        });
+        const results = batch.completed;
+        const payload = {
+          action: batch.status === 'completed' ? 'columns_deleted' : 'delete_columns_partial_failure',
           requested: parsedItems.length,
           sequential: true,
           destructive: true,
           results,
-          next: confirm ? undefined : 'Call delete_columns again with the same items and confirm=true to delete sequentially.',
-        });
+          postcondition: {
+            verificationMethod: 'table_schema_column_ids',
+            confirmedAbsent: batch.status === 'completed'
+              && results.every((item) => item.postcondition?.confirmedAbsent === true),
+            remainingColumnIds: results.flatMap((item) => item.postcondition?.remainingColumnIds || []),
+          },
+          ...(batch.status === 'partial_failure' ? {
+            status: 'partial_failure',
+            failure: batch.failure,
+            remainingIndexes: batch.remainingIndexes,
+            requiresNewPreview: true,
+          } : {}),
+        };
+        const result = jsonContent(payload);
+        return batch.status === 'partial_failure' ? { ...result, isError: true } : result;
       }
     );
 }

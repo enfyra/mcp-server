@@ -10,6 +10,7 @@ import {
 } from './dynamic-endpoint-contract.js';
 import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
 import { writeSourceArtifact } from './source-artifacts.js';
+import { destructivePreviewContent } from './destructive-preview.js';
 import {
   normalizeEscapedVueSource,
   normalizeStrictBoolean,
@@ -178,15 +179,24 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'delete_route',
-      'Business operation: preview-first delete for a route and its route-owned handlers, hooks, guards, and permissions. Use only when a route contract is retired.',
+      'Business operation: preview-first delete for a route and its route-owned handlers, hooks, guards, and permissions. confirm=true requires the preview path again. Partial failures return exact deleted and remaining checkpoints and require a new preview before retry.',
       {
         path: z.string().optional().describe('Route path, e.g. /old-endpoint. Use either path or routeId.'),
         routeId: z.union([z.string(), z.number()]).optional().describe('Route id. Use either path or routeId.'),
-        expectedPath: z.string().optional().describe('Optional safety check. When confirm=true, pass the path returned by the preview.'),
+        expectedRouteId: z.union([z.string(), z.number()]).optional().describe('Required when confirm=true. Pass the exact route id returned by the preview.'),
+        expectedPath: z.string().optional().describe('Required when confirm=true. Pass the exact path returned by the preview.'),
         confirm: z.boolean().optional().default(false).describe('false returns a dependency preview only; true deletes the route and related route-owned records.'),
         globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
       },
-      async (input) => jsonText(await deleteRoute(ENFYRA_API_URL, input)),
+      async (input) => {
+        const result = await deleteRoute(ENFYRA_API_URL, input);
+        if (!input.confirm) return destructivePreviewContent('delete_route', result, 1);
+        const content = jsonText(result);
+        return ('status' in result && result.status === 'partial_failure')
+          || ('postcondition' in result && result.postcondition.confirmedAbsent !== true)
+          ? { ...content, isError: true }
+          : content;
+      },
     );
 
   server.tool(

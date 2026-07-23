@@ -25,6 +25,7 @@ import { registerRuntimeZoneTools } from './runtime-zone-tools.js';
 import { registerOAuthProviderTools } from './oauth-tools.js';
 import { registerDynamicRepositoryBuilder } from './dynamic-repository-builder.js';
 import { buildDynamicScriptContextTypeContract } from './dynamic-script-context-contract.js';
+import { destructivePreviewContent } from './destructive-preview.js';
 import { assertCreateHandlerRouteBoundary } from './dynamic-endpoint-contract.js';
 import { assertGenericRecordMutationAllowed, parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
 import {
@@ -399,7 +400,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     }, null, 2) }] };
   });
 
-  server.tool('delete_records', 'Delete one or more route-backed records in one MCP call. Pass items as a native JSON array; for one delete, pass one item. The tool previews every target when confirm=false, rejects duplicate ids, and deletes sequentially when confirm=true. Confirmed deletes automatically re-read the requested primary keys and return postcondition.confirmedAbsent plus remainingIds, so a separate absence query is optional. By default, confirm=true skips records that were already removed by cascade or a previous cleanup step.', {
+  server.tool('delete_records', 'Delete one or more route-backed records in one MCP call. Pass items as a native JSON array; for one delete, pass one item. The tool previews every target when confirm=false, rejects duplicate ids, and deletes sequentially when confirm=true. Confirmed deletes automatically re-read the requested primary keys and return postcondition.confirmedAbsent plus remainingIds. A partial failure returns completed, failure, and remainingIndexes; inspect the target and obtain a new preview before retrying. By default, confirm=true skips records that were already removed by cascade or a previous cleanup step.', {
     tableName: z.string().describe('Table name'),
     items: bulkObjectArrayParam(z, 'Delete items').describe('Native JSON array of delete items: [{ "id": "...", "queryParams": { ... }? }].'),
     maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one MCP batch. Default/max is 100.'),
@@ -425,15 +426,14 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
           limit: '1',
           fields: primaryKey,
         });
-        const preview = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${query.toString()}`).catch((error) => ({ error: String(error?.message || error) }));
+        const preview = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${query.toString()}`);
         previews.push({
           index,
           id: item.id,
           preview: preview?.data?.[0] || null,
-          previewError: preview?.error,
         });
       }
-      return { content: [{ type: 'text', text: JSON.stringify({
+      return destructivePreviewContent('delete_records', {
         action: 'delete_records_preview',
         tableName,
         primaryKey,
@@ -448,66 +448,82 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
           confirmedAbsent: false,
         },
         next: 'Call delete_records again with the same items and confirm=true to delete these route-backed records sequentially.',
-      }, null, 2) }] };
+      }, parsedItems.length);
     }
-  
-  	  assertGlobalRulesAck(globalRulesAckKey);
-  	  const deleted = [];
-  	  const skippedNotFound = [];
-  	  for (const [index, item] of parsedItems.entries()) {
-  	    const query = parseQueryParamsArg(JSON.stringify(item.queryParams || {}));
-  	    try {
-  	      const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${encodeURIComponent(String(item.id))}`, query), { method: 'DELETE' });
-  	      deleted.push({
-  	        index,
-  	        id: item.id,
-  	        statusCode: result?.statusCode,
-  	        success: result?.success,
-  	      });
-  	    } catch (error) {
-  	      if (skipNotFound && isNotFoundDeleteError(error)) {
-  	        skippedNotFound.push({
-  	          index,
-  	          id: item.id,
-  	          skipped: true,
-  	          reason: 'not_found',
-  	        });
-  	        continue;
-  	      }
-  	      throw error;
-  	    }
-  	  }
-  	  const requestedIds = parsedItems.map((item) => item.id);
-  	  let postcondition;
-  	  try {
-  	    const verificationQuery = new URLSearchParams({
-  	      filter: JSON.stringify({ [primaryKey]: { _in: requestedIds } }),
-  	      limit: String(parsedItems.length),
-  	      fields: primaryKey,
-  	    });
-  	    const verification = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${verificationQuery.toString()}`);
-  	    postcondition = buildDeletePostcondition(requestedIds, verification?.data ?? [], primaryKey);
-  	  } catch (error) {
-  	    postcondition = {
-  	      verificationMethod: 'route_read_by_primary_keys',
-  	      requestedIds,
-  	      remainingIds: [],
-  	      confirmedAbsent: false,
-  	      verificationError: String((error as any)?.message || error),
-  	    };
-  	  }
-  	  return { content: [{ type: 'text', text: JSON.stringify({
-  	    action: 'deleted_records',
-  	    tableName,
-  	    requested: parsedItems.length,
-  	    deletedCount: deleted.length,
-  	    skippedNotFoundCount: skippedNotFound.length,
-  	    sequential: true,
-  	    duplicateIdsRejected: true,
-  	    skipNotFound,
-  	    deleted,
-  	    skippedNotFound,
-  	    postcondition,
-  	  }, null, 2) }] };
-  	});
+
+    assertGlobalRulesAck(globalRulesAckKey);
+    const batch = await executeSequentialBatch(parsedItems, async (item, index) => {
+      const query = parseQueryParamsArg(JSON.stringify(item.queryParams || {}));
+      try {
+        const result = await fetchAPI(ENFYRA_API_URL, appendQuery(`/${tableName}/${encodeURIComponent(String(item.id))}`, query), { method: 'DELETE' });
+        return {
+          index,
+          id: item.id,
+          status: 'deleted',
+          statusCode: result?.statusCode,
+          success: result?.success,
+        };
+      } catch (error) {
+        if (skipNotFound && isNotFoundDeleteError(error)) {
+          return {
+            index,
+            id: item.id,
+            status: 'skipped_not_found',
+            skipped: true,
+            reason: 'not_found',
+          };
+        }
+        throw error;
+      }
+    });
+    const requestedIds = parsedItems.map((item) => item.id);
+    let postcondition;
+    try {
+      const verificationQuery = new URLSearchParams({
+        filter: JSON.stringify({ [primaryKey]: { _in: requestedIds } }),
+        limit: String(parsedItems.length),
+        fields: primaryKey,
+      });
+      const verification = await fetchAPI(ENFYRA_API_URL, `/${tableName}?${verificationQuery.toString()}`);
+      postcondition = buildDeletePostcondition(requestedIds, verification?.data ?? [], primaryKey);
+    } catch (error) {
+      postcondition = {
+        verificationMethod: 'route_read_by_primary_keys',
+        requestedIds,
+        remainingIds: [],
+        confirmedAbsent: false,
+        verificationError: String((error as any)?.message || error),
+      };
+    }
+      const completed = batch.completed;
+      const deleted = completed.filter((item) => item.status === 'deleted');
+      const skippedNotFound = completed.filter((item) => item.status === 'skipped_not_found');
+      const unverified = postcondition.confirmedAbsent !== true;
+      const payload = {
+        action: batch.status === 'partial_failure'
+          ? 'delete_records_partial_failure'
+          : unverified
+            ? 'delete_records_unverified'
+            : 'deleted_records',
+        tableName,
+        requested: parsedItems.length,
+        deletedCount: deleted.length,
+        skippedNotFoundCount: skippedNotFound.length,
+        sequential: true,
+        duplicateIdsRejected: true,
+        skipNotFound,
+        deleted,
+        skippedNotFound,
+        postcondition,
+        ...(batch.status === 'partial_failure' ? {
+          status: 'partial_failure',
+          completed,
+          failure: batch.failure,
+          remainingIndexes: batch.remainingIndexes,
+          requiresNewPreview: true,
+        } : {}),
+      };
+      const result = jsonContent(payload);
+      return batch.status === 'partial_failure' || unverified ? { ...result, isError: true } : result;
+    });
 }

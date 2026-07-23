@@ -15,6 +15,14 @@ export interface ToolResult {
   _meta?: Record<string, unknown>;
 }
 
+export interface DestructivePreviewReceipt {
+  version: 1;
+  valid: true;
+  toolName: string;
+  action: string;
+  targetCount: number;
+}
+
 export type UnknownRecord = Record<string, unknown>;
 
 export interface McpToolAnnotations {
