@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { afterMcpToolExecution, beforeMcpToolExecution } from './session-safety.js';
-import { formatToolResult, jsonContent } from './response-format.js';
 import { paginateResults } from './pagination.js';
+import { formatToolResult, jsonContent } from './response-format.js';
+import { afterMcpToolExecution, beforeMcpToolExecution } from './session-safety.js';
 import { getToolContract, isCatalogExecutable } from './tool-contracts.js';
-import { isToolVisibleInToolset } from './toolset-filter.js';
 import { workflowSurfaceForTool } from './tool-routing.js';
+import { isToolVisibleInToolset } from './toolset-filter.js';
 import type { RegisteredToolDefinition, ToolAvailability, ToolsetRegistrationState } from './types.js';
 
 type ToolAvailabilityResolver = (toolNames: string[]) => Promise<Record<string, ToolAvailability>>;

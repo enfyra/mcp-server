@@ -1,17 +1,14 @@
 /**
  * Table & Column tools for Enfyra MCP Server
  */
-import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
 import {
   fetchMetadataContext,
   fetchTableCatalog,
-  fetchTableMetadata,
-  resolveTableCatalogEntry,
+  fetchTableMetadata
 } from './metadata-client.js';
+import { assertGlobalRulesAck } from './required-knowledge.js';
 import { jsonContent } from './response-format.js';
-import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
-import { normalizeTableName } from './tool-input-normalization.js';
 import {
   AnyRecord,
   RelationPatch,
@@ -228,59 +225,6 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       });
       });
     }
-
-  const columnCreateSchema = {
-      tableId: z.string().describe('Table definition ID (from get_all_tables or create_tables).'),
-      name: z.string().describe('Column name (e.g., "title", "webhook_secret"). Lowercase with underscores. Do not create id, _id, createdAt, or updatedAt; Enfyra manages them automatically.'),
-      type: z.string().describe('Column type from the live enfyra_column.type enum. Common valid types are int, varchar, text, boolean, uuid, ObjectId, bigint, date, datetime, timestamp, enum, simple-json, code, array-select, richtext, and float. The tool normalizes common aliases before sending: decimal/numeric/money/number -> float when decimal is not live-supported, longtext -> text, json/jsonb/object/array -> simple-json when live-supported, string -> varchar. Prefer relations instead of *_id columns.'),
-      isNullable: z.boolean().optional().default(true).describe('Set to false if column cannot be null.'),
-      isUnique: z.boolean().optional().default(false).describe('Set to true for unique constraint.'),
-      isPublished: z.boolean().optional().describe('Set column visibility baseline. Use false for secrets and internal fields.'),
-      isUpdatable: z.boolean().optional().describe('Set false for immutable fields that cannot be updated after creation. Independent from isEncrypted.'),
-      isEncrypted: z.boolean().optional().describe('Set true to encrypt this column at the Enfyra database-query layer. This does not change isUpdatable. Encrypted fields cannot be filtered or sorted.'),
-      isPrimary: z.boolean().optional().describe('Set true only for primary key columns; normally only create_tables auto id uses this.'),
-      isGenerated: z.boolean().optional().describe('Set true only for generated columns such as auto id.'),
-      isSystem: z.boolean().optional().describe('Set true only for system-managed columns. Avoid for normal app fields.'),
-      defaultValue: z.string().optional().describe('Default value as JSON string or backend-supported literal.'),
-      description: z.string().optional().describe('Column description.'),
-      options: z.union([z.array(z.string()), z.string()]).optional().describe('Column options as a native array such as ["draft","published"] or a JSON string for older clients.'),
-      globalRulesAckKey: globalRulesAckParam(z),
-    };
-
-  const relationCreateSchema = {
-      sourceTableId: z.string().describe('Source table id, exact table name, or alias. For many-to-one, this is the table that owns the relation property.'),
-      targetTableId: z.string().optional().describe('Target table id, exact table name, or alias. MCP resolves names/aliases to ids before mutation. Optional when targetTable is provided.'),
-      targetTable: z.string().optional().describe('Alias for targetTableId when naturally using a target table name/alias such as enfyra_user. Optional when targetTableId is provided.'),
-        type: z.string().describe('Relation type. Use many-to-one, one-to-many, one-to-one, or many-to-many. Common aliases such as many_to_one are normalized by the tool.'),
-      propertyName: z.string().describe('Property name on source table (e.g., "customer", "items").'),
-      inversePropertyName: z.string().optional().describe('Property name on target table for bidirectional relation (e.g., "orders"). Omit unless a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal will use the reverse field. Do not add inverses merely because a parent table exists.'),
-      mappedBy: z.string().optional().describe('Mapped-by property for inverse relation shapes when required by the backend. Do not use physical FK names.'),
-      isNullable: z.boolean().optional().default(true).describe('Whether the relation is nullable.'),
-      onDelete: z.enum(['CASCADE', 'SET NULL', 'RESTRICT']).optional().default('SET NULL').describe('On delete behavior.'),
-      description: z.string().optional().describe('Relation description.'),
-      fkCol: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
-      fkColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
-      foreignKeyColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
-      sourceColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
-      targetColumn: z.never().optional().describe('Forbidden. Use propertyName only; Enfyra derives FK columns.'),
-      junctionSourceColumn: z.never().optional().describe('Forbidden. Use relation property names only; Enfyra derives junction columns.'),
-      junctionTargetColumn: z.never().optional().describe('Forbidden. Use relation property names only; Enfyra derives junction columns.'),
-      globalRulesAckKey: globalRulesAckParam(z),
-    };
-
-  const columnDeleteSchema = {
-      tableId: z.string().describe('Table definition ID.'),
-      columnId: z.string().describe('Column definition ID to delete.'),
-      confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
-      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
-    };
-
-  const relationDeleteSchema = {
-      tableId: z.string().describe('Table definition ID (source table of the relation).'),
-      relationId: z.string().describe('Relation definition ID to delete.'),
-      confirm: z.boolean().optional().default(false).describe('Required true to apply the destructive delete. Omit/false returns a preview only.'),
-      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
-    };
 
   function arrayValue(name, value) {
       if (value === undefined || value === null || value === '') return [];

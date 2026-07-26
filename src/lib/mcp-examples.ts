@@ -1,14 +1,14 @@
 import { connectExamples } from './mcp-example-connect.js';
-import { oauthSetupExamples } from './mcp-example-oauth-setup.js';
-import { schemaRelationsExamples } from './mcp-example-schema-relations.js';
-import { queriesDeepExamples } from './mcp-example-queries-deep.js';
+import { extensionsExamples } from './mcp-example-extensions.js';
+import { filesExamples } from './mcp-example-files.js';
+import { flowsExamples } from './mcp-example-flows.js';
 import { graphqlExamples } from './mcp-example-graphql.js';
 import { handlersHooksExamples } from './mcp-example-handlers-hooks.js';
+import { oauthSetupExamples } from './mcp-example-oauth-setup.js';
 import { permissionsRlsExamples } from './mcp-example-permissions-rls.js';
+import { queriesDeepExamples } from './mcp-example-queries-deep.js';
+import { schemaRelationsExamples } from './mcp-example-schema-relations.js';
 import { websocketExamples } from './mcp-example-websocket.js';
-import { flowsExamples } from './mcp-example-flows.js';
-import { filesExamples } from './mcp-example-files.js';
-import { extensionsExamples } from './mcp-example-extensions.js';
 
 export const EXAMPLE_REASONING_GUIDE = [
   'Examples are reasoning anchors, not templates to copy blindly. Preserve the platform contract, then adapt table names, route paths, relation names, fields, UI labels, and lifecycle triggers to the live app.',

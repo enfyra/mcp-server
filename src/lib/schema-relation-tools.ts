@@ -2,29 +2,20 @@
  * Table & Column tools for Enfyra MCP Server
  */
 import { z } from 'zod';
-import { fetchAPI } from './fetch.js';
-import {
-  fetchMetadataContext,
-  fetchTableCatalog,
-  fetchTableMetadata,
-  resolveTableCatalogEntry,
-} from './metadata-client.js';
-import { jsonContent } from './response-format.js';
+import { destructivePreviewContent } from './destructive-preview.js';
 import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
-import { normalizeTableName } from './tool-input-normalization.js';
+import { jsonContent } from './response-format.js';
+import { createSchemaToolOperations } from './schema-tool-operations.js';
+import { executeSequentialBatch } from './sequential-batch.js';
 import {
   AnyRecord,
   assertBulkLimit,
   bulkObjectArrayParam,
   parseBulkItemsParam,
 } from './table-tool-logic.js';
-import { createSchemaToolOperations } from './schema-tool-operations.js';
-import { destructivePreviewContent } from './destructive-preview.js';
-import { executeSequentialBatch } from './sequential-batch.js';
 
 export function registerSchemaRelationTools(server, ENFYRA_API_URL, options: { toolset?: string } = {}) {
   const toolset = options.toolset || 'guided';
-  const apiBase = ENFYRA_API_URL.replace(/\/$/, '');
   const {
     appendRelationToTable,
     removeRelationFromTable,

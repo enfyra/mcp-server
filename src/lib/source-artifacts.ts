@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const DEFAULT_PREVIEW_CHARS = 480;
 const DEFAULT_INLINE_LIMIT = 1400;

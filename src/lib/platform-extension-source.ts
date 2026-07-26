@@ -1,36 +1,13 @@
-import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { fetchAPI } from './fetch.js';
-import { fetchTableCatalog, fetchTableMetadata, fetchTableMetadataByRef, resolveTableCatalogEntry } from './metadata-client.js';
-import {
-  assertCustomEndpointRoute,
-  assertDynamicEndpointContract,
-  extractExplicitRepositoryTableNames,
-  reviewDynamicEndpointContract,
-} from './dynamic-endpoint-contract.js';
-import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
-import { writeSourceArtifact } from './source-artifacts.js';
-import {
-  normalizeEscapedVueSource,
-  normalizeStrictBoolean,
-} from './tool-input-normalization.js';
 import {
   analyzeExtensionSfc,
-  extensionElementAttributeValue,
-  extensionElementHasAttribute,
+  extensionElementHasAttribute
 } from './extension-sfc-analyzer.js';
+import { fetchAPI } from './fetch.js';
+import { validatePortableScriptSource } from './mutation-guards.js';
 import {
-  assertDynamicCodeKnowledgeAck,
-  assertDynamicCodeKnowledgeAckIf,
-  assertExtensionKnowledgeAck,
-  assertGlobalRulesAck,
-  dynamicCodeKnowledgeAckParam,
-  extensionKnowledgeAckParam,
-  globalRulesAckParam,
-} from './required-knowledge.js';
-import {
-  AnyRecord,
-} from './platform-shared-operations.js';
+  findRecord,
+} from './platform-data-operations.js';
 import {
   AUTO_INJECTED_EXTENSION_COMPONENT_BY_LOWERCASE,
   FULL_WIDTH_EXTENSION_FIELD_TAGS,
@@ -44,8 +21,13 @@ import {
   unwrapData,
 } from './platform-route-operations.js';
 import {
-  findRecord,
-} from './platform-data-operations.js';
+  AnyRecord,
+} from './platform-shared-operations.js';
+import {
+  assertExtensionKnowledgeAck,
+  assertGlobalRulesAck
+} from './required-knowledge.js';
+import { writeSourceArtifact } from './source-artifacts.js';
 
 export function parseJsonObjectArg(name, value, fallback = {}) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -125,16 +107,6 @@ export function readTemplateBlocks(code) {
     index = closeStart + '</template'.length;
   }
   return blocks;
-}
-
-function readTemplateTagName(template, start) {
-  const next = template[start + 1];
-  if (!next || next === '!' || next === '?') return null;
-  let index = start + (next === '/' ? 2 : 1);
-  while (/\s/.test(template[index] || '')) index += 1;
-  const nameStart = index;
-  while (/[\w.-]/.test(template[index] || '')) index += 1;
-  return index > nameStart ? template.slice(nameStart, index) : null;
 }
 
 function findInvalidExtensionSortSyntax(code) {

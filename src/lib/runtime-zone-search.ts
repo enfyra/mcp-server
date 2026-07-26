@@ -1,11 +1,11 @@
 import { z } from 'zod';
+import { inspectExtensionLocation, searchExtensions } from './extension-search-tools.js';
 import { fetchAPI } from './fetch.js';
 import { fetchMetadataTables, fetchTableCatalog, fetchTableMetadata, fetchTableMetadataByRef } from './metadata-client.js';
+import { paginateResults } from './pagination.js';
 import { jsonContent } from './response-format.js';
 import { writeSourceArtifact } from './source-artifacts.js';
-import { inspectExtensionLocation, searchExtensions } from './extension-search-tools.js';
 import { normalizeSnippetChars } from './tool-input-normalization.js';
-import { paginateResults } from './pagination.js';
 
 import {
   RUNTIME_ZONES,

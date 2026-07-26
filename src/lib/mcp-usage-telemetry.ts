@@ -1,7 +1,7 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
 import { getRuntimeCacheTelemetry } from './runtime-cache.js';
 
 type UnknownRecord = Record<string, any>;

@@ -1,21 +1,16 @@
 /**
  * Table & Column tools for Enfyra MCP Server
  */
-import { z } from 'zod';
 import { fetchAPI } from './fetch.js';
 import {
-  fetchMetadataContext,
   fetchTableCatalog,
   fetchTableMetadata,
-  resolveTableCatalogEntry,
+  resolveTableCatalogEntry
 } from './metadata-client.js';
-import { jsonContent } from './response-format.js';
-import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
-import { normalizeTableName } from './tool-input-normalization.js';
 import {
   getId,
 } from './schema-relation-contracts.js';
-import type { AnyRecord, CascadeVerifyOptions, ColumnPatch, ConstraintGroup, RelationPatch } from './schema-tool-types.js';
+import type { AnyRecord, ColumnPatch } from './schema-tool-types.js';
 export type { AnyRecord, CascadeVerifyOptions, ColumnPatch, ConstraintGroup, RelationPatch } from './schema-tool-types.js';
 
 export function bulkObjectArrayParam(z, label: string) {

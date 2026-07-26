@@ -2,6 +2,7 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mc
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { initAuth } from './auth.js';
+import { registerDiscoveryTools } from './discovery-tools.js';
 import { registerDynamicRepositoryBuilder } from './dynamic-repository-builder.js';
 import {
   ENFYRA_API_TOKEN,
@@ -11,7 +12,6 @@ import {
   MCP_TOOLSET,
   resolveCatalogToolAvailability,
 } from './enfyra-tool-logic.js';
-import { registerDiscoveryTools } from './discovery-tools.js';
 import { registerIdentityTools } from './identity-tools.js';
 import { registerLogTools } from './log-tools.js';
 import { buildMcpServerInstructions } from './mcp-instructions.js';

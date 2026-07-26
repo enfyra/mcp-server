@@ -1,52 +1,26 @@
-import { z } from 'zod';
-import { createHash } from 'node:crypto';
-import { fetchAPI } from './fetch.js';
-import { fetchTableCatalog, fetchTableMetadata, fetchTableMetadataByRef, resolveTableCatalogEntry } from './metadata-client.js';
 import {
-  assertCustomEndpointRoute,
-  assertDynamicEndpointContract,
-  extractExplicitRepositoryTableNames,
-  reviewDynamicEndpointContract,
-} from './dynamic-endpoint-contract.js';
-import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
-import { writeSourceArtifact } from './source-artifacts.js';
+  findRecord,
+} from './platform-data-operations.js';
 import {
-  normalizeEscapedVueSource,
-  normalizeStrictBoolean,
-} from './tool-input-normalization.js';
-import {
-  analyzeExtensionSfc,
-  extensionElementAttributeValue,
-  extensionElementHasAttribute,
-} from './extension-sfc-analyzer.js';
-import {
-  assertDynamicCodeKnowledgeAck,
-  assertDynamicCodeKnowledgeAckIf,
-  assertExtensionKnowledgeAck,
-  assertGlobalRulesAck,
-  dynamicCodeKnowledgeAckParam,
-  extensionKnowledgeAckParam,
-  globalRulesAckParam,
-} from './required-knowledge.js';
+  extensionMatches,
+  step,
+} from './platform-endpoint-workflow.js';
 import {
   validateExtensionCode,
 } from './platform-extension-source.js';
 import {
-  findRecord,
-} from './platform-data-operations.js';
+  ensureExtension,
+  ensureMenu,
+} from './platform-resource-operations.js';
 import {
   getId,
   normalizeRestPath,
   refId,
 } from './platform-route-operations.js';
 import {
-  extensionMatches,
-  step,
-} from './platform-endpoint-workflow.js';
-import {
-  ensureExtension,
-  ensureMenu,
-} from './platform-resource-operations.js';
+  assertExtensionKnowledgeAck,
+  assertGlobalRulesAck
+} from './required-knowledge.js';
 
 async function resolveExtensionWorkflowState(apiUrl, opts) {
   const type = opts.type || 'page';

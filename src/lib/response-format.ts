@@ -1,7 +1,7 @@
-import type { ToolResult, UnknownRecord } from "./types.js";
 import { recordMcpToolUsage } from './mcp-usage-telemetry.js';
 import { afterMcpToolExecution, beforeMcpToolExecution } from './session-safety.js';
 import { getToolContract } from './tool-contracts.js';
+import type { ToolResult, UnknownRecord } from "./types.js";
 
 const RESPONSE_FORMAT = 'json+columnar-v1';
 const COLUMNAR_FORMAT = 'columnar-v1';

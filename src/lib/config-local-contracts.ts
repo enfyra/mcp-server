@@ -1,4 +1,4 @@
-import { stdin as input, stdout as output } from 'node:process';
+import { stdout as output } from 'node:process';
 import type { ClientKey, ExistingEnv, ParsedArgs } from './config-local-types.js';
 export type { ChoiceClientKey, ClientKey, ClientSelection, ExistingEnv, KeypressInfo, ParsedArgs, TargetChoice } from './config-local-types.js';
 

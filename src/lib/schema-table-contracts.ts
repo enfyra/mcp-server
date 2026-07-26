@@ -1,22 +1,12 @@
 /**
  * Table & Column tools for Enfyra MCP Server
  */
-import { z } from 'zod';
-import { fetchAPI } from './fetch.js';
-import {
-  fetchMetadataContext,
-  fetchTableCatalog,
-  fetchTableMetadata,
-  resolveTableCatalogEntry,
-} from './metadata-client.js';
-import { jsonContent } from './response-format.js';
-import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
-import { normalizeTableName } from './tool-input-normalization.js';
 import {
   AUTO_MANAGED_COLUMN_NAMES,
   AnyRecord,
   ConstraintGroup,
 } from './schema-mutation-coordinator.js';
+import { normalizeTableName } from './tool-input-normalization.js';
 
 export function parseJsonArrayParam(name, value) {
   if (!value) return [];
@@ -60,10 +50,6 @@ function normalizeConstraintGroups(name, groups) {
     }
     return value;
   });
-}
-
-function parseConstraintGroupsParam(name, value) {
-  return normalizeConstraintGroups(name, parseJsonArrayParam(name, value));
 }
 
 export function normalizeConstraintGroupsValue(name, value): ConstraintGroup[] {

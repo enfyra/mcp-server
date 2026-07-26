@@ -2,101 +2,38 @@
  * Enfyra MCP — stdio server (loaded by index.ts / dist/index.js).
  */
 
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { createHash } from 'node:crypto';
 // Import modules
-import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './auth.js';
-import { fetchAPI, validateFilter, validateTableName } from './fetch.js';
-import {
-  fetchMetadataContext,
-  fetchMetadataTables,
-  fetchTableCatalog,
-  fetchTableMetadata,
-  fetchTableMetadataByRef,
-} from './metadata-client.js';
-import { buildMcpServerInstructions, buildGraphqlUrls } from './mcp-instructions.js';
-import { getExamples, listExampleCategories } from './mcp-examples.js';
-import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './tool-routing.js';
-import { getSupportedColumnTypesFromMetadata, registerTableTools } from './table-tools.js';
-import { registerPlatformOperationTools, validateExtensionCode } from './platform-operation-tools.js';
-import { registerRuntimeZoneTools } from './runtime-zone-tools.js';
-import { registerOAuthProviderTools } from './oauth-tools.js';
-import { registerDynamicRepositoryBuilder } from './dynamic-repository-builder.js';
-import { buildDynamicScriptContextTypeContract } from './dynamic-script-context-contract.js';
-import { assertCreateHandlerRouteBoundary } from './dynamic-endpoint-contract.js';
-import { assertGenericRecordMutationAllowed, parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
-import {
-  assertDynamicCodeKnowledgeAck,
-  assertDynamicCodeKnowledgeAckIf,
-  assertExtensionKnowledgeAckIf,
-  assertGlobalRulesAck,
-  acknowledgeRequiredKnowledge,
-  buildRequiredKnowledgePayload,
-  dynamicCodeKnowledgeAckParam,
-  extensionKnowledgeAckParam,
-  globalRulesAckParam,
-} from './required-knowledge.js';
-import { validateMainTableRoutePath } from './route-guards.js';
-import { assertRecordFieldsReadable, buildDeletePostcondition, buildQuerySchemaReceipt } from './record-contracts.js';
-import { installColumnarToolFormatter, jsonContent } from './response-format.js';
-import { startMcpUsageTelemetry } from './mcp-usage-telemetry.js';
-import { startRuntimeCacheSocket } from './runtime-cache-socket.js';
-import { executeSequentialBatch } from './sequential-batch.js';
-import { compactSourceFields, readSourceArtifactResource, writeSourceArtifact } from './source-artifacts.js';
-import { installToolsetFilter, normalizeDynamicToolPacks, normalizeMcpProfile, normalizeMcpToolset, summarizeToolsetForInstructions } from './toolset-filter.js';
-import { installToolAnnotations } from './tool-contracts.js';
-import { installToolOutputContracts } from './tool-output-contracts.js';
-import { registerToolCatalogTools } from './tool-catalog.js';
-import { registerWorkflowToolPack } from './workflow-tool-packs.js';
-import type { ToolAvailability } from './types.js';
-import {
-  findRoutePermission,
-  mergeMethodNames,
-  normalizeMethodNames,
-  resolveRoleByNameOrId,
-  routeAvailableMethodNames,
-  routePublicMethodNames,
-  summarizeRouteAccess,
-  summarizeRoutePermission,
-  validateMethodsForRoute,
-} from './route-permission-tools.js';
+import { getValidToken } from './auth.js';
 import {
   AnyRecord,
-  RouteCreateBody,
-  RouteHandlerBody,
   SCRIPT_BACKED_TABLES,
   collectFeatureSearchState,
   collectRestDefinitionState,
   enrichRoute,
-  fetchAll,
-  firstDataRecord,
   getId,
   getMetadataDatabaseContext,
-  getMetadataTables,
-  getMethodIdNameMap,
-  getMethodMap,
   getPrimaryColumn,
   getRecordSource,
-  methodNames,
   normalizeMethodNameInput,
   normalizeRestPath,
   parseJsonArg,
   pickCodeSummary,
   refId,
-  reloadRoutesResult,
-  resolveMethodIds,
   sameId,
   scriptRecordLabel,
   scriptTraceFields,
   sha256,
   sourcePreview,
-  summarizeRoutes,
   summarizeTable,
   targetInstance,
-  unwrapData,
+  unwrapData
 } from './enfyra-tool-logic.js';
+import { fetchAPI } from './fetch.js';
+import {
+  fetchTableMetadataByRef
+} from './metadata-client.js';
+import { jsonContent } from './response-format.js';
 
 export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
   server.tool(

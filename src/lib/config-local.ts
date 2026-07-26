@@ -1,11 +1,11 @@
-import { stdin as input, stdout as output, cwd } from 'node:process';
-import {
-  clients, exitCancelled, isCancelError, parseArgs, printHelp, statusIcon, style, type ParsedArgs,
-} from './config-local-contracts.js';
+import { cwd, stdin as input, stdout as output } from 'node:process';
 import {
   assertProjectConfigUntracked, buildServerEntry, ensureProjectConfigIgnored, getClientPath,
   loadExistingEnfyraEnv, mergeCodexConfig, mergeMcpFile, mergeVscodeMcpFile,
 } from './config-local-adapters.js';
+import {
+  clients, exitCancelled, isCancelError, parseArgs, printHelp, statusIcon, style, type ParsedArgs,
+} from './config-local-contracts.js';
 import { promptConfig, promptTargetChoice, resolveNonInteractive } from './config-local-prompts.js';
 
 export async function runLocalConfig(argv: string[]) {

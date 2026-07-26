@@ -1,5 +1,5 @@
-import { appendFile, chmod, readFile, writeFile, mkdir } from 'node:fs/promises';
 import { execFile as execFileCallback } from 'node:child_process';
+import { appendFile, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 import type { ExistingEnv } from './config-local-contracts.js';

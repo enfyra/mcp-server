@@ -1,7 +1,7 @@
 import { fetchAPI } from './fetch.js';
+import { paginateResults } from './pagination.js';
 import { writeSourceArtifact } from './source-artifacts.js';
 import { normalizeSnippetChars } from './tool-input-normalization.js';
-import { paginateResults } from './pagination.js';
 
 type ExtensionRecord = Record<string, any>;
 type MenuRecord = Record<string, any>;

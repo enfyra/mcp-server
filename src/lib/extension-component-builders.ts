@@ -1,40 +1,3 @@
-import { z } from 'zod';
-import { createHash } from 'node:crypto';
-import { fetchAPI } from './fetch.js';
-import { fetchTableCatalog, fetchTableMetadata, fetchTableMetadataByRef, resolveTableCatalogEntry } from './metadata-client.js';
-import {
-  assertCustomEndpointRoute,
-  assertDynamicEndpointContract,
-  extractExplicitRepositoryTableNames,
-  reviewDynamicEndpointContract,
-} from './dynamic-endpoint-contract.js';
-import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
-import { writeSourceArtifact } from './source-artifacts.js';
-import {
-  normalizeEscapedVueSource,
-  normalizeStrictBoolean,
-} from './tool-input-normalization.js';
-import {
-  analyzeExtensionSfc,
-  extensionElementAttributeValue,
-  extensionElementHasAttribute,
-} from './extension-sfc-analyzer.js';
-import {
-  assertDynamicCodeKnowledgeAck,
-  assertDynamicCodeKnowledgeAckIf,
-  assertExtensionKnowledgeAck,
-  assertGlobalRulesAck,
-  dynamicCodeKnowledgeAckParam,
-  extensionKnowledgeAckParam,
-  globalRulesAckParam,
-} from './required-knowledge.js';
-import {
-  escapeRegExp,
-  readTemplateBlocks,
-} from './platform-extension-source.js';
-import {
-  AnyRecord,
-} from './platform-shared-operations.js';
 
 const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
   'CommonDrawer',
@@ -117,23 +80,6 @@ function normalizeVueBodySnippet(body) {
     return `<button type="button"${attrs}>`;
   });
   return { code, changes: Array.from(new Set(changes)) };
-}
-
-function findMissingFullWidthFieldControls(code) {
-  const violations: Array<{ tag: string; snippet: string }> = [];
-  for (const template of readTemplateBlocks(code)) {
-    let match;
-    FULL_WIDTH_EXTENSION_FIELD_PATTERN.lastIndex = 0;
-    while ((match = FULL_WIDTH_EXTENSION_FIELD_PATTERN.exec(template))) {
-      const [snippet, tag, attrs] = match;
-      if (/\bdata-compact\b/.test(attrs) || /\bdata-inline\b/.test(attrs)) continue;
-      const classMatch = attrs.match(/\bclass="([^"]*)"/);
-      if (!classMatch || !classMatch[1].split(/\s+/).includes('w-full')) {
-        violations.push({ tag, snippet: snippet.length > 160 ? `${snippet.slice(0, 157)}...` : snippet });
-      }
-    }
-  }
-  return violations;
 }
 
 function indentLines(code, spaces = 2) {

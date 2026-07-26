@@ -14,19 +14,16 @@ export {
   buildExtensionPatchDiffArtifact,
   buildExtensionPermissionGateSnippet,
   buildExtensionResourceGridSnippet,
-  buildExtensionResourceListSnippet,
-  buildExtensionTabsSnippet,
+  buildExtensionResourceListSnippet, buildExtensionRuntimeVerification, buildExtensionTabsSnippet,
   buildExtensionUiSnippet,
   buildExtensionUploadModalSnippet,
-  buildExtensionWidgetSnippet,
-  buildExtensionRuntimeVerification,
-  reviewExtensionRuntimeContract,
+  buildExtensionWidgetSnippet, reviewExtensionRuntimeContract,
   reviewExtensionThemeContract,
   reviewExtensionUiContract,
   summarizeWorkflowOperation,
   validateExtensionCode,
   validateExtensionCodeLocally,
-  verifyExtensionRuntime,
+  verifyExtensionRuntime
 } from './platform-operation-logic.js';
 import { registerPlatformExtensionTools } from './platform-extension-tools.js';
 import { registerPlatformFlowTools } from './platform-flow-tools.js';

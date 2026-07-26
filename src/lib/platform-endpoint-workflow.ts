@@ -1,37 +1,21 @@
-import { z } from 'zod';
-import { createHash } from 'node:crypto';
-import { fetchAPI } from './fetch.js';
-import { fetchTableCatalog, fetchTableMetadata, fetchTableMetadataByRef, resolveTableCatalogEntry } from './metadata-client.js';
 import {
   assertCustomEndpointRoute,
   assertDynamicEndpointContract,
   extractExplicitRepositoryTableNames,
   reviewDynamicEndpointContract,
 } from './dynamic-endpoint-contract.js';
-import { validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
-import { writeSourceArtifact } from './source-artifacts.js';
+import { fetchAPI } from './fetch.js';
+import { fetchTableMetadata } from './metadata-client.js';
+import { validateScriptSourceIfPresent } from './mutation-guards.js';
 import {
-  normalizeEscapedVueSource,
-  normalizeStrictBoolean,
-} from './tool-input-normalization.js';
+  assertOneScope,
+  fetchRecords,
+  findRecord,
+  resolveRole,
+} from './platform-data-operations.js';
 import {
-  analyzeExtensionSfc,
-  extensionElementAttributeValue,
-  extensionElementHasAttribute,
-} from './extension-sfc-analyzer.js';
-import {
-  assertDynamicCodeKnowledgeAck,
-  assertDynamicCodeKnowledgeAckIf,
-  assertExtensionKnowledgeAck,
-  assertGlobalRulesAck,
-  dynamicCodeKnowledgeAckParam,
-  extensionKnowledgeAckParam,
-  globalRulesAckParam,
-} from './required-knowledge.js';
-import {
-  AnyRecord,
-  WorkflowNextStep,
-} from './platform-shared-operations.js';
+  parseJsonObjectArg,
+} from './platform-extension-source.js';
 import {
   fetchAll,
   findHandler,
@@ -47,14 +31,13 @@ import {
   uniqueMethodNames,
 } from './platform-route-operations.js';
 import {
-  assertOneScope,
-  fetchRecords,
-  findRecord,
-  resolveRole,
-} from './platform-data-operations.js';
+  AnyRecord,
+  WorkflowNextStep,
+} from './platform-shared-operations.js';
 import {
-  parseJsonObjectArg,
-} from './platform-extension-source.js';
+  assertDynamicCodeKnowledgeAck,
+  assertGlobalRulesAck
+} from './required-knowledge.js';
 
 function normalizeEndpointAccess(anonymousAccess, makePublic) {
   if (makePublic !== undefined) return makePublic ? 'public' : 'private';

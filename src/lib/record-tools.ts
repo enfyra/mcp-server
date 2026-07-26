@@ -2,67 +2,9 @@
  * Enfyra MCP — stdio server (loaded by index.ts / dist/index.js).
  */
 
-import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { createHash } from 'node:crypto';
 // Import modules
-import { exchangeApiToken, refreshAccessToken, getValidToken, resetTokens, getTokenExpiry, initAuth } from './auth.js';
-import { fetchAPI, validateFilter, validateTableName } from './fetch.js';
-import {
-  fetchMetadataContext,
-  fetchMetadataTables,
-  fetchTableCatalog,
-  fetchTableMetadata,
-  fetchTableMetadataByRef,
-} from './metadata-client.js';
-import { buildMcpServerInstructions, buildGraphqlUrls } from './mcp-instructions.js';
-import { getExamples, listExampleCategories } from './mcp-examples.js';
-import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './tool-routing.js';
-import { getSupportedColumnTypesFromMetadata, registerTableTools } from './table-tools.js';
-import { registerPlatformOperationTools, validateExtensionCode } from './platform-operation-tools.js';
-import { registerRuntimeZoneTools } from './runtime-zone-tools.js';
-import { registerOAuthProviderTools } from './oauth-tools.js';
-import { registerDynamicRepositoryBuilder } from './dynamic-repository-builder.js';
-import { buildDynamicScriptContextTypeContract } from './dynamic-script-context-contract.js';
 import { destructivePreviewContent } from './destructive-preview.js';
-import { assertCreateHandlerRouteBoundary } from './dynamic-endpoint-contract.js';
-import { assertGenericRecordMutationAllowed, parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource, validateScriptSourceIfPresent } from './mutation-guards.js';
-import {
-  assertDynamicCodeKnowledgeAck,
-  assertDynamicCodeKnowledgeAckIf,
-  assertExtensionKnowledgeAckIf,
-  assertGlobalRulesAck,
-  acknowledgeRequiredKnowledge,
-  buildRequiredKnowledgePayload,
-  dynamicCodeKnowledgeAckParam,
-  extensionKnowledgeAckParam,
-  globalRulesAckParam,
-} from './required-knowledge.js';
-import { validateMainTableRoutePath } from './route-guards.js';
-import { assertRecordFieldsReadable, buildDeletePostcondition, buildQuerySchemaReceipt } from './record-contracts.js';
-import { installColumnarToolFormatter, jsonContent } from './response-format.js';
-import { startMcpUsageTelemetry } from './mcp-usage-telemetry.js';
-import { startRuntimeCacheSocket } from './runtime-cache-socket.js';
-import { executeSequentialBatch } from './sequential-batch.js';
-import { compactSourceFields, readSourceArtifactResource, writeSourceArtifact } from './source-artifacts.js';
-import { installToolsetFilter, normalizeDynamicToolPacks, normalizeMcpProfile, normalizeMcpToolset, summarizeToolsetForInstructions } from './toolset-filter.js';
-import { installToolAnnotations } from './tool-contracts.js';
-import { installToolOutputContracts } from './tool-output-contracts.js';
-import { registerToolCatalogTools } from './tool-catalog.js';
-import { registerWorkflowToolPack } from './workflow-tool-packs.js';
-import type { ToolAvailability } from './types.js';
-import {
-  findRoutePermission,
-  mergeMethodNames,
-  normalizeMethodNames,
-  resolveRoleByNameOrId,
-  routeAvailableMethodNames,
-  routePublicMethodNames,
-  summarizeRouteAccess,
-  summarizeRoutePermission,
-  validateMethodsForRoute,
-} from './route-permission-tools.js';
 import {
   appendQuery,
   applyDeepFieldSelections,
@@ -86,6 +28,18 @@ import {
   summarizeMutationResult,
   validateExtensionCodeForGenericMutation,
 } from './enfyra-tool-logic.js';
+import { fetchAPI, validateFilter, validateTableName } from './fetch.js';
+import { assertGenericRecordMutationAllowed, parseRecordBatchData } from './mutation-guards.js';
+import { assertRecordFieldsReadable, buildDeletePostcondition, buildQuerySchemaReceipt } from './record-contracts.js';
+import {
+  assertGlobalRulesAck,
+  dynamicCodeKnowledgeAckParam,
+  extensionKnowledgeAckParam,
+  globalRulesAckParam
+} from './required-knowledge.js';
+import { jsonContent } from './response-format.js';
+import { executeSequentialBatch } from './sequential-batch.js';
+import { compactSourceFields } from './source-artifacts.js';
 
 export function registerRecordTools(server, ENFYRA_API_URL) {
   server.tool('query_table', 'Query any route-backed table with a live metadata preflight. Explicit fields are validated before the REST read and the result includes schemaReceipt, so a separate metadata call is optional unless the schema itself must be inspected. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {

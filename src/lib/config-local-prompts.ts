@@ -1,6 +1,6 @@
-import { createInterface } from 'node:readline/promises';
-import { emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
+import { emitKeypressEvents } from 'node:readline';
+import { createInterface } from 'node:readline/promises';
 import {
   clients, deriveApiUrlFromAppUrl, deriveMeUrl, isCancelError, normalizeAppUrl,
   resolveDefaultAppUrl, style, type ClientKey, type ClientSelection, type ExistingEnv, type KeypressInfo,
