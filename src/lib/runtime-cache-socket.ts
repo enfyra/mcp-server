@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import { getValidToken } from './auth.js';
+import { getValidToken, resetTokens } from './auth.js';
 import { fetchAPI } from './fetch.js';
 import { clearRuntimeCache, clearRuntimeCacheDomains, recordRuntimeCacheWarm, runtimeCacheDomainsForReloadSteps, runtimeCacheKeysForDomains } from './runtime-cache.js';
 
@@ -110,7 +110,11 @@ function bindRuntimeCacheSocketEvents(nextSocket: Socket, apiUrl: string) {
     scheduleRuntimeCacheSocketReconnect(apiUrl);
   });
 
-  nextSocket.on('connect_error', () => {
+  nextSocket.on('connect_error', (err: Error) => {
+    const msg = err?.message || '';
+    if (msg.includes('Invalid authentication token') || msg.includes('Authentication token required') || msg.includes('ENFYRA_AUTH_REQUIRED')) {
+      resetTokens();
+    }
     scheduleRuntimeCacheSocketReconnect(apiUrl);
   });
 }
