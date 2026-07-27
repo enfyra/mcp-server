@@ -385,7 +385,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
         security: 'Filters, sorts, counts, and aggregate values can leak information even when a field is not selected. In generated public/user-facing APIs, do not filter, sort, count, or aggregate unpublished fields or private relations unless the endpoint intentionally exposes that fact.',
         deep: {
           shape: '{ [relationName]: { fields?, filter?, sort?, limit?, page?, deep? } }',
-          mcpFieldProjection: 'query_table auto-adds missing top-level deep relation names to fields unless fields are in exclude mode, so the nested relation can appear in the response.',
+          mcpFieldProjection: 'query_table auto-adds missing top-level deep relation names to fields unless fields are in exclude mode, then recursively validates dotted fields and fields inside deep against every relation target metadata before the REST request.',
           rules: [
             'Unknown relation keys are invalid.',
             'Unknown deep entry keys are invalid.',
@@ -393,6 +393,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
             'Dotted sort through one-to-many/many-to-many is invalid.',
             'Deep sort orders rows inside the related collection only; use root aggregate sort helpers when parent rows must be ordered by child values.',
             'Nested deep is recursively validated.',
+            'Use inspect_rest_projection to compare authenticated and anonymous response shape when a field is missing, permission-dependent, or unexpectedly exposed.',
             'Field permissions may rewrite filters/sorts and sanitize post-query results.',
           ],
         },

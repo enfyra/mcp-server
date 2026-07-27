@@ -74,7 +74,7 @@ export async function runLocalConfig(argv: string[]) {
     throw error;
   }
 
-  const serverEntry = buildServerEntry(apiUrl, apiToken);
+  const serverEntry = buildServerEntry(apiUrl, apiToken, { toolMode: opts.toolMode });
   const written = [];
   const selectedPaths = [
     ...(writeCodex ? [getClientPath('codex', root)] : []),
@@ -87,7 +87,7 @@ export async function runLocalConfig(argv: string[]) {
 
   if (writeCodex) {
     const p = getClientPath('codex', root);
-    await mergeCodexConfig(p, apiUrl, apiToken);
+    await mergeCodexConfig(p, apiUrl, apiToken, { toolMode: opts.toolMode });
     written.push({ client: 'codex', path: p });
   }
   if (writeClaude) {

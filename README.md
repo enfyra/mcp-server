@@ -85,6 +85,8 @@ npx @enfyra/mcp-server@latest config [options]
 | `--api-token`, `-t` | Set `ENFYRA_API_TOKEN` |
 | `--yes` | Run non-interactively |
 | `--reconfig` | Select clients again and replace the existing `enfyra` entry |
+| `--compact-tools` | Use guided dynamic packs to minimize the initial tool manifest |
+| `--static-tools` | Use the guided static manifest instead of dynamic packs |
 | `--codex` | Write Codex config |
 | `--claude-code`, `--claude` | Write Claude Code config |
 | `--cursor` | Write Cursor config |
@@ -98,6 +100,8 @@ npx @enfyra/mcp-server@latest config [options]
 |---|---|---|
 | `ENFYRA_API_URL` | Runtime API base written into MCP config | Required |
 | `ENFYRA_API_TOKEN` | Programmatic token from the Enfyra admin UI `/me` | Required |
+
+By default, re-running `config` preserves an existing `ENFYRA_MCP_DYNAMIC_TOOLS`, `ENFYRA_MCP_TOOLSET`, or `ENFYRA_MCP_PROFILE` value. Pass `--compact-tools` or `--static-tools` only when intentionally changing the tool-loading mode.
 
 The API token is exchanged for a short-lived access token at runtime. It is not sent directly as a Bearer token.
 

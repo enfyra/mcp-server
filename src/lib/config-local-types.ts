@@ -4,6 +4,12 @@ export type ChoiceClientKey = ClientKey | 'all';
 
 export type ClientSelection = Record<ClientKey, boolean>;
 
+export type McpConfigToolMode = 'preserve' | 'compact' | 'static';
+
+export type McpServerEntryOptions = {
+  toolMode?: McpConfigToolMode;
+};
+
 export type ParsedArgs = ClientSelection & {
   appUrl?: string;
   apiToken?: string;
@@ -11,6 +17,7 @@ export type ParsedArgs = ClientSelection & {
   yes: boolean;
   reconfig: boolean;
   targetExplicit: boolean;
+  toolMode: McpConfigToolMode;
 };
 
 export type ExistingEnv = {

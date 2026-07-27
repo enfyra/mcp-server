@@ -41,7 +41,20 @@ test('all supported clients are selected equally by default and explicit selecto
   }
 });
 
-test('Codex config writes only the Enfyra API URL and token', async (t) => {
+test('compact and static tool modes are explicit mutually exclusive config choices', () => {
+  assert.equal(parseArgs([]).toolMode, 'preserve');
+  assert.equal(parseArgs(['--compact-tools']).toolMode, 'compact');
+  assert.equal(parseArgs(['--static-tools']).toolMode, 'static');
+  assert.throws(() => parseArgs(['--compact-tools', '--static-tools']), /cannot be combined/i);
+
+  assert.deepEqual(buildServerEntry('http://localhost:3000/api', 'secret-token', { toolMode: 'compact' }).env, {
+    ...EXPECTED_ENV,
+    ENFYRA_MCP_TOOLSET: 'guided',
+    ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
+  });
+});
+
+test('Codex config preserves existing advanced MCP runtime settings by default', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'enfyra-mcp-codex-config-'));
   const configPath = join(root, 'config.toml');
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -59,6 +72,8 @@ test('Codex config writes only the Enfyra API URL and token', async (t) => {
     'ENFYRA_API_URL = "http://old.test/api"',
     'ENFYRA_API_TOKEN = "old-token"',
     'ENFYRA_MCP_DYNAMIC_TOOLS = "on"',
+    'ENFYRA_MCP_TOOLSET = "guided"',
+    'ENFYRA_MCP_PROFILE = "schema"',
     '',
   ].join('\n'));
 
@@ -69,10 +84,12 @@ test('Codex config writes only the Enfyra API URL and token', async (t) => {
   assert.match(config, /\[mcp_servers\.other\]\s+command = "other"/);
   assert.match(config, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_URL = "http:\/\/localhost:3000\/api"/);
   assert.match(config, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_TOKEN = "secret-token"/);
-  assert.doesNotMatch(config, /ENFYRA_MCP_DYNAMIC_TOOLS|ENFYRA_MCP_TOOLSET|ENFYRA_MCP_PROFILE/);
+  assert.match(config, /ENFYRA_MCP_DYNAMIC_TOOLS = "on"/);
+  assert.match(config, /ENFYRA_MCP_TOOLSET = "guided"/);
+  assert.match(config, /ENFYRA_MCP_PROFILE = "schema"/);
 });
 
-test('JSON MCP hosts replace Enfyra with the same two-setting entry', async (t) => {
+test('JSON MCP hosts preserve existing advanced MCP runtime settings by default', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'enfyra-mcp-json-config-'));
   const configPath = join(root, '.mcp.json');
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -85,6 +102,8 @@ test('JSON MCP hosts replace Enfyra with the same two-setting entry', async (t) 
           ENFYRA_API_URL: 'http://old.test/api',
           ENFYRA_API_TOKEN: 'old-token',
           ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
+          ENFYRA_MCP_TOOLSET: 'guided',
+          ENFYRA_MCP_PROFILE: 'schema',
         },
       },
     },
@@ -98,9 +117,44 @@ test('JSON MCP hosts replace Enfyra with the same two-setting entry', async (t) 
   const config = JSON.parse(await readFile(configPath, 'utf8'));
   assert.deepEqual(config.mcpServers.enfyra.env, {
     ...EXPECTED_ENV,
+    ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
+    ENFYRA_MCP_TOOLSET: 'guided',
+    ENFYRA_MCP_PROFILE: 'schema',
   });
   assert.deepEqual(config.mcpServers.enfyra.args, ['-y', '@enfyra/mcp-server@latest']);
   assert.deepEqual(config.mcpServers.other, { command: 'other' });
+});
+
+test('an explicit static mode overrides an existing compact host setting', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'enfyra-mcp-static-config-'));
+  const configPath = join(root, '.mcp.json');
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(configPath, JSON.stringify({
+    mcpServers: {
+      enfyra: {
+        env: {
+          ENFYRA_API_URL: 'http://old.test/api',
+          ENFYRA_API_TOKEN: 'old-token',
+          ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
+          ENFYRA_MCP_TOOLSET: 'full',
+          ENFYRA_MCP_PROFILE: 'runtime',
+        },
+      },
+    },
+  }));
+
+  await mergeMcpFile(
+    configPath,
+    buildServerEntry('http://localhost:3000/api', 'secret-token', { toolMode: 'static' }),
+  );
+
+  const config = JSON.parse(await readFile(configPath, 'utf8'));
+  assert.deepEqual(config.mcpServers.enfyra.env, {
+    ...EXPECTED_ENV,
+    ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
+    ENFYRA_MCP_TOOLSET: 'guided',
+    ENFYRA_MCP_PROFILE: 'runtime',
+  });
 });
 
 test('every supported host serializes the same Enfyra package and environment contract', async (t) => {
@@ -160,10 +214,11 @@ test('VS Code MCP config keeps the same two-setting Enfyra boundary', async (t) 
   });
 });
 
-test('manual Codex configuration keeps the two-setting boundary', async () => {
+test('manual Codex configuration documents optional compact tool mode', async () => {
   const readmePath = fileURLToPath(new URL('../README.md', import.meta.url));
   const readme = await readFile(readmePath, 'utf8');
   assert.match(readme, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_URL/);
   assert.match(readme, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_TOKEN/);
-  assert.doesNotMatch(readme, /ENFYRA_MCP_DYNAMIC_TOOLS|ENFYRA_MCP_TOOLSET|ENFYRA_MCP_PROFILE/);
+  assert.match(readme, /--compact-tools/);
+  assert.match(readme, /--static-tools/);
 });

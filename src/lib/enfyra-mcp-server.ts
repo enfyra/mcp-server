@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
@@ -38,13 +39,23 @@ import {
 } from './toolset-filter.js';
 import { registerWorkflowToolPack } from './workflow-tool-packs.js';
 
+function readPackageVersion(): string {
+  try {
+    const packageJsonPath = new URL('../../package.json', import.meta.url);
+    const parsed = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+    return String(parsed.version || '0.0.0');
+  } catch {
+    return '0.0.0';
+  }
+}
+
 export function createEnfyraMcpServer() {
   initAuth(ENFYRA_API_URL, ENFYRA_API_TOKEN);
 
   const server = new McpServer(
     {
       name: 'enfyra-mcp',
-      version: '1.0.0',
+      version: readPackageVersion(),
     },
     {
       instructions: buildMcpServerInstructions(ENFYRA_API_URL, {

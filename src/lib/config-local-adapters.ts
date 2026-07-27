@@ -2,7 +2,7 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { appendFile, chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
-import type { ExistingEnv } from './config-local-contracts.js';
+import type { ExistingEnv, McpServerEntryOptions } from './config-local-contracts.js';
 
 const SERVER_KEY = 'enfyra';
 const MCP_PACKAGE_SPEC = '@enfyra/mcp-server@latest';
@@ -10,6 +10,43 @@ const PRIVATE_FILE_MODE = 0o600;
 const execFile = promisify(execFileCallback);
 type JsonRecord = Record<string, any>;
 type ServerEntry = ReturnType<typeof buildServerEntry>;
+const ADVANCED_RUNTIME_ENV_KEYS = [
+  'ENFYRA_MCP_DYNAMIC_TOOLS',
+  'ENFYRA_MCP_TOOLSET',
+  'ENFYRA_MCP_PROFILE',
+] as const;
+
+function advancedRuntimeEnv(env: unknown) {
+  const source = env && typeof env === 'object' && !Array.isArray(env) ? env as JsonRecord : {};
+  const result: JsonRecord = {};
+  for (const key of ADVANCED_RUNTIME_ENV_KEYS) {
+    if (typeof source[key] === 'string' && source[key]) result[key] = source[key];
+  }
+  return result;
+}
+
+function runtimeEnvForMode(options: McpServerEntryOptions = {}) {
+  if (options.toolMode === 'compact') {
+    return { ENFYRA_MCP_TOOLSET: 'guided', ENFYRA_MCP_DYNAMIC_TOOLS: 'on' };
+  }
+  if (options.toolMode === 'static') {
+    return { ENFYRA_MCP_TOOLSET: 'guided', ENFYRA_MCP_DYNAMIC_TOOLS: 'off' };
+  }
+  return {};
+}
+
+function mergeServerEntry(existing: unknown, next: ServerEntry): ServerEntry {
+  const existingEntry = existing && typeof existing === 'object' && !Array.isArray(existing)
+    ? existing as JsonRecord
+    : {};
+  return {
+    ...next,
+    env: {
+      ...advancedRuntimeEnv(existingEntry.env),
+      ...next.env,
+    },
+  };
+}
 
 async function writePrivateFile(path: string, content: string) {
   await writeFile(path, content, { encoding: 'utf8', mode: PRIVATE_FILE_MODE });
@@ -63,13 +100,14 @@ export async function assertProjectConfigUntracked(root: string, paths: string[]
   }
 }
 
-export function buildServerEntry(apiUrl: string, apiToken: string) {
+export function buildServerEntry(apiUrl: string, apiToken: string, options: McpServerEntryOptions = {}) {
   return {
     command: 'npx',
     args: ['-y', MCP_PACKAGE_SPEC],
     env: {
       ENFYRA_API_URL: apiUrl,
       ENFYRA_API_TOKEN: apiToken,
+      ...runtimeEnvForMode(options),
     },
   };
 }
@@ -85,7 +123,10 @@ export async function mergeMcpFile(absPath: string, serverEntry: ServerEntry) {
   } catch (e: any) {
     if (e.code !== 'ENOENT') throw e;
   }
-  data.mcpServers = { ...data.mcpServers, [SERVER_KEY]: serverEntry };
+  data.mcpServers = {
+    ...data.mcpServers,
+    [SERVER_KEY]: mergeServerEntry(data.mcpServers[SERVER_KEY], serverEntry),
+  };
   const dir = dirname(absPath);
   await mkdir(dir, { recursive: true });
   await writePrivateFile(absPath, `${JSON.stringify(data, null, 2)}\n`);
@@ -109,7 +150,7 @@ export async function mergeVscodeMcpFile(absPath: string, serverEntry: ServerEnt
     ...data.servers,
     [SERVER_KEY]: {
       type: 'stdio',
-      ...serverEntry,
+      ...mergeServerEntry(data.servers[SERVER_KEY], serverEntry),
     },
   };
   await mkdir(dirname(absPath), { recursive: true });
@@ -120,7 +161,7 @@ function tomlString(value: unknown) {
   return JSON.stringify(String(value ?? ''));
 }
 
-function buildCodexTomlBlock(apiUrl: string, apiToken: string) {
+function buildCodexTomlBlock(apiUrl: string, apiToken: string, runtimeEnv: JsonRecord = {}) {
   return [
     '[mcp_servers.enfyra]',
     'command = "npx"',
@@ -129,11 +170,14 @@ function buildCodexTomlBlock(apiUrl: string, apiToken: string) {
     '[mcp_servers.enfyra.env]',
     `ENFYRA_API_URL = ${tomlString(apiUrl)}`,
     `ENFYRA_API_TOKEN = ${tomlString(apiToken)}`,
+    ...ADVANCED_RUNTIME_ENV_KEYS
+      .filter((key) => typeof runtimeEnv[key] === 'string' && runtimeEnv[key])
+      .map((key) => `${key} = ${tomlString(runtimeEnv[key])}`),
     '',
   ].join('\n');
 }
 
-export async function mergeCodexConfig(absPath: string, apiUrl: string, apiToken: string) {
+export async function mergeCodexConfig(absPath: string, apiUrl: string, apiToken: string, options: McpServerEntryOptions = {}) {
   let raw = '';
   try {
     raw = await readFile(absPath, 'utf8');
@@ -152,8 +196,12 @@ export async function mergeCodexConfig(absPath: string, apiUrl: string, apiToken
     if (!skip) kept.push(line);
   }
 
+  const runtimeEnv = {
+    ...readCodexAdvancedRuntimeEnv(raw),
+    ...runtimeEnvForMode(options),
+  };
   const prefix = kept.join('\n').trimEnd();
-  const next = prefix ? `${prefix}\n\n${buildCodexTomlBlock(apiUrl, apiToken)}` : buildCodexTomlBlock(apiUrl, apiToken);
+  const next = prefix ? `${prefix}\n\n${buildCodexTomlBlock(apiUrl, apiToken, runtimeEnv)}` : buildCodexTomlBlock(apiUrl, apiToken, runtimeEnv);
   await mkdir(dirname(absPath), { recursive: true });
   await writePrivateFile(absPath, next);
 }
@@ -166,6 +214,23 @@ function parseTomlString(value: unknown) {
   } catch {
     return trimmed.replace(/^['"]|['"]$/g, '');
   }
+}
+
+function readCodexAdvancedRuntimeEnv(raw: string) {
+  const values: JsonRecord = {};
+  let inEnv = false;
+  for (const line of raw.split(/\r?\n/)) {
+    const header = line.match(/^\s*\[([^\]]+)\]\s*$/);
+    if (header) {
+      inEnv = header[1].trim() === 'mcp_servers.enfyra.env';
+      continue;
+    }
+    if (!inEnv) continue;
+    const pair = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.+?)\s*$/);
+    if (!pair || !ADVANCED_RUNTIME_ENV_KEYS.includes(pair[1] as typeof ADVANCED_RUNTIME_ENV_KEYS[number])) continue;
+    values[pair[1]] = parseTomlString(pair[2]);
+  }
+  return advancedRuntimeEnv(values);
 }
 
 async function readCodexEnfyraEnv(absPath: string): Promise<ExistingEnv | null> {

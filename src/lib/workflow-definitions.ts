@@ -188,7 +188,7 @@ export const TOOL_WORKFLOWS = [
     inspectTools: ['inspect_table', 'get_table_metadata', 'discover_query_capabilities'],
     knowledgeTools: ['get_enfyra_required_knowledge'],
     writeTools: ['create_records', 'update_records', 'delete_records'],
-    verifyTools: ['find_one_record', 'query_table', 'count_records', 'debug_field_exposure'],
+    verifyTools: ['find_one_record', 'query_table', 'count_records', 'inspect_rest_projection'],
     avoidTools: [
       {
         tool: 'query_table without limit or all=true',
@@ -210,9 +210,9 @@ export const TOOL_WORKFLOWS = [
       },
       {
         tool: 'route-local pre-hook or frontend hiding',
-        when: 'REST fields/deep appears to return an isPublished=false field',
-        useInstead: 'debug_field_exposure',
-        reason: 'Unpublished field exposure is a core contract issue; first produce a compact repro and escalation shape.',
+        when: 'REST fields/deep is missing, access-dependent, or appears to expose an unpublished field',
+        useInstead: 'inspect_rest_projection',
+        reason: 'First validate the recursive metadata contract and compare authenticated/anonymous response shape without exposing values.',
       },
     ],
     requiredAck: ['globalRulesAckKey for writes', 'dynamicCodeAckKey for script-backed sourceCode writes', 'extensionAckKey for extension code writes'],
@@ -220,7 +220,7 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Inspect table metadata and choose fields explicitly.',
       'Use bounded pagination or all=true deliberately.',
-      'For suspected hidden/private field leaks through fields/deep, run debug_field_exposure and escalate core exposure instead of patching UI/hooks.',
+      'For missing, private, or unexpectedly exposed fields through fields/deep, run inspect_rest_projection before changing UI, hooks, or permissions.',
       'For writes, read required knowledge and use plural mutation tools with native array inputs, even for one item.',
       'Re-read with explicit fields after mutation when saved shape matters.',
     ],

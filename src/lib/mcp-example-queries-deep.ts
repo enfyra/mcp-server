@@ -144,6 +144,21 @@ query_table({
         ],
       },
       {
+        name: 'Inspect authenticated and anonymous field projection',
+        code: `inspect_rest_projection({
+  tableName: "account",
+  fields: ["id", "displayName", "settings.locale", "secretToken"],
+  access: "compare",
+  limit: 1
+})`,
+        notes: [
+          'Use this when fields are missing, differ by access, or may expose unpublished metadata.',
+          'The tool recursively validates dotted/deep paths before issuing GET requests.',
+          'It reports response shape and path presence only; record values are not returned.',
+          'A private route is reported separately from a field-projection difference.',
+        ],
+      },
+      {
         name: 'Sort parent rows by child relation aggregates',
         code: `query_table({
   tableName: "cloud_support_tickets",

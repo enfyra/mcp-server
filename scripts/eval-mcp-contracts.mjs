@@ -71,6 +71,20 @@ async function main() {
       if (profile === 'operations') {
         assert.ok(listed.tools.some((tool) => tool.name === 'setup_oauth_provider' && tool.outputSchema));
       }
+      if (profile === 'schema') {
+        const projection = parseToolResult(await client.callTool({
+          name: 'inspect_rest_projection',
+          arguments: {
+            tableName: 'enfyra_method',
+            fields: ['id', 'name'],
+            access: 'authenticated',
+            limit: 1,
+          },
+        }));
+        assert.equal(projection.action, 'rest_projection_inspected');
+        assert.equal(projection.requestExecuted, true);
+        assert.notEqual(projection.verdict, 'schema_contract_mismatch');
+      }
       surfaces[`guided/${profile}`] = measureTools(listed.tools);
       outputSchemas[`guided/${profile}`] = {
         covered: listed.tools.filter((tool) => tool.outputSchema).length,
@@ -202,7 +216,10 @@ async function main() {
     assert.equal(records.dataBoundary.trust, 'untrusted');
     assert.equal(records.schemaReceipt.metadataChecked, true);
     assert.equal(records.schemaReceipt.requestedFieldsValidated, true);
+    assert.equal(records.schemaReceipt.deepValidated, true);
     assert.deepEqual(records.schemaReceipt.requestedTopLevelFields, ['id', 'name']);
+    assert.deepEqual(records.schemaReceipt.validatedPaths, ['id', 'name']);
+    assert.deepEqual(records.schemaReceipt.metadataTablesChecked, ['enfyra_method']);
     scenarios.push({ name: 'untrusted_data_boundary', status: 'passed' });
 
     const exactMissing = parseToolResult(await client.callTool({

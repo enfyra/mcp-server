@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { countTokens } from 'gpt-tokenizer';
 
 const BASELINES = [
   {
@@ -14,7 +15,8 @@ const BASELINES = [
     },
     unsetDynamic: true,
     count: 84,
-    hash: 'a08d7919a08303c7eeb16876312511380fb197ebca1ae1ef90b0553a06e9cabe',
+    hash: '90f8f6bcf0bb91dce1cc7dfcf1f32e6b5b01863a860136e11225a3cbfc6d5fab',
+    maxTokens: 34000,
   },
   {
     name: 'guided-dynamic',
@@ -24,7 +26,8 @@ const BASELINES = [
       ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
     },
     count: 13,
-    hash: '7cf886a207311a214e2be435358574f9f44b1d9719b319455172991c5b384da0',
+    hash: 'd7cf661155fb22bf99377a11579d0264781ac364b0cb458c6272851532af8b36',
+    maxTokens: 5000,
   },
   {
     name: 'guided-static',
@@ -34,7 +37,8 @@ const BASELINES = [
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
     count: 84,
-    hash: 'a08d7919a08303c7eeb16876312511380fb197ebca1ae1ef90b0553a06e9cabe',
+    hash: '90f8f6bcf0bb91dce1cc7dfcf1f32e6b5b01863a860136e11225a3cbfc6d5fab',
+    maxTokens: 34000,
   },
   {
     name: 'full',
@@ -43,8 +47,9 @@ const BASELINES = [
       ENFYRA_MCP_PROFILE: 'all',
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
-    count: 132,
-    hash: '4adb33e277df3b116699e7882a605e395cfe616d2a66f67f27816d7729471e9b',
+    count: 133,
+    hash: '70407a0d3d0fae8de40672ff7080a8edbf82331ec8c15af576c450a26f36a97e',
+    maxTokens: 49000,
   },
 ];
 
@@ -63,16 +68,18 @@ async function readManifest(baseline) {
     const page = await client.listTools();
     const tools = [...page.tools]
       .sort((a, b) => a.name.localeCompare(b.name))
-      .map(({ name, description, inputSchema, annotations }) => ({
+      .map(({ name, description, inputSchema, outputSchema, annotations }) => ({
         name,
         description,
         inputSchema,
+        outputSchema,
         annotations,
       }));
     const serialized = JSON.stringify(tools);
     return {
       count: tools.length,
       hash: createHash('sha256').update(serialized).digest('hex'),
+      tokenizerTokens: countTokens(serialized),
     };
   } finally {
     await client.close();
@@ -82,9 +89,13 @@ async function readManifest(baseline) {
 for (const baseline of BASELINES) {
   test(`tool manifest remains stable for ${baseline.name}`, async () => {
     const manifest = await readManifest(baseline);
-    assert.deepEqual(manifest, {
+    assert.deepEqual({ count: manifest.count, hash: manifest.hash }, {
       count: baseline.count,
       hash: baseline.hash,
     });
+    assert.ok(
+      manifest.tokenizerTokens <= baseline.maxTokens,
+      `${baseline.name} tool manifest uses ${manifest.tokenizerTokens} tokens; budget is ${baseline.maxTokens}`,
+    );
   });
 }

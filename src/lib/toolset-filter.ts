@@ -51,7 +51,7 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     ...CORE_TOOL_NAMES,
     'build_dynamic_repository_usage',
     'search_runtime_zone',
-    'debug_field_exposure',
+    'inspect_rest_projection',
     'inspect_table',
     'inspect_route',
     'get_table_metadata',

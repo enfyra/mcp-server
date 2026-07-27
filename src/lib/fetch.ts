@@ -68,7 +68,7 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
   }
 
   let res = await requestWithCurrentToken();
-  if ((res.status === 401 || res.status === 403) && hasApiToken()) {
+  if (res.status === 401 && hasApiToken()) {
     clearRuntimeCache('auth');
     resetTokens();
     res = await requestWithCurrentToken();

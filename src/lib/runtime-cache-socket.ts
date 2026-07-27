@@ -1,7 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { getValidToken } from './auth.js';
 import { fetchAPI } from './fetch.js';
-import { clearRuntimeCacheDomains, recordRuntimeCacheWarm, runtimeCacheDomainsForReloadSteps, runtimeCacheKeysForDomains } from './runtime-cache.js';
+import { clearRuntimeCache, clearRuntimeCacheDomains, recordRuntimeCacheWarm, runtimeCacheDomainsForReloadSteps, runtimeCacheKeysForDomains } from './runtime-cache.js';
 
 type ReloadPayload = {
   status?: 'pending' | 'done';
@@ -92,11 +92,17 @@ function scheduleRuntimeCacheSocketReconnect(apiUrl: string) {
 }
 
 function bindRuntimeCacheSocketEvents(nextSocket: Socket, apiUrl: string) {
+  let hasConnectedBefore = false;
+
   nextSocket.on('$system:reload', (payload: ReloadPayload) => {
     if (payload?.status === 'done') invalidateAndWarm(apiUrl, payload.steps || []);
   });
 
   nextSocket.on('connect', () => {
+    if (hasConnectedBefore) {
+      clearRuntimeCache('reload');
+    }
+    hasConnectedBefore = true;
     reconnectAttempt = 0;
   });
 

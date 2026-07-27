@@ -85,7 +85,9 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('discover_enfyra_workflows', 'guided'), true);
   assert.equal(isToolVisibleInToolset('search_admin_extensions', 'guided'), true);
   assert.equal(isToolVisibleInToolset('search_runtime_zone', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('debug_field_exposure', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('inspect_rest_projection', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('debug_field_exposure', 'guided'), false);
+  assert.equal(isToolVisibleInToolset('debug_field_exposure', 'full'), true);
   assert.equal(isToolVisibleInToolset('api_endpoint_workflow', 'guided'), true);
   assert.equal(isToolVisibleInToolset('patch_extension_code', 'guided'), true);
   assert.equal(isToolVisibleInToolset('verify_extension_runtime', 'guided'), true);

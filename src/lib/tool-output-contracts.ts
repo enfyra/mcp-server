@@ -79,8 +79,32 @@ const queryTableOutputSchema = {
     primaryKey: z.string().nullable(),
     metadataChecked: z.literal(true),
     requestedFieldsValidated: z.literal(true),
+    deepValidated: z.literal(true),
     requestedTopLevelFields: z.array(z.string()),
+    validatedPaths: z.array(z.string()),
+    pathMetadata: z.array(z.object({
+      path: z.string(),
+      tableName: z.string(),
+      fieldName: z.string(),
+      kind: z.enum(['column', 'relation', 'wildcard']),
+      isPublished: z.boolean().nullable(),
+      isEncrypted: z.boolean().nullable(),
+    }).passthrough()),
+    resolvedRelations: z.array(z.object({
+      path: z.string(),
+      sourceTable: z.string(),
+      targetTable: z.string(),
+      type: z.string().nullable(),
+    }).passthrough()),
+    metadataTablesChecked: z.array(z.string()),
   }).passthrough(),
+} satisfies ZodRawShape;
+
+const restProjectionOutputSchema = {
+  ...actionOutputSchema,
+  action: z.literal('rest_projection_inspected'),
+  verdict: z.string(),
+  requestExecuted: z.boolean(),
 } satisfies ZodRawShape;
 
 const deleteRecordsOutputSchema = {
@@ -191,6 +215,7 @@ export function getToolOutputSchema(toolName: string): ZodRawShape | undefined {
   if (toolName === 'execute_enfyra_tool') return catalogExecuteOutputSchema;
   if (toolName === 'get_enfyra_api_context') return apiContextOutputSchema;
   if (toolName === 'query_table') return queryTableOutputSchema;
+  if (toolName === 'inspect_rest_projection') return restProjectionOutputSchema;
   if (toolName === 'delete_records') return deleteRecordsOutputSchema;
   if (['delete_tables', 'delete_columns', 'delete_relations', 'delete_method', 'delete_route'].includes(toolName)) {
     return destructiveOutputSchema;

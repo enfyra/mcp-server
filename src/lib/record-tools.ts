@@ -25,12 +25,15 @@ import {
   prepareGenericBatchMutation,
   prepareGenericMutation,
   stringifyJsonArg,
+  summarizeTable,
   summarizeMutationResult,
   validateExtensionCodeForGenericMutation,
 } from './enfyra-tool-logic.js';
 import { fetchAPI, validateFilter, validateTableName } from './fetch.js';
+import { fetchTableMetadata } from './metadata-client.js';
 import { assertGenericRecordMutationAllowed, parseRecordBatchData } from './mutation-guards.js';
-import { assertRecordFieldsReadable, buildDeletePostcondition, buildQuerySchemaReceipt } from './record-contracts.js';
+import { validateQueryContract } from './query-contract.js';
+import { assertRecordFieldsReadable, buildDeletePostcondition } from './record-contracts.js';
 import {
   assertGlobalRulesAck,
   dynamicCodeKnowledgeAckParam,
@@ -38,11 +41,12 @@ import {
   globalRulesAckParam
 } from './required-knowledge.js';
 import { jsonContent } from './response-format.js';
+import { inspectRestProjection } from './rest-projection.js';
 import { executeSequentialBatch } from './sequential-batch.js';
 import { compactSourceFields } from './source-artifacts.js';
 
 export function registerRecordTools(server, ENFYRA_API_URL) {
-  server.tool('query_table', 'Query any route-backed table with a live metadata preflight. Explicit fields are validated before the REST read and the result includes schemaReceipt, so a separate metadata call is optional unless the schema itself must be inspected. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
+  server.tool('query_table', 'Query any route-backed table with a recursive live metadata preflight. Explicit dotted fields and deep relation fields are validated against every target table before the REST read, and the result includes schemaReceipt. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects instead of guessing _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
     tableName: z.string().describe('Table name to query'),
     filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object. Example: {"status": {"_eq": "active"}}.'),
     sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
@@ -67,7 +71,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     const deepParam = stringifyJsonArg(deep);
     const aggregateParam = stringifyJsonArg(aggregate);
     validateFilter(filter);
-    parseJsonArg(deep, undefined);
+    const parsedDeep = parseJsonArg(deep, undefined);
     parseJsonArg(aggregate, undefined);
   
     const queryParams = new URLSearchParams();
@@ -76,7 +80,12 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     const requestedFields = fields && fields.length > 0 ? fields : [primaryKey];
     const deepFieldSelection = applyDeepFieldSelections(requestedFields, deep);
     const selectedFields = deepFieldSelection.fields;
-    const schemaReceipt = buildQuerySchemaReceipt({ ...table, primaryKey }, selectedFields);
+    const schemaReceipt = await validateQueryContract({
+      rootTable: { ...table, primaryKey },
+      fields: selectedFields,
+      deep: parsedDeep,
+      loadTable: async (targetTableName) => summarizeTable(await fetchTableMetadata(ENFYRA_API_URL, targetTableName)),
+    });
     if (filterParam) queryParams.set('filter', filterParam);
     const normalizedSort = normalizeSortParam(sort);
     if (normalizedSort) queryParams.set('sort', normalizedSort);
@@ -101,7 +110,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
       all: !!all,
       queryOptions: {
         meta: meta || null,
-        deep: deep ? parseJsonArg(deep, null) : null,
+        deep: parsedDeep ?? null,
         aggregate: aggregate ? parseJsonArg(aggregate, null) : null,
       },
       minimalDefaultApplied: !(fields && fields.length > 0),
@@ -114,6 +123,26 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     };
     return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
   });
+
+  server.tool(
+    'inspect_rest_projection',
+    [
+      'Inspect a route-backed REST projection without returning record values.',
+      'Recursively validate explicit fields and deep selections before the request, then compare authenticated and anonymous response shape when requested.',
+      'Use this for missing fields, access-dependent projections, unpublished omissions, or suspected public exposure.',
+    ].join(' '),
+    {
+      tableName: z.string().describe('Metadata table whose field and relation contract should be validated.'),
+      fields: z.array(z.string()).min(1).describe('Explicit include fields or dotted relation paths. Wildcards and exclusions are rejected.'),
+      routePath: z.string().optional().describe('Optional API route path when it differs from /<tableName>. Full URLs and query strings are rejected.'),
+      filter: jsonObjectParam(z, 'Filter object').optional().describe('Optional Query DSL filter object.'),
+      sort: z.string().optional().describe('Optional REST sort expression.'),
+      deep: jsonObjectParam(z, 'Deep relation fetch object').optional().describe('Optional deep relation fetch object. Fields inside deep are validated recursively.'),
+      limit: z.number().int().min(1).max(10).optional().default(1).describe('Small sample size used only to inspect response shape.'),
+      access: z.enum(['authenticated', 'anonymous', 'compare']).optional().default('compare').describe('Run authenticated, anonymous, or both projections.'),
+    },
+    async (input) => jsonContent(await inspectRestProjection(ENFYRA_API_URL, input)),
+  );
 
   server.tool(
     'count_records',

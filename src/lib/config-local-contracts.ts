@@ -1,6 +1,6 @@
 import { stdout as output } from 'node:process';
 import type { ClientKey, ExistingEnv, ParsedArgs } from './config-local-types.js';
-export type { ChoiceClientKey, ClientKey, ClientSelection, ExistingEnv, KeypressInfo, ParsedArgs, TargetChoice } from './config-local-types.js';
+export type { ChoiceClientKey, ClientKey, ClientSelection, ExistingEnv, KeypressInfo, McpConfigToolMode, McpServerEntryOptions, ParsedArgs, TargetChoice } from './config-local-types.js';
 
 const forceColor = process.env.FORCE_COLOR != null && process.env.FORCE_COLOR !== '0';
 const canStyle = forceColor || (output.isTTY && process.env.NO_COLOR == null);
@@ -78,6 +78,8 @@ ${style.bold('Options')}
   --api-token, -t <secret>  ENFYRA_API_TOKEN
   --reconfig              Always choose target again in interactive mode and replace the old enfyra config for that target
   --yes                   Non-interactive: no prompts (CI / scripts); use CLI, env, existing file, then defaults
+  --compact-tools         Use guided dynamic packs to minimize the initial tool manifest
+  --static-tools          Use the guided static manifest; cannot be combined with --compact-tools
 
 ${style.bold('Client selection')}
   Non-interactive default is all supported clients. In a TTY with no target flags, choose with ↑/↓.
@@ -121,6 +123,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     vscode: true,
     antigravity: true,
     targetExplicit: false,
+    toolMode: 'preserve',
   };
   let pickClaude = false;
   let pickCursor = false;
@@ -139,6 +142,14 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (a === 'help') out.help = true;
     else if (a === '--yes') out.yes = true;
     else if (a === '--reconfig') out.reconfig = true;
+    else if (a === '--compact-tools') {
+      if (out.toolMode === 'static') throw new Error('--compact-tools and --static-tools cannot be combined');
+      out.toolMode = 'compact';
+    }
+    else if (a === '--static-tools') {
+      if (out.toolMode === 'compact') throw new Error('--compact-tools and --static-tools cannot be combined');
+      out.toolMode = 'static';
+    }
     else if (a === '--app-url') out.appUrl = next();
     else if (a === '--api-url' || a === '-a') {
       throw new Error(`${a} is no longer supported for setup; use --app-url instead`);

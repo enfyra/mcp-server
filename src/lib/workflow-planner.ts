@@ -55,7 +55,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
       return [
         step(1, 'inspect_table', 'Read live columns, relations, primary key, route path, and field visibility.'),
         step(2, 'discover_query_capabilities', 'Load filter/deep/sort/aggregate shape when query shape is non-trivial.'),
-        step(3, 'debug_field_exposure', 'Build a compact repro when fields/deep may expose an unpublished field; escalate core exposure instead of adding local fixes.', { when: 'The task is about hidden/private/secret field exposure.' }),
+        step(3, 'inspect_rest_projection', 'Validate recursive fields/deep and compare authenticated/anonymous response shape.', { when: 'Fields are missing, unexpectedly exposed, or permission-dependent.' }),
         step(4, 'query_table / find_one_record / count_records', 'Read records with explicit fields and bounded pagination.'),
         step(5, 'create_records / update_records / delete_records', 'For writes, use only metadata-backed column names and relation propertyName values. Always pass a native array, even for one item.', { when: 'Only after required knowledge is read for writes.' }),
         step(6, 'find_one_record or query_table', 'Verify the saved/read shape with explicit fields.'),

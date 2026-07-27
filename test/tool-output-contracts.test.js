@@ -21,6 +21,7 @@ test('core workflow tools receive formal output schemas', () => {
     'search_admin_extensions',
     'inspect_table',
     'inspect_route',
+    'inspect_rest_projection',
     'api_endpoint_workflow',
     'extension_workflow',
     'flow_workflow',
@@ -76,11 +77,34 @@ test('record read and delete output contracts require deterministic receipts', (
       primaryKey: 'id',
       metadataChecked: true,
       requestedFieldsValidated: true,
+      deepValidated: true,
       requestedTopLevelFields: ['id'],
+      validatedPaths: ['id'],
+      pathMetadata: [{
+        path: 'id',
+        tableName: 'tasks',
+        fieldName: 'id',
+        kind: 'column',
+        isPublished: true,
+        isEncrypted: false,
+      }],
+      resolvedRelations: [],
+      metadataTablesChecked: ['tasks'],
     },
   }).success, true);
   assert.equal(validateStructuredToolOutput('query_table', {
     responseFormat: 'json-v1',
+  }).success, false);
+
+  assert.equal(validateStructuredToolOutput('inspect_rest_projection', {
+    responseFormat: 'json-v1',
+    action: 'rest_projection_inspected',
+    verdict: 'projections_match',
+    requestExecuted: true,
+  }).success, true);
+  assert.equal(validateStructuredToolOutput('inspect_rest_projection', {
+    responseFormat: 'json-v1',
+    action: 'rest_projection_inspected',
   }).success, false);
 
   assert.equal(validateStructuredToolOutput('delete_records', {

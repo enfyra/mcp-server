@@ -568,8 +568,8 @@ export function registerRuntimeZoneTools(server: any, ENFYRA_API_URL: string) {
   server.tool(
     'debug_field_exposure',
     [
-      'Diagnose whether a REST fields/deep projection exposes an isPublished=false field.',
-      'Use this for suspected secret/private field leaks. It builds a minimal repro and tells the agent when this is a core bug rather than a hook/frontend fix.',
+      'Compatibility inspector for a single suspected isPublished=false REST field exposure.',
+      'Prefer inspect_rest_projection for recursive metadata validation and authenticated/anonymous projection comparison.',
     ].join(' '),
     {
       tableName: z.string().describe('Root route-backed table name used by the REST request.'),

@@ -242,7 +242,7 @@ test('startup instructions remain a compact router because hosts may repeat them
   const instructions = buildMcpServerInstructions('https://admin.example.com/api', {
     toolsetSummary: 'Toolset mode: guided.',
   });
-  assert.ok(Buffer.byteLength(instructions, 'utf8') < 1800);
+  assert.ok(Buffer.byteLength(instructions, 'utf8') < 1200);
   assert.match(instructions, /get_enfyra_api_context/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(instructions, /discover_enfyra_workflows/);

@@ -437,6 +437,7 @@ test('discovery tools report target instance and avoid unbounded broad searches'
 
 test('query_table supports deep meta and aggregate query options', () => {
   const entry = readEntrySource();
+  const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
   assert.match(entry, /meta: z\.string\(\)\.optional\(\)/);
   assert.match(entry, /deep: jsonObjectParam\(z, 'Deep relation fetch object'\)\.optional\(\)/);
   assert.match(entry, /aggregate: jsonObjectParam\(z, 'Aggregate object'\)\.optional\(\)/);
@@ -446,6 +447,10 @@ test('query_table supports deep meta and aggregate query options', () => {
   assert.match(entry, /function applyDeepFieldSelections/);
   assert.match(entry, /autoAddedDeepFields/);
   assert.match(entry, /query_table auto-adds missing top-level deep relation names to fields/);
+  assert.match(entry, /validateQueryContract/);
+  assert.match(entry, /server\.tool\(\s*['"]inspect_rest_projection['"]/);
+  assert.match(requiredKnowledge, /Explicit dotted fields and fields inside deep are recursively checked/);
+  assert.match(requiredKnowledge, /compare authenticated and anonymous response shape without returning record values/);
 });
 
 test('generic read tools reject enfyra_extension sourceCode confusion', () => {
