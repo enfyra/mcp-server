@@ -53,10 +53,6 @@ export function assertGlobalRulesAck(key) {
   }
 }
 
-export function assertGlobalRulesAckIf(condition, key) {
-  if (condition) assertGlobalRulesAck(key);
-}
-
 export function assertDynamicCodeKnowledgeAck(key) {
   if (!acknowledgedDomains.has('dynamicServerCode') && (!hasExplicitAckKey(key) || key !== DYNAMIC_CODE_KNOWLEDGE_ACK_KEY)) {
     throw new Error('Missing or invalid dynamic-code knowledge acknowledgement. Call get_enfyra_required_knowledge, read the dynamic server code contracts, then pass dynamicCodeAckKey as knowledgeAckKey.');

@@ -49,10 +49,6 @@ export function needsRefresh(): boolean {
   return Date.now() + TOKEN_REFRESH_BUFFER >= tokenExpiry;
 }
 
-export function getAccessToken(): string | null {
-  return accessToken;
-}
-
 export function hasApiToken(): boolean {
   return !!API_TOKEN;
 }

@@ -125,10 +125,6 @@ export function setRuntimeCache(path: string, value: unknown) {
   entries.set(path, { domain, value: clone(value) });
 }
 
-export function runtimeCacheKeys() {
-  return [...entries.keys()];
-}
-
 export function runtimeCacheKeysForDomains(domains: Iterable<RuntimeCacheDomain>) {
   const allowed = new Set(domains);
   return [...entries.entries()]

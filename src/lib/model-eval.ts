@@ -1,3 +1,4 @@
+// Note: test-only utility. Only consumed by test/model-eval.test.js
 import { destructiveToolInputsMatch } from './session-safety.js';
 import { isDestructiveTool, isMutationTool } from './tool-contracts.js';
 import type {

@@ -87,28 +87,6 @@ export async function validateDynamicScript(apiUrl, sourceCode, scriptLanguage =
   };
 }
 
-export function readTemplateBlocks(code) {
-  const blocks = [];
-  const lower = String(code || '').toLowerCase();
-  let index = 0;
-  while (index < lower.length) {
-    const openStart = lower.indexOf('<template', index);
-    if (openStart === -1) break;
-    const boundary = lower[openStart + '<template'.length];
-    if (boundary && !/\s|>/.test(boundary)) {
-      index = openStart + 1;
-      continue;
-    }
-    const openEnd = lower.indexOf('>', openStart + '<template'.length);
-    if (openEnd === -1) break;
-    const closeStart = lower.indexOf('</template', openEnd + 1);
-    if (closeStart === -1) break;
-    blocks.push(String(code).slice(openEnd + 1, closeStart));
-    index = closeStart + '</template'.length;
-  }
-  return blocks;
-}
-
 function findInvalidExtensionSortSyntax(code) {
   const source = String(code || '');
   if (/\bsort\s*:\s*\[[\s\S]*?\]/u.test(source)) {
