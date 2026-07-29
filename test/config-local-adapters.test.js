@@ -11,6 +11,7 @@ import {
   mergeCodexConfig,
   mergeMcpFile,
   mergeVscodeMcpFile,
+  mergeZcodeConfig,
 } from '../dist/lib/config-local-adapters.js';
 import { parseArgs } from '../dist/lib/config-local-contracts.js';
 
@@ -26,6 +27,7 @@ test('all supported clients are selected equally by default and explicit selecto
     cursor: '--cursor',
     vscode: '--vscode',
     antigravity: '--antigravity',
+    zcode: '--zcode',
   };
   const defaultSelection = parseArgs([]);
 
@@ -167,6 +169,7 @@ test('every supported host serializes the same Enfyra package and environment co
     cursor: getClientPath('cursor', root),
     vscode: getClientPath('vscode', root),
     antigravity: getClientPath('antigravity', root),
+    zcode: getClientPath('zcode', root),
   };
 
   await mergeCodexConfig(paths.codex, EXPECTED_ENV.ENFYRA_API_URL, EXPECTED_ENV.ENFYRA_API_TOKEN);
@@ -175,6 +178,7 @@ test('every supported host serializes the same Enfyra package and environment co
     mergeMcpFile(paths.cursor, serverEntry),
     mergeVscodeMcpFile(paths.vscode, serverEntry),
     mergeMcpFile(paths.antigravity, serverEntry),
+    mergeZcodeConfig(paths.zcode, serverEntry),
   ]);
 
   for (const client of ['claude', 'cursor', 'antigravity']) {
@@ -187,6 +191,9 @@ test('every supported host serializes the same Enfyra package and environment co
     type: 'stdio',
     ...serverEntry,
   });
+
+  const zcodeConfig = JSON.parse(await readFile(paths.zcode, 'utf8'));
+  assert.deepEqual(zcodeConfig.mcp.servers.enfyra, serverEntry);
 
   const codexConfig = await readFile(paths.codex, 'utf8');
   assert.match(codexConfig, /command = "npx"/);
@@ -221,4 +228,52 @@ test('manual Codex configuration documents optional compact tool mode', async ()
   assert.match(readme, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_TOKEN/);
   assert.match(readme, /--compact-tools/);
   assert.match(readme, /--static-tools/);
+});
+
+test('ZCode config uses nested mcp.servers and preserves existing settings', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'enfyra-mcp-zcode-config-'));
+  const configPath = join(root, '.zcode', 'config.json');
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await mergeZcodeConfig(
+    configPath,
+    buildServerEntry('http://localhost:3000/api', 'secret-token'),
+  );
+
+  let config = JSON.parse(await readFile(configPath, 'utf8'));
+  assert.deepEqual(config.mcp.servers.enfyra.env, EXPECTED_ENV);
+  assert.deepEqual(config.mcp.servers.enfyra.args, ['-y', '@enfyra/mcp-server@latest']);
+
+  // Merge again with existing advanced runtime env preserved
+  await writeFile(configPath, JSON.stringify({
+    mcp: {
+      servers: {
+        other: { command: 'other' },
+        enfyra: {
+          command: 'old',
+          env: {
+            ENFYRA_API_URL: 'http://old.test/api',
+            ENFYRA_API_TOKEN: 'old-token',
+            ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
+            ENFYRA_MCP_TOOLSET: 'guided',
+          },
+        },
+      },
+    },
+    hooks: { enabled: true },
+  }));
+
+  await mergeZcodeConfig(
+    configPath,
+    buildServerEntry('http://localhost:3000/api', 'secret-token'),
+  );
+
+  config = JSON.parse(await readFile(configPath, 'utf8'));
+  assert.deepEqual(config.mcp.servers.enfyra.env, {
+    ...EXPECTED_ENV,
+    ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
+    ENFYRA_MCP_TOOLSET: 'guided',
+  });
+  assert.deepEqual(config.mcp.servers.other, { command: 'other' });
+  assert.deepEqual(config.hooks, { enabled: true });
 });

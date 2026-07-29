@@ -1,4 +1,4 @@
-export type ClientKey = 'codex' | 'claude' | 'cursor' | 'vscode' | 'antigravity';
+export type ClientKey = 'codex' | 'claude' | 'cursor' | 'vscode' | 'antigravity' | 'zcode';
 
 export type ChoiceClientKey = ClientKey | 'all';
 

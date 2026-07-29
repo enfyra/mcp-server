@@ -11,31 +11,35 @@ export async function promptTargetChoice(): Promise<ClientSelection> {
   const choices: TargetChoice[] = [
     {
       client: 'codex',
-      value: { claude: false, cursor: false, codex: true, vscode: false, antigravity: false },
+      value: { claude: false, cursor: false, codex: true, vscode: false, antigravity: false, zcode: false },
     },
     {
       client: 'claude',
-      value: { claude: true, cursor: false, codex: false, vscode: false, antigravity: false },
+      value: { claude: true, cursor: false, codex: false, vscode: false, antigravity: false, zcode: false },
     },
     {
       client: 'cursor',
-      value: { claude: false, cursor: true, codex: false, vscode: false, antigravity: false },
+      value: { claude: false, cursor: true, codex: false, vscode: false, antigravity: false, zcode: false },
     },
     {
       client: 'vscode',
-      value: { claude: false, cursor: false, codex: false, vscode: true, antigravity: false },
+      value: { claude: false, cursor: false, codex: false, vscode: true, antigravity: false, zcode: false },
     },
     {
       client: 'antigravity',
-      value: { claude: false, cursor: false, codex: false, vscode: false, antigravity: true },
+      value: { claude: false, cursor: false, codex: false, vscode: false, antigravity: true, zcode: false },
+    },
+    {
+      client: 'zcode',
+      value: { claude: false, cursor: false, codex: false, vscode: false, antigravity: false, zcode: true },
     },
     {
       client: 'all',
-      value: { claude: true, cursor: true, codex: true, vscode: true, antigravity: true },
+      value: { claude: true, cursor: true, codex: true, vscode: true, antigravity: true, zcode: true },
     },
   ];
   if (input.setRawMode && output.isTTY) {
-    return promptTargetSelect(choices, 5);
+    return promptTargetSelect(choices, 6);
   }
 
   const rl = createInterface({ input, output });
@@ -46,29 +50,33 @@ export async function promptTargetChoice(): Promise<ClientSelection> {
       + '  [3] Cursor       ./.cursor/mcp.json\n'
       + '  [4] VS Code      ./.vscode/mcp.json\n'
       + '  [5] Antigravity  ./.agents/mcp_config.json\n'
-      + '  [6] All [default]\n'
-      + 'Choice [6]: ',
+      + '  [6] ZCode        ./.zcode/config.json\n'
+      + '  [7] All [default]\n'
+      + 'Choice [7]: ',
   )).trim().toLowerCase();
   await rl.close();
-  if (line === '' || line === '6' || line === 'all' || line === 'a') {
-    return { claude: true, cursor: true, codex: true, vscode: true, antigravity: true };
+  if (line === '' || line === '7' || line === 'all' || line === 'a') {
+    return { claude: true, cursor: true, codex: true, vscode: true, antigravity: true, zcode: true };
   }
   if (line === '1' || line === 'codex' || line === 'x') {
-    return { claude: false, cursor: false, codex: true, vscode: false, antigravity: false };
+    return { claude: false, cursor: false, codex: true, vscode: false, antigravity: false, zcode: false };
   }
   if (line === '2' || line === 'claude' || line === 'claude-code') {
-    return { claude: true, cursor: false, codex: false, vscode: false, antigravity: false };
+    return { claude: true, cursor: false, codex: false, vscode: false, antigravity: false, zcode: false };
   }
   if (line === '3' || line === 'cursor' || line === 'u') {
-    return { claude: false, cursor: true, codex: false, vscode: false, antigravity: false };
+    return { claude: false, cursor: true, codex: false, vscode: false, antigravity: false, zcode: false };
   }
   if (line === '4' || line === 'vscode' || line === 'vs-code' || line === 'copilot') {
-    return { claude: false, cursor: false, codex: false, vscode: true, antigravity: false };
+    return { claude: false, cursor: false, codex: false, vscode: true, antigravity: false, zcode: false };
   }
   if (line === '5' || line === 'antigravity') {
-    return { claude: false, cursor: false, codex: false, vscode: false, antigravity: true };
+    return { claude: false, cursor: false, codex: false, vscode: false, antigravity: true, zcode: false };
   }
-  return { claude: true, cursor: true, codex: true, vscode: true, antigravity: true };
+  if (line === '6' || line === 'zcode' || line === 'z') {
+    return { claude: false, cursor: false, codex: false, vscode: false, antigravity: false, zcode: true };
+  }
+  return { claude: true, cursor: true, codex: true, vscode: true, antigravity: true, zcode: true };
 }
 
 async function promptTargetSelect(choices: TargetChoice[], initialIndex = 0): Promise<ClientSelection> {
@@ -81,7 +89,7 @@ async function promptTargetSelect(choices: TargetChoice[], initialIndex = 0): Pr
     if (choice.client === 'all') {
       const label = active ? style.bold(style.underline('All supported clients')) : 'All supported clients';
       const paddedLabel = label + ' '.repeat(22 - 'All supported clients'.length);
-      const hint = active ? style.cyan('Codex + Claude Code + Cursor + VS Code + Antigravity') : style.dim('Codex + Claude Code + Cursor + VS Code + Antigravity');
+      const hint = active ? style.cyan('Codex + Claude Code + Cursor + VS Code + Antigravity + ZCode') : style.dim('Codex + Claude Code + Cursor + VS Code + Antigravity + ZCode');
       return `${accent} ${indicator} ${paddedLabel} ${hint}`;
     }
 

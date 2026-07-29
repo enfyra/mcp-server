@@ -1,6 +1,6 @@
 # Enfyra MCP Server
 
-Connect Enfyra to MCP-compatible coding tools such as Codex, Claude Code, Cursor, VS Code / GitHub Copilot, Google Antigravity, and other STDIO MCP hosts.
+Connect Enfyra to MCP-compatible coding tools such as Codex, Claude Code, Cursor, VS Code / GitHub Copilot, Google Antigravity, ZCode, and other STDIO MCP hosts.
 
 ## Install and Configure
 
@@ -25,6 +25,7 @@ It writes project-local configuration and replaces only the `enfyra` server entr
 | Cursor | `npx @enfyra/mcp-server@latest config --cursor` | `.cursor/mcp.json` |
 | VS Code / GitHub Copilot | `npx @enfyra/mcp-server@latest config --vscode` | `.vscode/mcp.json` |
 | Google Antigravity | `npx @enfyra/mcp-server@latest config --antigravity` | `.agents/mcp_config.json` |
+| ZCode | `npx @enfyra/mcp-server@latest config --zcode` | `.zcode/config.json` |
 
 Non-interactive setup for all supported clients:
 
@@ -71,6 +72,25 @@ ENFYRA_API_URL = "http://localhost:3000/api"
 ENFYRA_API_TOKEN = "efy_pat_your-token"
 ```
 
+ZCode uses a nested `mcp.servers` JSON structure in `.zcode/config.json`:
+
+```json
+{
+  "mcp": {
+    "servers": {
+      "enfyra": {
+        "command": "npx",
+        "args": ["-y", "@enfyra/mcp-server@latest"],
+        "env": {
+          "ENFYRA_API_URL": "http://localhost:3000/api",
+          "ENFYRA_API_TOKEN": "efy_pat_your-token"
+        }
+      }
+    }
+  }
+}
+```
+
 Restart or reload the MCP client after writing configuration. Keep the token out of committed files.
 
 ## Config Command
@@ -92,6 +112,7 @@ npx @enfyra/mcp-server@latest config [options]
 | `--cursor` | Write Cursor config |
 | `--vscode`, `--copilot` | Write VS Code / GitHub Copilot config |
 | `--antigravity` | Write Google Antigravity config |
+| `--zcode` | Write ZCode config |
 | `-h`, `--help` | Show CLI help |
 
 ## Environment

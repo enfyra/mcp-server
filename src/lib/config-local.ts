@@ -1,7 +1,7 @@
 import { cwd, stdin as input, stdout as output } from 'node:process';
 import {
   assertProjectConfigUntracked, buildServerEntry, ensureProjectConfigIgnored, getClientPath,
-  loadExistingEnfyraEnv, mergeCodexConfig, mergeMcpFile, mergeVscodeMcpFile,
+  loadExistingEnfyraEnv, mergeCodexConfig, mergeMcpFile, mergeVscodeMcpFile, mergeZcodeConfig,
 } from './config-local-adapters.js';
 import {
   clients, exitCancelled, isCancelError, parseArgs, printHelp, statusIcon, style, type ParsedArgs,
@@ -43,6 +43,7 @@ export async function runLocalConfig(argv: string[]) {
   let writeCodex = opts.codex;
   let writeVscode = opts.vscode;
   let writeAntigravity = opts.antigravity;
+  let writeZcode = opts.zcode;
   if (usePrompt && (!opts.targetExplicit || opts.reconfig)) {
     const t = await promptTargetChoice();
     writeClaude = t.claude;
@@ -50,9 +51,10 @@ export async function runLocalConfig(argv: string[]) {
     writeCodex = t.codex;
     writeVscode = t.vscode;
     writeAntigravity = t.antigravity;
+    writeZcode = t.zcode;
   }
 
-  const existing = await loadExistingEnfyraEnv(root, writeClaude, writeCursor, writeCodex, writeVscode, writeAntigravity);
+  const existing = await loadExistingEnfyraEnv(root, writeClaude, writeCursor, writeCodex, writeVscode, writeAntigravity, writeZcode);
 
   let apiUrl;
   let apiToken;
@@ -82,6 +84,7 @@ export async function runLocalConfig(argv: string[]) {
     ...(writeCursor ? [getClientPath('cursor', root)] : []),
     ...(writeVscode ? [getClientPath('vscode', root)] : []),
     ...(writeAntigravity ? [getClientPath('antigravity', root)] : []),
+    ...(writeZcode ? [getClientPath('zcode', root)] : []),
   ];
   await assertProjectConfigUntracked(root, selectedPaths);
 
@@ -110,6 +113,11 @@ export async function runLocalConfig(argv: string[]) {
     await mergeMcpFile(p, serverEntry);
     written.push({ client: 'antigravity', path: p });
   }
+  if (writeZcode) {
+    const p = getClientPath('zcode', root);
+    await mergeZcodeConfig(p, serverEntry);
+    written.push({ client: 'zcode', path: p });
+  }
 
   await ensureProjectConfigIgnored(root, written.map((entry) => entry.path));
 
@@ -136,6 +144,9 @@ export async function runLocalConfig(argv: string[]) {
   }
   if (selectedClients.has('antigravity')) {
     console.log('  - Antigravity: reopen the workspace or reload MCP servers so ./.agents/mcp_config.json is picked up.');
+  }
+  if (selectedClients.has('zcode')) {
+    console.log('  - ZCode: restart ZCode or open a new session; MCP servers connect automatically.');
   }
   console.log('  - Re-run this command anytime to update the same Enfyra entries.');
   if (!apiToken) {

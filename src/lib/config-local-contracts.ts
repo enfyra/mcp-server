@@ -41,6 +41,11 @@ export const clients: Record<ClientKey, { label: string; path: string; color: (v
     path: './.agents/mcp_config.json',
     color: style.yellow,
   },
+  zcode: {
+    label: 'ZCode',
+    path: './.zcode/config.json',
+    color: style.green,
+  },
 };
 
 export function statusIcon(kind: 'success' | 'warn' | string) {
@@ -72,6 +77,7 @@ ${style.bold('Supported clients')}
   Cursor       ./.cursor/mcp.json
   VS Code      ./.vscode/mcp.json
   Antigravity  ./.agents/mcp_config.json
+  ZCode        ./.zcode/config.json
 
 ${style.bold('Options')}
   --app-url <url>          Enfyra app/admin URL, for example https://demo.enfyra.io
@@ -89,12 +95,13 @@ ${style.bold('Client selection')}
   --codex, --codex-only                    Only ./.codex/config.toml (Codex project scope)
   --vscode, --copilot, --vscode-only       Only ./.vscode/mcp.json (VS Code / Copilot)
   --antigravity, --antigravity-only        Only ./.agents/mcp_config.json (Antigravity)
+  --zcode, --zcode-only                    Only ./.zcode/config.json (ZCode)
   Passing multiple target flags writes each selected target.
 
   -h, --help              Show this help
 
 ${style.bold('Interactive mode')}
-  Choose Codex, Claude Code, Cursor, VS Code, Antigravity, or all clients; then enter ENFYRA_APP_URL and ENFYRA_API_TOKEN.
+  Choose Codex, Claude Code, Cursor, VS Code, Antigravity, ZCode, or all clients; then enter ENFYRA_APP_URL and ENFYRA_API_TOKEN.
   Existing Enfyra config and environment variables are used as defaults. Re-run anytime to update.
 
 ${style.bold('Examples')}
@@ -103,6 +110,7 @@ ${style.bold('Examples')}
   npx @enfyra/mcp-server@latest config --codex --cursor
   npx @enfyra/mcp-server@latest config --vscode
   npx @enfyra/mcp-server@latest config --antigravity
+  npx @enfyra/mcp-server@latest config --zcode
   npx @enfyra/mcp-server@latest config --claude-code
   npx @enfyra/mcp-server@latest config --reconfig
   npx @enfyra/mcp-server@latest config --app-url http://localhost:3000 -t 'efy_pat_...'
@@ -122,6 +130,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     reconfig: false,
     vscode: true,
     antigravity: true,
+    zcode: true,
     targetExplicit: false,
     toolMode: 'preserve',
   };
@@ -130,6 +139,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let pickCodex = false;
   let pickVscode = false;
   let pickAntigravity = false;
+  let pickZcode = false;
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     const next = () => {
@@ -163,15 +173,17 @@ export function parseArgs(argv: string[]): ParsedArgs {
     else if (a === '--codex-only' || a === '--codex') pickCodex = true;
     else if (a === '--vscode-only' || a === '--vscode' || a === '--copilot') pickVscode = true;
     else if (a === '--antigravity-only' || a === '--antigravity') pickAntigravity = true;
+    else if (a === '--zcode-only' || a === '--zcode') pickZcode = true;
     else throw new Error(`Unknown argument: ${a}`);
   }
-  out.targetExplicit = pickClaude || pickCursor || pickCodex || pickVscode || pickAntigravity;
+  out.targetExplicit = pickClaude || pickCursor || pickCodex || pickVscode || pickAntigravity || pickZcode;
   if (out.targetExplicit) {
     out.claude = pickClaude;
     out.cursor = pickCursor;
     out.codex = pickCodex;
     out.vscode = pickVscode;
     out.antigravity = pickAntigravity;
+    out.zcode = pickZcode;
   }
   return out;
 }

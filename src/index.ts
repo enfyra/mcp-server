@@ -19,6 +19,7 @@ Common config flags:
   --cursor            Write ./.cursor/mcp.json
   --vscode            Write ./.vscode/mcp.json
   --antigravity       Write ./.agents/mcp_config.json
+  --zcode             Write ./.zcode/config.json
   --reconfig          Prompt for host and credentials again, replacing the enfyra entry
   --compact-tools     Use guided dynamic packs to minimize initial tool context
   --static-tools      Use the guided static tool manifest

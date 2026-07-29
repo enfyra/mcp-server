@@ -157,6 +157,26 @@ export async function mergeVscodeMcpFile(absPath: string, serverEntry: ServerEnt
   await writePrivateFile(absPath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
+export async function mergeZcodeConfig(absPath: string, serverEntry: ServerEntry) {
+  let data: JsonRecord = {};
+  try {
+    const raw = await readFile(absPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      data = { ...parsed };
+    }
+  } catch (e: any) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+  const mcp = data.mcp && typeof data.mcp === 'object' && !Array.isArray(data.mcp) ? { ...data.mcp } : {};
+  const servers = mcp.servers && typeof mcp.servers === 'object' && !Array.isArray(mcp.servers) ? { ...mcp.servers } : {};
+  servers[SERVER_KEY] = mergeServerEntry(servers[SERVER_KEY], serverEntry);
+  mcp.servers = servers;
+  data.mcp = mcp;
+  await mkdir(dirname(absPath), { recursive: true });
+  await writePrivateFile(absPath, `${JSON.stringify(data, null, 2)}\n`);
+}
+
 function tomlString(value: unknown) {
   return JSON.stringify(String(value ?? ''));
 }
@@ -259,6 +279,23 @@ async function readCodexEnfyraEnv(absPath: string): Promise<ExistingEnv | null> 
   return null;
 }
 
+async function readZcodeEnfyraEnv(absPath: string): Promise<ExistingEnv | null> {
+  try {
+    const raw = await readFile(absPath, 'utf8');
+    const j = JSON.parse(raw);
+    const e = j?.mcp?.servers?.[SERVER_KEY]?.env;
+    if (e && typeof e === 'object' && (e.ENFYRA_API_URL || e.ENFYRA_API_TOKEN)) {
+      return {
+        apiUrl: typeof e.ENFYRA_API_URL === 'string' ? e.ENFYRA_API_URL : '',
+        apiToken: typeof e.ENFYRA_API_TOKEN === 'string' ? e.ENFYRA_API_TOKEN : '',
+      };
+    }
+  } catch {
+    /* */
+  }
+  return null;
+}
+
 function getCodexConfigPath(root: string) {
   return join(root, '.codex', 'config.toml');
 }
@@ -279,12 +316,17 @@ function getAntigravityConfigPath(root: string) {
   return join(root, '.agents', 'mcp_config.json');
 }
 
+function getZcodeConfigPath(root: string) {
+  return join(root, '.zcode', 'config.json');
+}
+
 export function getClientPath(client, root) {
   if (client === 'claude') return getClaudeConfigPath(root);
   if (client === 'cursor') return getCursorConfigPath(root);
   if (client === 'codex') return getCodexConfigPath(root);
   if (client === 'vscode') return getVscodeConfigPath(root);
   if (client === 'antigravity') return getAntigravityConfigPath(root);
+  if (client === 'zcode') return getZcodeConfigPath(root);
   throw new Error(`Unknown MCP client: ${client}`);
 }
 
@@ -305,7 +347,7 @@ async function readMcpServerEnv(absPath: string, serverRootKey: 'mcpServers' | '
   return null;
 }
 
-export async function loadExistingEnfyraEnv(root: string, readClaude: boolean, readCursor: boolean, readCodex: boolean, readVscode: boolean, readAntigravity: boolean): Promise<ExistingEnv> {
+export async function loadExistingEnfyraEnv(root: string, readClaude: boolean, readCursor: boolean, readCodex: boolean, readVscode: boolean, readAntigravity: boolean, readZcode: boolean): Promise<ExistingEnv> {
   const paths: Array<{ path: string; rootKey: 'mcpServers' | 'servers' }> = [];
   if (readClaude) paths.push({ path: getClaudeConfigPath(root), rootKey: 'mcpServers' });
   if (readCursor) paths.push({ path: getCursorConfigPath(root), rootKey: 'mcpServers' });
@@ -319,6 +361,10 @@ export async function loadExistingEnfyraEnv(root: string, readClaude: boolean, r
     seen.add(key);
     const env = await readMcpServerEnv(entry.path, entry.rootKey);
     if (env) return env;
+  }
+  if (readZcode) {
+    const zcode = await readZcodeEnfyraEnv(getZcodeConfigPath(root));
+    if (zcode) return zcode;
   }
   if (readCodex) {
     const codex = await readCodexEnfyraEnv(getCodexConfigPath(root));
