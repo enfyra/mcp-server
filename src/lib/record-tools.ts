@@ -30,8 +30,8 @@ import {
   validateExtensionCodeForGenericMutation,
 } from './enfyra-tool-logic.js';
 import { fetchAPI, validateFilter, validateTableName } from './fetch.js';
-import { fetchTableMetadata } from './metadata-client.js';
-import { assertGenericRecordMutationAllowed, parseRecordBatchData } from './mutation-guards.js';
+import { fetchTableCatalog, fetchTableMetadata } from './metadata-client.js';
+import { assertGenericRecordMutationAllowed, parseRecordBatchData, resolveCanonicalTableName } from './mutation-guards.js';
 import { validateQueryContract } from './query-contract.js';
 import { assertRecordFieldsReadable, buildDeletePostcondition } from './record-contracts.js';
 import {
@@ -266,7 +266,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
       throw new Error(`create_records received ${parsedRecords.length} records, above maxRecords=${maxRecords}. Split the batch deliberately.`);
     }
     assertKnowledgeForGenericBatchMutation(tableName, parsedRecords, { knowledgeAckKey, extensionKnowledgeAckKey });
-    const prepared = await prepareGenericBatchMutation(tableName, parsedRecords);
+    const prepared = await prepareGenericBatchMutation(tableName, parsedRecords, 'create');
     const extensionValidations = [];
     for (const item of prepared.records) {
       extensionValidations.push(await validateExtensionCodeForGenericMutation(tableName, item.payload, item.payload?.name || item.index));
@@ -336,7 +336,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
         throw new Error(`items[${index}].data must be a JSON object.`);
       }
       assertKnowledgeForGenericMutation(tableName, JSON.stringify(item.data), { knowledgeAckKey, extensionKnowledgeAckKey });
-      const prepared = await prepareGenericMutation(tableName, JSON.stringify(item.data));
+      const prepared = await prepareGenericMutation(tableName, JSON.stringify(item.data), 'update');
       preparedItems.push({ index, id: item.id, queryParams: item.queryParams, prepared });
       extensionValidations.push(await validateExtensionCodeForGenericMutation(tableName, prepared.payload, item.id));
     }
@@ -392,7 +392,9 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
   }, async ({ tableName, items, maxItems, confirm, skipNotFound, globalRulesAckKey }) => {
     validateTableName(tableName);
-    assertGenericRecordMutationAllowed('delete', tableName);
+    const deleteCatalog = await fetchTableCatalog(ENFYRA_API_URL);
+    const canonicalDeleteTable = resolveCanonicalTableName(deleteCatalog, tableName);
+    assertGenericRecordMutationAllowed('delete', canonicalDeleteTable);
     const parsedItems = parseBulkItemsArg('items', items);
     assertMaxBulkItems('delete_records', parsedItems, maxItems);
     assertNoDuplicateBulkIds('delete_records', parsedItems);

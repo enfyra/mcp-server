@@ -179,7 +179,7 @@ export async function getMetadataTables(tableRef?: unknown) {
   };
 }
 
-export async function prepareGenericMutation(tableName, data) {
+export async function prepareGenericMutation(tableName, data, operation?) {
   const { tables } = await getMetadataTables(tableName);
   return prepareRecordMutation({
     fetchAPI,
@@ -187,10 +187,11 @@ export async function prepareGenericMutation(tableName, data) {
     tables,
     tableName,
     data,
+    operation,
   });
 }
 
-export async function prepareGenericBatchMutation(tableName, records) {
+export async function prepareGenericBatchMutation(tableName, records, operation?) {
   const { tables } = await getMetadataTables(tableName);
   return prepareRecordBatchMutation({
     fetchAPI,
@@ -198,6 +199,7 @@ export async function prepareGenericBatchMutation(tableName, records) {
     tables,
     tableName,
     records,
+    operation,
   });
 }
 

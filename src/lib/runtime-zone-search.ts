@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { inspectExtensionLocation, searchExtensions } from './extension-search-tools.js';
 import { fetchAPI } from './fetch.js';
 import { fetchMetadataTables, fetchTableCatalog, fetchTableMetadata, fetchTableMetadataByRef } from './metadata-client.js';
+import { getDomainOwner } from './mutation-guards.js';
 import { paginateResults } from './pagination.js';
 import { jsonContent } from './response-format.js';
 import { writeSourceArtifact } from './source-artifacts.js';
@@ -488,6 +489,19 @@ export async function debugFieldExposure(apiUrl: string, input: any) {
   };
 }
 
+function buildNextWriteGuidance(tableName: string) {
+  const create = getDomainOwner(tableName, 'create');
+  const update = getDomainOwner(tableName, 'update');
+  const del = getDomainOwner(tableName, 'delete');
+  if (!create && !update && !del) return undefined;
+  return {
+    ...(create ? { create } : {}),
+    ...(update ? { update } : {}),
+    ...(del ? { delete: del } : {}),
+    note: 'Generic create_records/update_records/delete_records are blocked for this table. Use the named business tool above.',
+  };
+}
+
 export async function inspectRuntimeZoneLocation(apiUrl: string, input: any) {
   const zone = input.zone as RuntimeZone;
   if (!RUNTIME_ZONES.includes(zone)) throw new Error(`Unsupported runtime zone: ${zone}`);
@@ -534,8 +548,9 @@ export async function inspectRuntimeZoneLocation(apiUrl: string, input: any) {
     id: getId(record),
     record,
     sources,
+    nextWrite: buildNextWriteGuidance(table.tableName),
     nextSteps: [
-      'Use zone-specific edit tools where available.',
+      'Use the nextWrite guidance above for mutations. Generic create_records/update_records/delete_records are blocked for domain-owned tables.',
       'When sources are returned, use those exact artifacts. Call get_script_source only with this concrete record id when a fresh source artifact is needed.',
       'Re-run search_runtime_zone or the specific inspector after mutation.',
     ],

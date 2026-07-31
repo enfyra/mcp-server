@@ -30,6 +30,7 @@ import {
   unwrapData
 } from './enfyra-tool-logic.js';
 import { fetchAPI } from './fetch.js';
+import { getDomainOwner, isSystemTable } from './mutation-guards.js';
 import {
   fetchTableMetadataByRef
 } from './metadata-client.js';
@@ -291,6 +292,21 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
       async ({ method, path, query, body, headers, useAuth }) => {
         const httpMethod = normalizeMethodNameInput(method || 'GET');
         const restPath = normalizeRestPath(path);
+        const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+        if (MUTATING_METHODS.has(httpMethod)) {
+          const firstSegment = restPath.replace(/^\//, '').split(/[/?]/)[0];
+          if (firstSegment && isSystemTable(firstSegment)) {
+            const operation = httpMethod === 'DELETE' ? 'delete' : httpMethod === 'POST' ? 'create' : 'update';
+            const owner = getDomainOwner(firstSegment, operation);
+            if (owner) {
+              throw new Error(
+                `test_rest_endpoint blocks ${httpMethod} to system metadata path "/${firstSegment}". ` +
+                `Use the owning business tool: ${owner}. ` +
+                `test_rest_endpoint is for verifying custom endpoint behavior, not for mutating Enfyra system tables.`,
+              );
+            }
+          }
+        }
         const url = new URL(`${ENFYRA_API_URL.replace(/\/$/, '')}${restPath}`);
         const queryObj = parseJsonArg(query, {});
         for (const [key, value] of Object.entries(queryObj || {})) {

@@ -30,7 +30,7 @@ const FORBIDDEN_RELATION_DEFINITION_KEYS = new Set([
   'junctionTargetColumn',
 ]);
 
-const DOMAIN_OWNED_RECORD_MUTATIONS = {
+const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'update' | 'delete', string>>> = {
   enfyra_table: {
     create: 'create_tables',
     update: 'update_tables',
@@ -48,10 +48,140 @@ const DOMAIN_OWNED_RECORD_MUTATIONS = {
   },
   enfyra_route: {
     create: 'api_endpoint_workflow',
-    update: 'api_endpoint_workflow or the route access/public-method tools',
+    update: 'api_endpoint_workflow or the route access/public-method tools (add_route_methods, replace_route_methods, remove_route_methods, enable_route, disable_route, public_route_methods, private_route_methods)',
     delete: 'delete_route',
   },
+  enfyra_route_handler: {
+    create: 'create_handler or api_endpoint_workflow',
+    update: 'patch_script_source / update_script_source for source edits, or api_endpoint_workflow(overwrite=true) for full handler replacement',
+    delete: 'delete_route (cascades all handlers) — individual handler removal requires full toolset',
+  },
+  enfyra_pre_hook: {
+    create: 'create_pre_hook',
+    update: 'patch_script_source / update_script_source for source edits',
+    delete: 'delete_route (cascades all hooks) — individual hook removal requires full toolset',
+  },
+  enfyra_post_hook: {
+    create: 'create_post_hook',
+    update: 'patch_script_source / update_script_source for source edits',
+    delete: 'delete_route (cascades all hooks) — individual hook removal requires full toolset',
+  },
+  enfyra_route_permission: {
+    create: 'ensure_route_access',
+    update: 'ensure_route_access (mode=merge or mode=replace)',
+    delete: 'ensure_route_access(mode=replace, methods=[]) to revoke, or delete_route to cascade — individual permission removal requires full toolset',
+  },
+  enfyra_method: {
+    create: 'create_method',
+    update: 'update_method',
+    delete: 'delete_method',
+  },
+  enfyra_guard: {
+    create: 'ensure_guard or ensure_route_rate_limit',
+    update: 'ensure_guard or ensure_route_rate_limit',
+    delete: 'ensure_guard(isEnabled=false) to disable — physical removal requires full toolset',
+  },
+  enfyra_guard_rule: {
+    create: 'ensure_guard (rulesMode=replace or rulesMode=append)',
+    update: 'ensure_guard (rulesMode=replace)',
+    delete: 'ensure_guard (rulesMode=replace with reduced rules) — individual rule removal requires full toolset',
+  },
+  enfyra_field_permission: {
+    create: 'ensure_field_permission',
+    update: 'ensure_field_permission',
+    delete: 'ensure_field_permission with effect=deny to override — physical removal requires full toolset',
+  },
+  enfyra_column_rule: {
+    create: 'ensure_column_rule',
+    update: 'ensure_column_rule',
+    delete: 'ensure_column_rule(isEnabled=false) to disable — physical removal requires full toolset',
+  },
+  enfyra_graphql: {
+    create: 'set_table_graphql',
+    update: 'set_table_graphql',
+    delete: 'set_table_graphql(isEnabled=false) to disable',
+  },
+  enfyra_flow: {
+    create: 'flow_workflow',
+    update: 'flow_workflow',
+    delete: 'flow_workflow or disable via flow editor — physical removal requires full toolset',
+  },
+  enfyra_flow_step: {
+    create: 'flow_workflow (manages steps within a flow)',
+    update: 'flow_workflow or patch_script_source / update_script_source for source edits',
+    delete: 'flow_workflow (omit the step to remove it) — individual step removal requires full toolset',
+  },
+  enfyra_flow_execution: {
+    create: 'trigger_flow',
+    update: 'read-only runtime table — execution state is system-managed',
+    delete: 'read-only runtime table — execution cleanup requires full toolset',
+  },
+  enfyra_websocket: {
+    create: 'ensure_websocket_gateway',
+    update: 'ensure_websocket_gateway or patch_script_source / update_script_source for source edits',
+    delete: 'physical removal requires full toolset',
+  },
+  enfyra_websocket_event: {
+    create: 'ensure_websocket_event',
+    update: 'ensure_websocket_event or patch_script_source / update_script_source for source edits',
+    delete: 'physical removal requires full toolset',
+  },
+  enfyra_extension: {
+    create: 'ensure_page_extension / ensure_global_extension / ensure_widget_extension or extension_workflow',
+    update: 'patch_extension_code / update_extension_code',
+    delete: 'physical removal requires full toolset after verifying menu wiring',
+  },
+  enfyra_menu: {
+    create: 'ensure_menu',
+    update: 'ensure_menu or reorder_menus',
+    delete: 'physical removal requires full toolset after verifying child/extension dependencies',
+  },
+  enfyra_package: {
+    create: 'install_package',
+    update: 'install_package (re-install with new version) — upgrade requires full toolset',
+    delete: 'physical removal requires full toolset',
+  },
+  enfyra_oauth_config: {
+    create: 'setup_oauth_provider',
+    update: 'setup_oauth_provider',
+    delete: 'physical removal requires full toolset',
+  },
+  enfyra_bootstrap_script: {
+    create: 'full toolset only — bootstrap scripts are platform-owned',
+    update: 'patch_script_source / update_script_source for source edits',
+    delete: 'full toolset only — bootstrap scripts are platform-owned',
+  },
+  enfyra_user: {
+    create: 'full toolset with identity safeguards — inspect enfyra_user schema first',
+    update: 'full toolset with identity safeguards',
+    delete: 'full toolset with identity safeguards',
+  },
+  enfyra_role: {
+    create: 'full toolset — inspect enfyra_role schema and check system-role protections first',
+    update: 'full toolset — check system-role protections first',
+    delete: 'full toolset — check role usage impact first',
+  },
+  enfyra_oauth_account: {
+    create: 'identity-owned — OAuth accounts are created through the OAuth login flow',
+    update: 'full toolset',
+    delete: 'full toolset — unlinking requires identity safeguards',
+  },
+  enfyra_file_permission: {
+    create: 'full toolset — inspect enfyra_file_permission schema first',
+    update: 'full toolset',
+    delete: 'full toolset',
+  },
 };
+
+const SYSTEM_TABLE_PREFIX = 'enfyra_';
+
+export function isSystemTable(tableName: string): boolean {
+  return String(tableName || '').startsWith(SYSTEM_TABLE_PREFIX);
+}
+
+export function getDomainOwner(tableName: string, operation: 'create' | 'update' | 'delete'): string | undefined {
+  return DOMAIN_OWNED_RECORD_MUTATIONS[String(tableName || '')]?.[operation];
+}
 
 export function assertGenericRecordMutationAllowed(operation, tableName) {
   const owner = DOMAIN_OWNED_RECORD_MUTATIONS[String(tableName || '')]?.[operation];
@@ -59,6 +189,14 @@ export function assertGenericRecordMutationAllowed(operation, tableName) {
   throw new Error(
     `Generic ${operation}_records is blocked for domain-owned metadata table "${tableName}". Use ${owner} so Enfyra applies dependency checks, physical schema/runtime changes, reloads, and destructive previews correctly.`,
   );
+}
+
+export function resolveCanonicalTableName(tables: Array<{ name?: string; alias?: string }>, tableName: string): string {
+  const match = tables.find((item) => item?.name === tableName || item?.alias === tableName);
+  if (!match) throw new Error(
+    `Unknown table "${tableName}". Call get_all_metadata({ search: "${tableName}" }) or inspect_table({ tableName }) to discover the canonical table name, then retry.`,
+  );
+  return match.name || tableName;
 }
 
 export function parseRecordData(data) {
@@ -265,10 +403,13 @@ export async function validateScriptSourceIfPresent(fetchAPI, apiUrl, tableName,
   }
 }
 
-export async function prepareRecordMutation({ fetchAPI, apiUrl, tables, tableName, data }) {
+export async function prepareRecordMutation({ fetchAPI, apiUrl, tables, tableName, data, operation }) {
   const payload = parseRecordData(data);
   const table = tables.find((item) => item?.name === tableName || item?.alias === tableName);
-  if (!table) throw new Error(`Unknown table "${tableName}"`);
+  if (!table) throw new Error(
+    `Unknown table "${tableName}". Call get_all_metadata({ search: "${tableName}" }) or inspect_table({ tableName }) to discover the canonical table name, then retry.`,
+  );
+  if (operation) assertGenericRecordMutationAllowed(operation, table.name);
 
   validatePayloadFields(table, payload);
   rejectUnsafeScriptPayload(table.name, payload);
@@ -282,10 +423,13 @@ export async function prepareRecordMutation({ fetchAPI, apiUrl, tables, tableNam
   };
 }
 
-export async function prepareRecordBatchMutation({ fetchAPI, apiUrl, tables, tableName, records }) {
+export async function prepareRecordBatchMutation({ fetchAPI, apiUrl, tables, tableName, records, operation }) {
   const parsedRecords = parseRecordBatchData(records);
   const table = tables.find((item) => item?.name === tableName || item?.alias === tableName);
-  if (!table) throw new Error(`Unknown table "${tableName}"`);
+  if (!table) throw new Error(
+    `Unknown table "${tableName}". Call get_all_metadata({ search: "${tableName}" }) or inspect_table({ tableName }) to discover the canonical table name, then retry.`,
+  );
+  if (operation) assertGenericRecordMutationAllowed(operation, table.name);
 
   const preparedRecords = [];
   for (const [index, payload] of parsedRecords.entries()) {
