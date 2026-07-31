@@ -246,9 +246,9 @@ test('startup instructions remain a compact router because hosts may repeat them
   assert.match(instructions, /get_enfyra_api_context/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(instructions, /discover_enfyra_workflows/);
-  assert.match(instructions, /Third-app OAuth: connect first/);
-  assert.match(instructions, /ask only for them and stop/);
-  assert.match(instructions, /Show only the callback returned by `setup_oauth_provider`/);
+  assert.match(instructions, /install @enfyra\/sdk-\*/);
+  assert.match(instructions, /OAuth: connect first/);
+  assert.match(instructions, /ask only for credentials/);
   assert.match(instructions, /partial changes may exist/);
   assert.match(instructions, /only from a successful receipt or explicit verification/);
   assert.doesNotMatch(instructions, /### Operating Model/);

@@ -624,21 +624,24 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
   assert.ok(payloadText.includes('do not use @THROW404(\\"Project\\", id) as a semantic shortcut'));
 });
 
-test('SSR app examples include Nuxt Next and Angular connection patterns', () => {
+test('connect examples are SDK-first with framework selection guide', () => {
   const examples = readExamplesSource();
 
-  assert.match(examples, /Nuxt routeRules for REST and Socket\.IO/);
-  assert.match(examples, /Next rewrites for REST and Socket\.IO/);
-  assert.match(examples, /Next client provider for authenticated realtime/);
-  assert.match(examples, /Create the Socket\.IO client once in a top-level client provider/);
-  assert.match(examples, /Proxy \/socket\.io through Next rewrites to the Enfyra app bridge \/ws\/socket\.io/);
-  assert.match(examples, /Angular dev proxy for REST and Socket\.IO/);
-  assert.match(examples, /"pathRewrite": \{/);
-  assert.match(examples, /provideHttpClient\(withInterceptors\(\[enfyraCredentialsInterceptor\]\)\)/);
-  assert.match(examples, /req\.clone\(\{ withCredentials: true \}\)/);
-  assert.match(examples, /Angular HttpClient auth service and route guard/);
-  assert.match(examples, /Angular singleton Socket\.IO realtime service/);
-  assert.match(examples, /Do not create a new socket per routed component/);
+  assert.match(examples, /SDK package selection by framework/);
+  assert.match(examples, /@enfyra\/sdk-nuxt/);
+  assert.match(examples, /@enfyra\/sdk-next/);
+  assert.match(examples, /@enfyra\/sdk-react/);
+  assert.match(examples, /@enfyra\/sdk-vue/);
+  assert.match(examples, /@enfyra\/sdk-core/);
+  assert.match(examples, /Do not write manual proxy configs.*when an SDK exists/i);
+  assert.match(examples, /Nuxt setup with @enfyra\/sdk-nuxt/);
+  assert.match(examples, /Next\.js setup with @enfyra\/sdk-next/);
+  assert.match(examples, /export \{ default \} from '@enfyra\/sdk-next'/);
+  assert.match(examples, /createServerEnfyra/);
+  assert.match(examples, /createServerActionEnfyra/);
+  assert.match(examples, /cookieBridgePrefix must match the SDK proxy prefix/);
+  assert.match(examples, /Do not use @enfyra\/sdk-react inside Next\.js/);
+  assert.match(examples, /Do not use @enfyra\/sdk-vue inside Nuxt/);
 });
 
 test('OAuth setup examples guide provider console callback configuration', () => {
@@ -654,8 +657,8 @@ test('OAuth setup examples guide provider console callback configuration', () =>
   assert.match(examples, /do not present callbackUri.*before setup_oauth_provider returns/i);
   assert.match(examples, /wait for confirmation/i);
   assert.match(examples, /setupComplete=false/i);
-  assert.match(examples, /Enfyra app bridge owns refresh and Bearer forwarding/);
-  assert.match(examples, /fetchOptions:\s*\{\s*redirect:\s*["']manual["']/);
+  assert.match(examples, /cookieBridgePrefix/);
+  assert.match(examples, /Do not parse tokens from the URL/);
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {

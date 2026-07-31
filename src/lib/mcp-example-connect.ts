@@ -1,441 +1,269 @@
 export const connectExamples = {
-    title: 'Connect SSR and browser apps to Enfyra',
-    useWhen: 'Use when connecting Nuxt, Next, Angular, or another browser app to Enfyra for REST, login, OAuth, refresh, files, GraphQL, or Socket.IO; adapt the framework wrapper while preserving the app-origin proxy and cookie boundary.',
-    examples: [
-      {
-        name: 'Nuxt routeRules for REST and Socket.IO',
-        code: `export default defineNuxtConfig({
-  routeRules: {
-    "/enfyra/**": {
-      proxy: {
-        to: \`\${process.env.ENFYRA_API_URL}/**\`,
-        fetchOptions: { redirect: "manual" }
-      }
+  title: 'Connect apps to Enfyra using official SDK packages',
+  useWhen: 'Use when connecting a Nuxt, Next.js, React, Vue, Angular, or other app to Enfyra. Always prefer the official SDK package for the target framework over manual proxy configuration.',
+  examples: [
+    {
+      name: 'SDK package selection by framework',
+      code: `# Nuxt 3/4 (SSR + CSR, auto proxy, auto composables)
+yarn add @enfyra/sdk-nuxt @enfyra/sdk-core
+
+# Next.js App Router (SSR + CSR, one-line config preset, providerless hooks)
+yarn add @enfyra/sdk-next @enfyra/sdk-core
+
+# React SPA (CSR only, Provider + hooks)
+yarn add @enfyra/sdk-react @enfyra/sdk-core zustand
+
+# Vue 3 SPA (CSR only, composables)
+yarn add @enfyra/sdk-vue @enfyra/sdk-core
+
+# Any other framework / Node.js scripts (core client only)
+yarn add @enfyra/sdk-core`,
+      notes: [
+        'Always install the framework-specific SDK package. Do not write manual proxy configs, route handlers, or cookie bridges when an SDK exists for the target framework.',
+        '@enfyra/sdk-nuxt and @enfyra/sdk-next handle the same-origin proxy, cookie bridge, OAuth redirect, and SSR request isolation automatically.',
+        '@enfyra/sdk-react and @enfyra/sdk-vue are CSR-only. The host app still needs a same-origin reverse proxy (dev server proxy or production nginx/Caddy) pointing /enfyra/** to the Enfyra App /api bridge.',
+        '@enfyra/sdk-core is the transport layer. Use it directly only for Node.js scripts, unsupported frameworks, or when the framework SDK does not cover the use case.',
+      ],
     },
-    "/socket.io/**": {
-      proxy: \`\${process.env.ENFYRA_APP_URL}/ws/socket.io/**\`
-    }
-  }
-})`,
-        notes: [
-          'Browser code calls app-origin routes such as /enfyra/login, /enfyra/me, /enfyra/logout, and /enfyra/<table>.',
-          'Keep redirects manual so OAuth and the set-cookie bridge return their redirect response to the browser.',
-          'Proxy to the Enfyra app /api bridge, not the raw Enfyra server. The Enfyra app bridge reads and refreshes cookies, then injects Authorization for protected ESV requests.',
-        ],
-      },
-      {
-        name: 'Next rewrites for REST and Socket.IO',
-        code: `const nextConfig = {
-  async rewrites() {
-    return [
-      {
-        source: "/enfyra/:path*",
-        destination: \`\${process.env.ENFYRA_API_URL}/:path*\`
-      },
-      {
-        source: "/socket.io/",
-        destination: \`\${process.env.ENFYRA_APP_URL}/ws/socket.io/\`
-      }
-    ]
-  }
-}
-
-export default nextConfig`,
-        notes: [
-          'Use rewrites for browser traffic, including the OAuth cookie bridge.',
-          'The destination is the Enfyra app /api bridge. Do not point the browser rewrite at a raw ESV origin.',
-          'For server components, forward the incoming Cookie header when fetching through the third app origin.',
-        ],
-      },
-      {
-        name: 'Angular dev proxy for REST and Socket.IO',
-        code: `// src/proxy.conf.json
-{
-  "/enfyra/**": {
-    "target": "https://demo.enfyra.io/api",
-    "secure": true,
-    "changeOrigin": true,
-    "pathRewrite": {
-      "^/enfyra": ""
-    }
-  },
-  "/socket.io/**": {
-    "target": "https://demo.enfyra.io/api/ws",
-    "secure": true,
-    "changeOrigin": true,
-    "ws": true
-  }
-}
-
-// angular.json
-{
-  "projects": {
-    "app": {
-      "architect": {
-        "serve": {
-          "options": {
-            "proxyConfig": "src/proxy.conf.json"
-          }
-        }
-      }
-    }
-  }
-}`,
-        notes: [
-          'Browser code still calls /enfyra/login, /enfyra/me, /enfyra/logout, and /enfyra/<table>.',
-          'The /enfyra proxy strips the prefix before forwarding to the Enfyra API origin.',
-          'The /socket.io proxy forwards to the Enfyra app bridge /ws/socket.io while keeping the browser transport path as /socket.io.',
-          'Restart ng serve after changing proxy.conf.json.',
-        ],
-      },
-      {
-        name: 'Password login and current user fetch',
-        code: `await fetch("/enfyra/login", {
-  method: "POST",
-  credentials: "include",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ email, password, remember: true })
+    {
+      name: 'Nuxt setup with @enfyra/sdk-nuxt',
+      code: `// nuxt.config.ts
+export default defineNuxtConfig({
+  modules: ['@enfyra/sdk-nuxt'],
 })
 
-const me = await fetch("/enfyra/me", {
-  credentials: "include"
-}).then((res) => res.ok ? res.json() : null)`,
-        notes: [
-          'The third app proxy maps /enfyra/login to the Enfyra app /api/login cookie endpoint; use /login, not raw /auth/login, in browser cookie mode.',
-          'The Enfyra app bridge owns refresh and Bearer forwarding to ESV while HttpOnly cookies stay outside browser JavaScript.',
-          'Do not read or store JWTs in browser JavaScript in proxy-cookie mode.',
-        ],
-      },
-      {
-        name: 'Nuxt client plugin for authenticated realtime',
-        code: `// composables/useRealtime.ts
-import { io, type Socket } from "socket.io-client"
-import { readonly, ref, shallowRef } from "vue"
-
-const socket = shallowRef<Socket | null>(null)
-const isConnected = ref(false)
-
-export function useRealtime() {
-  function connect() {
-    if (import.meta.server) return null
-    if (socket.value) return socket.value
-
-    const nextSocket = io("/chat", {
-      path: "/socket.io",
-      withCredentials: true,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 30000
-    })
-
-    nextSocket.on("connect", () => {
-      isConnected.value = true
-    })
-    nextSocket.on("disconnect", () => {
-      isConnected.value = false
-    })
-
-    socket.value = nextSocket
-    return nextSocket
-  }
-
-  function disconnect() {
-    if (!socket.value) return
-    socket.value.disconnect()
-    socket.value = null
-    isConnected.value = false
-  }
-
-  function onMessage(handler) {
-    const activeSocket = socket.value ?? connect()
-    if (!activeSocket) return () => {}
-    activeSocket.on("chat:message", handler)
-    return () => activeSocket.off("chat:message", handler)
-  }
-
-  return { socket, isConnected: readonly(isConnected), connect, disconnect, onMessage }
-}
-
-// plugins/realtime.client.ts
-import { watch } from "vue"
-
-export default defineNuxtPlugin(() => {
-  const { me } = useAuth()
-  const realtime = useRealtime()
-
-  watch(
-    me,
-    user => {
-      if (user) realtime.connect()
-      else realtime.disconnect()
+// .env
+ENFYRA_APP_URL=https://admin.example.com`,
+      notes: [
+        'One module entry and one env var. No routeRules, no server middleware, no plugin, no cookie handler.',
+        'The module proxies /${routePrefix}/** to ${appUrl}/api/** with manual redirects, creates a request-scoped SSR client, and auto-imports all composables.',
+        'Composables: useEnfyra(), useAuth(), useQuery(), useMutation(), useStorage(), useWebSocket().',
+        'Optional config: enfyra.appUrl overrides env; enfyra.routePrefix changes the proxy prefix (default /enfyra).',
+      ],
     },
-    { immediate: true }
+    {
+      name: 'Next.js setup with @enfyra/sdk-next',
+      code: `// next.config.mjs — quick path (one line)
+export { default } from '@enfyra/sdk-next'
+
+// .env.local
+ENFYRA_APP_URL=http://localhost:3000`,
+      notes: [
+        'One re-export and one env var. No generated route handler, no middleware, no Provider in layout.',
+        'This quick path is for new apps or apps without an existing next.config. If the app already has a next.config with custom settings, use withEnfyra(existingConfig, options) instead to preserve them.',
+        'The preset adds beforeFiles rewrites proxying /api/enfyra/** to ${appUrl}/api/** and injects the browser prefix as a build constant.',
+        'Client hooks (providerless): import { useAuth, useEnfyra, useQuery, useMutation, useStorage } from "@enfyra/sdk-next/client".',
+        'Server Components: import { createServerEnfyra } from "@enfyra/sdk-next/server" — request-scoped, forwards cookies.',
+        'Server Actions: import { createServerActionEnfyra } from "@enfyra/sdk-next/server" — applies upstream Set-Cookie rotation.',
+        'Existing config: wrap with withEnfyra(nextConfig, options). Configured preset: enfyra({ appUrl, routePrefix }).',
+        'Requires Next.js >=14 <17 App Router. Rejects output:"export" at config load time.',
+      ],
+    },
+    {
+      name: 'Next.js client hooks usage',
+      code: `'use client'
+
+import { useAuth, useEnfyra, useQuery } from '@enfyra/sdk-next/client'
+
+function Dashboard() {
+  const { user, isAuthenticated, pending, login, logout } = useAuth()
+  const client = useEnfyra()
+  const { data, pending: loading } = useQuery(() =>
+    client.from('articles').select('id,title').limit(10).execute()
   )
-})
 
-// pages/chat.vue
-const realtime = useRealtime()
-let stopRealtime = () => {}
+  if (pending) return <p>Checking session…</p>
+  if (!isAuthenticated) return <button onClick={() => login({ email, password })}>Login</button>
+  return <ul>{data?.map(a => <li key={a.id}>{a.title}</li>)}</ul>
+}`,
+      notes: [
+        'No Provider wrapper needed. Hooks use a module-level singleton that is SSR-safe (server render is always anonymous/idle).',
+        'Auth refresh starts automatically after hydration via useEffect.',
+        'useEnfyra() returns the original EnfyraClient from @enfyra/sdk-core.',
+      ],
+    },
+    {
+      name: 'Next.js Server Component and Server Action',
+      code: `// app/page.tsx — Server Component
+import { createServerEnfyra } from '@enfyra/sdk-next/server'
 
-onMounted(() => {
-  stopRealtime = realtime.onMessage(event => {
-    // Update local UI state, then debounce REST refresh if full state is needed.
+export default async function Page() {
+  const client = await createServerEnfyra()
+  const { data } = await client.from('posts').select('id,title').limit(5).execute()
+  return <ul>{data?.map(p => <li key={p.id}>{p.title}</li>)}</ul>
+}
+
+// app/actions.ts — Server Action
+'use server'
+import { createServerActionEnfyra } from '@enfyra/sdk-next/server'
+
+export async function loginAction(formData: FormData) {
+  const { client, applySetCookies } = await createServerActionEnfyra()
+  const res = await client.post('/auth/login', {
+    email: formData.get('email'),
+    password: formData.get('password'),
   })
-})
+  applySetCookies(res.headers['set-cookie'] ?? [])
+}`,
+      notes: [
+        'createServerEnfyra() reads await headers(), forwards cookie/authorization, creates a fresh client per call.',
+        'createServerActionEnfyra() reads await cookies() and returns applySetCookies to write upstream Set-Cookie back to the browser.',
+        'Never cache the server client at module or process scope.',
+      ],
+    },
+    {
+      name: 'React SPA setup with @enfyra/sdk-react',
+      code: `import { EnfyraProvider, useAuth, useQuery, useMutation } from '@enfyra/sdk-react'
 
-onUnmounted(() => {
-  stopRealtime()
-})`,
-        notes: [
-          'Create the socket once in a client-only plugin after auth has resolved; pages should not own the initial connection lifecycle.',
-          'Use the websocket namespace path from live metadata, such as /chat, and keep the transport path as /socket.io.',
-          'Proxy /socket.io/** to the Enfyra app bridge /ws/socket.io/** so cookies are same-origin.',
-          'Route components add event listeners and remove them on unmount; they can optimistically update local state and debounce REST refreshes.',
-          'Disconnect the singleton socket when the current user/session clears.',
-        ],
-      },
-      {
-        name: 'Angular HttpClient auth service and route guard',
-        code: `// app.config.ts
-import { ApplicationConfig, inject } from "@angular/core"
-import { provideRouter, CanActivateFn, Router } from "@angular/router"
-import { HttpInterceptorFn, provideHttpClient, withInterceptors } from "@angular/common/http"
-import { catchError, map, of } from "rxjs"
-
-import { routes } from "./app.routes"
-import { EnfyraAuthService } from "./enfyra-auth.service"
-
-export const enfyraCredentialsInterceptor: HttpInterceptorFn = (req, next) => {
-  if (!req.url.startsWith("/enfyra/")) return next(req)
-  return next(req.clone({ withCredentials: true }))
-}
-
-export const requireUserGuard: CanActivateFn = () => {
-  const auth = inject(EnfyraAuthService)
-  const router = inject(Router)
-
-  return auth.loadMe().pipe(
-    map(user => user ? true : router.createUrlTree(["/login"])),
-    catchError(() => of(router.createUrlTree(["/login"])))
+function App() {
+  return (
+    <EnfyraProvider config={{ baseUrl: '/enfyra', auth: { strategy: 'cookie', cookieBridgePrefix: '/enfyra' } }}>
+      <Dashboard />
+    </EnfyraProvider>
   )
 }
 
-export const appConfig: ApplicationConfig = {
-  providers: [
-    provideHttpClient(withInterceptors([enfyraCredentialsInterceptor])),
-    provideRouter(routes)
-  ]
-}
-
-// enfyra-auth.service.ts
-import { Injectable, signal } from "@angular/core"
-import { HttpClient } from "@angular/common/http"
-import { Observable, tap } from "rxjs"
-
-type EnfyraUser = { id: string | number; email?: string }
-
-@Injectable({ providedIn: "root" })
-export class EnfyraAuthService {
-  readonly user = signal<EnfyraUser | null>(null)
-
-  constructor(private readonly http: HttpClient) {}
-
-  login(email: string, password: string): Observable<unknown> {
-    return this.http.post("/enfyra/login", { email, password, remember: true }).pipe(
-      tap(() => this.loadMe().subscribe())
-    )
-  }
-
-  loadMe(): Observable<EnfyraUser | null> {
-    return this.http.get<EnfyraUser | null>("/enfyra/me").pipe(
-      tap(user => this.user.set(user))
-    )
-  }
-
-  logout(): Observable<unknown> {
-    return this.http.post("/enfyra/logout", {}).pipe(
-      tap(() => this.user.set(null))
-    )
-  }
-
-  startGoogleOAuth(returnPath = "/") {
-    const redirect = new URL(returnPath, window.location.origin)
-    const url = new URL("/api/auth/google", "https://demo.enfyra.io")
-    url.searchParams.set("redirect", redirect.toString())
-    url.searchParams.set("cookieBridgePrefix", "/enfyra")
-    window.location.href = url.toString()
-  }
+function Dashboard() {
+  const { user, isAuthenticated, login, logout } = useAuth()
+  const { data, pending } = useQuery('articles', { select: ['id', 'title'], limit: 10 })
+  const { execute, pending: saving } = useMutation('articles', { operation: 'insert' })
 }`,
-        notes: [
-          'Use HttpClient with a credentials interceptor for /enfyra/* calls so cookies are sent consistently.',
-          'The guard is only for user experience; Enfyra route permissions and server-side owner checks remain authoritative.',
-          'Keep the current user in an Angular service or store; do not read JWTs from cookies or URLs.',
-          'OAuth starts at the Enfyra app /api/auth/google URL, not the local /enfyra path. It returns through the local cookie bridge before Angular loads /enfyra/me.',
-        ],
-      },
-      {
-        name: 'Next client provider for authenticated realtime',
-        code: `"use client"
+      notes: [
+        'React SPA is CSR-only. The host app must provide a same-origin proxy: Vite dev server proxy, CRA proxy, or production reverse proxy mapping /enfyra/** to the Enfyra App /api bridge.',
+        'EnfyraProvider wraps the app once at the root. All hooks read from the shared client/store.',
+        'Do not use @enfyra/sdk-react inside Next.js — use @enfyra/sdk-next instead.',
+      ],
+    },
+    {
+      name: 'Vue 3 SPA setup with @enfyra/sdk-vue',
+      code: `import { createEnfyraClient, useAuth, useApi, useStorage, useWebSocket } from '@enfyra/sdk-vue'
 
-// app/realtime-provider.tsx
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react"
-import { io, type Socket } from "socket.io-client"
-
-type RealtimeContextValue = {
-  socket: Socket | null
-  isConnected: boolean
-}
-
-const RealtimeContext = createContext<RealtimeContextValue>({
-  socket: null,
-  isConnected: false
+createEnfyraClient({
+  baseUrl: '/enfyra',
+  auth: { strategy: 'cookie', cookieBridgePrefix: '/enfyra' },
 })
 
-export function RealtimeProvider({
-  user,
-  children
-}: {
-  user: { id: string | number } | null
-  children: React.ReactNode
-}) {
-  const socketRef = useRef<Socket | null>(null)
-  const [isConnected, setConnected] = useState(false)
-
-  useEffect(() => {
-    if (!user) {
-      socketRef.current?.disconnect()
-      socketRef.current = null
-      setConnected(false)
-      return
-    }
-
-    if (socketRef.current) return
-
-    const socket = io("/chat", {
-      path: "/socket.io",
-      withCredentials: true,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 30000
-    })
-
-    socket.on("connect", () => setConnected(true))
-    socket.on("disconnect", () => setConnected(false))
-    socketRef.current = socket
-
-    return () => {
-      socket.off("connect")
-      socket.off("disconnect")
-      socket.disconnect()
-      socketRef.current = null
-      setConnected(false)
-    }
-  }, [user])
-
-  const value = useMemo(
-    () => ({ socket: socketRef.current, isConnected }),
-    [isConnected]
-  )
-
-  return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>
-}
-
-export function useRealtime() {
-  return useContext(RealtimeContext)
-}
-
-// app/chat/page.tsx
-// const { socket } = useRealtime()
-// useEffect(() => {
-//   if (!socket) return
-//   const onMessage = event => {
-//     // Update local UI state, then debounce REST refresh if full state is needed.
-//   }
-//   socket.on("chat:message", onMessage)
-//   return () => socket.off("chat:message", onMessage)
-// }, [socket])`,
-        notes: [
-          'Create the Socket.IO client once in a top-level client provider after the current user is known.',
-          'Use the websocket namespace path from live metadata, such as /chat, and keep the transport path as /socket.io.',
-          'Proxy /socket.io through Next rewrites to the Enfyra app bridge /ws/socket.io so cookies remain same-origin.',
-          'Pages/components should only subscribe/unsubscribe listeners; they should not create independent socket connections.',
-          'Disconnect the singleton socket when the current user/session clears.',
-        ],
+// In any component setup():
+const { user, login, logout, fetchUser } = useAuth()
+const { data, loading, error, refresh } = useApi().get('/articles', { query: { limit: 20 } })
+const socket = useWebSocket('chat')`,
+      notes: [
+        'Vue SPA is CSR-only. The host app must provide a same-origin proxy (Vite proxy, nginx, Caddy) mapping /enfyra/** to the Enfyra App /api bridge.',
+        'createEnfyraClient() is called once at app entry. Composables read from the shared instance.',
+        'Do not use @enfyra/sdk-vue inside Nuxt — use @enfyra/sdk-nuxt instead.',
+      ],
+    },
+    {
+      name: 'Dev proxy for CSR-only apps (React/Vue/Angular)',
+      code: `// vite.config.ts (React or Vue)
+export default defineConfig({
+  server: {
+    proxy: {
+      '/enfyra': {
+        target: 'https://admin.example.com/api',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\\/enfyra/, ''),
       },
-      {
-        name: 'Angular singleton Socket.IO realtime service',
-        code: `// enfyra-realtime.service.ts
-import { Injectable, computed, effect, signal } from "@angular/core"
-import { io, Socket } from "socket.io-client"
-
-import { EnfyraAuthService } from "./enfyra-auth.service"
-
-@Injectable({ providedIn: "root" })
-export class EnfyraRealtimeService {
-  private socket: Socket | null = null
-  private readonly connected = signal(false)
-  readonly isConnected = computed(() => this.connected())
-
-  constructor(private readonly auth: EnfyraAuthService) {
-    effect(() => {
-      const user = this.auth.user()
-      if (user) this.connect()
-      else this.disconnect()
-    })
-  }
-
-  connect() {
-    if (this.socket) return this.socket
-
-    this.socket = io("/chat", {
-      path: "/socket.io",
-      withCredentials: true,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 2000,
-      reconnectionDelayMax: 30000
-    })
-
-    this.socket.on("connect", () => this.connected.set(true))
-    this.socket.on("disconnect", () => this.connected.set(false))
-    return this.socket
-  }
-
-  disconnect() {
-    this.socket?.disconnect()
-    this.socket = null
-    this.connected.set(false)
-  }
-
-  onMessage(handler: (event: unknown) => void) {
-    const activeSocket = this.connect()
-    activeSocket.on("chat:message", handler)
-    return () => activeSocket.off("chat:message", handler)
-  }
-}`,
-        notes: [
-          'Create one app-level Socket.IO connection after auth is known.',
-          'Use the websocket namespace path from live metadata, such as /chat, and keep the transport path as /socket.io.',
-          'Components subscribe with onMessage and call the returned cleanup function in ngOnDestroy.',
-          'Do not create a new socket per routed component.',
-        ],
+      '/socket.io': {
+        target: 'https://admin.example.com/api/ws',
+        changeOrigin: true,
+        ws: true,
       },
-      {
-        name: 'Google OAuth button',
-        code: `const redirect = new URL("/chat", window.location.origin)
-const url = new URL("/api/auth/google", "https://demo.enfyra.io")
-url.searchParams.set("redirect", redirect.toString())
-url.searchParams.set("cookieBridgePrefix", "/enfyra")
-window.location.href = url.toString()`,
-        notes: [
-          'redirect must be absolute and must include the app origin.',
-          'Start OAuth on the Enfyra app URL. Do not start it at the third app /enfyra proxy path.',
-          'cookieBridgePrefix is the app proxy prefix that forwards to Enfyra API routes.',
-          'Enfyra redirects through {redirect.origin}{cookieBridgePrefix}/auth/set-cookies before returning to redirect.',
-          'After returning, call /enfyra/me to load the authenticated user; do not parse tokens from the URL in proxy-cookie mode.',
-        ],
-      },
-    ],
-  };
+    },
+  },
+})
+
+// Production: nginx/Caddy reverse proxy with the same mapping.
+// Angular: use proxy.conf.json with the same target paths.`,
+      notes: [
+        'CSR-only SDKs (@enfyra/sdk-react, @enfyra/sdk-vue, @enfyra/sdk-core in browser) require a same-origin proxy for HttpOnly cookie auth.',
+        'The proxy maps /enfyra/** to the Enfyra App /api bridge. Do not point it at a raw ESV origin.',
+        'Socket.IO proxy maps /socket.io/** to the Enfyra App /ws/socket.io/** for same-origin WebSocket cookies.',
+        'For Nuxt and Next.js, the SDK handles this proxy automatically — do not add manual proxy config.',
+      ],
+    },
+    {
+      name: 'OAuth login flow (all frameworks)',
+      code: `// Nuxt — composable handles everything:
+const { oauthLogin } = useAuth()
+oauthLogin('google')
+
+// Next.js — use the SDK proxy prefix for OAuth start:
+const redirect = new URL('/dashboard', window.location.origin)
+const url = new URL(window.location.origin + '/api/enfyra/auth/google')
+url.searchParams.set('redirect', redirect.toString())
+url.searchParams.set('cookieBridgePrefix', '/api/enfyra')
+window.location.href = url.toString()
+
+// React/Vue CSR — same pattern with the app proxy prefix:
+const oauthUrl = new URL(window.location.origin + '/enfyra/auth/google')
+oauthUrl.searchParams.set('redirect', window.location.origin + '/dashboard')
+oauthUrl.searchParams.set('cookieBridgePrefix', '/enfyra')
+window.location.href = oauthUrl.toString()`,
+      notes: [
+        'OAuth starts through the same-origin SDK proxy prefix (/api/enfyra/auth/<provider> for Next.js, /enfyra/auth/<provider> for Nuxt/React/Vue). No need to expose the Enfyra App URL to the browser.',
+        'cookieBridgePrefix must match the SDK proxy prefix: /enfyra for Nuxt/React/Vue, /api/enfyra for Next.js.',
+        'After OAuth return, the SDK session check (/me or useAuth refresh) picks up the HttpOnly cookie automatically.',
+        'Do not parse tokens from the URL. Do not create custom callback routes.',
+      ],
+    },
+    {
+      name: 'Password login and session check (all frameworks)',
+      code: `// Nuxt:
+const { login, user, isAuthenticated } = useAuth()
+await login({ email, password, remember: true })
+
+// Next.js:
+const { login, user, isAuthenticated } = useAuth()
+await login({ email, password })
+
+// React:
+const { login, user, isAuthenticated } = useAuth()
+await login({ email, password, remember: true })
+
+// Vue:
+const { login, user, fetchUser } = useAuth()
+await login({ email, password, remember: true })
+await fetchUser()`,
+      notes: [
+        'All SDK login methods POST to the same-origin proxy prefix. HttpOnly cookies are set by the Enfyra App bridge.',
+        'Session check calls /enfyra/me (Nuxt/React/Vue) or /api/enfyra/me (Next.js) through the SDK proxy. The SDK useAuth/fetchUser methods handle this internally.',
+        'Do not read or store JWTs in browser JavaScript when using cookie strategy.',
+        'The Enfyra App bridge owns token refresh and Bearer forwarding to ESV internally.',
+      ],
+    },
+    {
+      name: 'Realtime with SDK (Nuxt and Vue)',
+      code: `// Nuxt — auto-imported composable:
+const ws = useWebSocket('chat', { immediate: true })
+ws.on('chat:message', (event) => { /* update state */ })
+
+// Vue:
+const socket = useWebSocket('chat')
+await socket.connect()
+socket.on('chat:message', handler)`,
+      notes: [
+        'Nuxt and Vue SDKs include useWebSocket with automatic same-origin Socket.IO path.',
+        'Next.js realtime (useWebSocket) is gated pending E2E verification of WebSocket upgrade through Next rewrites.',
+        'For Next.js or unsupported frameworks, use socket.io-client directly with path /socket.io and a same-origin proxy to the Enfyra App /ws/socket.io bridge.',
+        'Create one connection per app, not per component. Disconnect when the user logs out.',
+      ],
+    },
+    {
+      name: 'Node.js scripts and unsupported frameworks with @enfyra/sdk-core',
+      code: `import { EnfyraClient } from '@enfyra/sdk-core'
+
+const client = new EnfyraClient({
+  baseUrl: 'https://admin.example.com',
+  auth: { strategy: 'token', accessToken: process.env.ENFYRA_API_TOKEN },
+})
+
+const { data } = await client.from('orders').select('id,total,status').limit(50).execute()`,
+      notes: [
+        'Use @enfyra/sdk-core directly for server-side scripts, CLI tools, or frameworks without an SDK adapter.',
+        'For server-to-server, use token strategy with an API token from Enfyra admin.',
+        'For browser usage without a framework SDK, use cookie strategy with a same-origin proxy.',
+      ],
+    },
+  ],
+};
