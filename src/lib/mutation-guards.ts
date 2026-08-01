@@ -111,6 +111,11 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
     update: 'flow_workflow or patch_script_source / update_script_source for source edits',
     delete: 'flow_workflow (omit the step to remove it) — individual step removal requires full toolset',
   },
+  enfyra_flow_trigger: {
+    create: 'ensure_flow_trigger',
+    update: 'ensure_flow_trigger or remove_flow_trigger to disable',
+    delete: 'remove_flow_trigger to disable — physical removal requires full toolset',
+  },
   enfyra_flow_execution: {
     create: 'trigger_flow',
     update: 'read-only runtime table — execution state is system-managed',

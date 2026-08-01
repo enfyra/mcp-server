@@ -35,6 +35,10 @@ function metadataResponse() {
   } });
 }
 
+function tableCatalogResponse() {
+  return jsonResponse({ data: [{ id: 61, name: 'temporary_notes', alias: null }] });
+}
+
 test('delete_records preview fails closed when an exact target read fails', async () => {
   const originalFetch = globalThis.fetch;
   const server = createToolHarness();
@@ -44,6 +48,7 @@ test('delete_records preview fails closed when an exact target read fails', asyn
     if (urlText.endsWith('/auth/token/exchange')) {
       return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
     }
+    if (urlText.includes('/enfyra_table?')) return tableCatalogResponse();
     if (urlText.endsWith('/metadata/temporary_notes')) return metadataResponse();
     if (urlText.includes('/temporary_notes?')) {
       return jsonResponse({ message: 'preview unavailable' }, 503);
@@ -79,6 +84,7 @@ test('delete_records returns a partial checkpoint and verifies remaining ids', a
     if (urlText.endsWith('/auth/token/exchange')) {
       return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
     }
+    if (urlText.includes('/enfyra_table?')) return tableCatalogResponse();
     if (urlText.endsWith('/metadata/temporary_notes')) return metadataResponse();
     if (urlText.endsWith('/temporary_notes/1') && options.method === 'DELETE') {
       return jsonResponse({ success: true, statusCode: 200 });

@@ -350,17 +350,18 @@ export const TOOL_WORKFLOWS = [
   },
   {
     key: 'flow',
-    title: 'Flow, scheduled/manual flow, or flow step',
+    title: 'Flow, trigger, or flow step',
     useWhen: [
-      'Creating or changing manual/scheduled flows.',
+      'Creating or changing flows.',
+      'Adding, updating, or disabling schedule, event, or webhook triggers.',
       'Choosing or writing a flow step.',
       'Testing or triggering a flow.',
     ],
-    keywords: ['flow', 'scheduled', 'manual flow', 'flow step', 'trigger flow', 'workflow'],
-    firstTools: ['get_enfyra_required_knowledge', 'flow_workflow', 'plan_flow_steps', 'discover_script_contexts'],
-    inspectTools: ['inspect_feature', 'query_table'],
+    keywords: ['flow', 'schedule trigger', 'event trigger', 'webhook trigger', 'flow step', 'trigger flow', 'workflow'],
+    firstTools: ['get_enfyra_required_knowledge', 'flow_workflow', 'ensure_flow', 'ensure_flow_trigger', 'plan_flow_steps', 'discover_script_contexts'],
+    inspectTools: ['search_runtime_zone', 'inspect_feature', 'query_table'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts'],
-    writeTools: ['flow_workflow', 'plan_flow_steps'],
+    writeTools: ['flow_workflow', 'ensure_flow', 'ensure_flow_trigger', 'remove_flow_trigger', 'plan_flow_steps'],
     verifyTools: ['test_flow_step', 'run_admin_test', 'trigger_flow'],
     avoidTools: [
       {
@@ -373,7 +374,8 @@ export const TOOL_WORKFLOWS = [
     requiredAck: ['globalRulesAckKey', 'dynamicCodeAckKey for script or condition source'],
     exampleCategories: ['flows'],
     nextStepTemplate: [
-      'Use flow_workflow with apply=false for multi-step flows; use plan_flow_steps only for dry-run step selection.',
+      'Use flow_workflow with apply=false for multi-step flows, or ensure_flow when only the base flow definition changes.',
+      'Use ensure_flow_trigger after the flow exists to attach schedule, event, or webhook activation. Use remove_flow_trigger to disable one.',
       'Prefer fixed step types for static config. Fixed-step config is not template-transformed; use one focused script step for @FLOW_PAYLOAD/@FLOW_LAST/@FLOW values.',
       'In scripts call @LOGS(message, details?); @LOGS has no .info/.warn/.error/.debug methods.',
       'Validate/test script or condition steps before relying on the flow.',

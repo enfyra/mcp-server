@@ -103,6 +103,9 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     'ensure_websocket_gateway',
     'ensure_websocket_event',
     'flow_workflow',
+    'ensure_flow',
+    'ensure_flow_trigger',
+    'remove_flow_trigger',
     'plan_flow_steps',
   ],
   operations: [

@@ -408,6 +408,18 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${resolvedTableId}`, {
         method: 'DELETE',
       });
+      const previewData = result?.data;
+      if (previewData && previewData._preview === true && previewData.requiredConfirmHash) {
+        return {
+          action: 'table_delete_pending_confirmation',
+          tableId: resolvedTableId,
+          tableName: tableData.name,
+          requiredConfirmHash: previewData.requiredConfirmHash,
+          confirmPath: `/enfyra_table/${resolvedTableId}`,
+          confirmMethod: 'DELETE',
+          next: 'Call confirm_schema_mutation with this requiredConfirmHash, confirmPath, and confirmMethod to execute the deletion.',
+        };
+      }
       let postcondition;
       try {
         const catalog = await fetchTableCatalog(ENFYRA_API_URL);

@@ -92,7 +92,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'remove_flow_trigger',
-      'Business operation: remove a trigger from an Enfyra flow by trigger ID, or by flow + type.',
+      'Business operation: disable a trigger on an Enfyra flow by trigger ID, or by flow + type.',
       {
         triggerId: z.union([z.string(), z.number()]).optional().describe('Trigger record ID to remove.'),
         flowName: z.string().optional().describe('Flow name (used with type to find trigger).'),
@@ -145,7 +145,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
           stepCount: plan.length,
           plan,
           nextSteps: [
-            'Create or update the flow with ensure_manual_flow or ensure_scheduled_flow first.',
+            'Create or update the flow with ensure_flow first, then attach schedule/event/webhook activation with ensure_flow_trigger when needed.',
             'Call each planned ensure_*_flow_step in order, adding flowName or flowId plus table/query/config details.',
             'Use ensure_script_flow_step only for steps where the plan chose script because fixed step types are insufficient.',
             'Use test_flow_step for script/condition/high-risk steps before triggering the full flow.',

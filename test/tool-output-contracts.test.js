@@ -207,3 +207,36 @@ test('structured output validation accepts record arrays after columnar formatti
   assert.equal(catalogOutput.tools.format, 'columnar-v1');
   assert.equal(validateStructuredToolOutput('search_enfyra_tools', catalogOutput).success, true);
 });
+
+test('query_table output validation accepts columnar schema receipt collections', () => {
+  const output = formatJsonPayload({
+    schemaReceipt: {
+      tableName: 'tasks',
+      primaryKey: 'id',
+      metadataChecked: true,
+      requestedFieldsValidated: true,
+      deepValidated: true,
+      requestedTopLevelFields: ['id'],
+      validatedPaths: ['id'],
+      pathMetadata: Array.from({ length: 12 }, (_, index) => ({
+        path: `relation_${index}.id`,
+        tableName: `table_${index}`,
+        fieldName: 'id',
+        kind: 'column',
+        isPublished: true,
+        isEncrypted: false,
+      })),
+      resolvedRelations: Array.from({ length: 12 }, (_, index) => ({
+        path: `relation_${index}`,
+        sourceTable: 'tasks',
+        targetTable: `table_${index}`,
+        type: 'many-to-one',
+      })),
+      metadataTablesChecked: ['tasks'],
+    },
+  });
+
+  assert.equal(output.schemaReceipt.pathMetadata.format, 'columnar-v1');
+  assert.equal(output.schemaReceipt.resolvedRelations.format, 'columnar-v1');
+  assert.equal(validateStructuredToolOutput('query_table', output).success, true);
+});

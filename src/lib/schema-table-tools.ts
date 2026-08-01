@@ -423,4 +423,35 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
         return batch.status === 'partial_failure' || unverified ? { ...result, isError: true } : result;
       }
     );
+
+  server.tool(
+    'confirm_schema_mutation',
+    'Execute a pending destructive schema mutation that returned a requiredConfirmHash preview. Pass the exact requiredConfirmHash, confirmPath, and confirmMethod from the preview response.',
+    {
+      requiredConfirmHash: z.string().describe('The requiredConfirmHash returned by the preview response.'),
+      confirmPath: z.string().describe('The confirmPath returned by the preview response, e.g. /enfyra_table/120.'),
+      confirmMethod: z.enum(['DELETE', 'PATCH', 'POST']).describe('The confirmMethod returned by the preview response.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+    },
+    async ({ requiredConfirmHash, confirmPath, confirmMethod, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      const { fetchAPI } = await import('./fetch.js');
+      const separator = confirmPath.includes('?') ? '&' : '?';
+      const result = await fetchAPI(ENFYRA_API_URL, `${confirmPath}${separator}schemaConfirmHash=${encodeURIComponent(requiredConfirmHash)}`, {
+        method: confirmMethod,
+      });
+      const stillPreview = result?.data?._preview === true && result?.data?.requiredConfirmHash;
+      if (stillPreview) {
+        return jsonContent({
+          action: 'schema_mutation_still_pending',
+          message: 'The mutation still returned a preview. The hash may have expired or the schema changed. Re-run the original operation to get a fresh preview.',
+          newRequiredConfirmHash: result.data.requiredConfirmHash,
+        });
+      }
+      return jsonContent({
+        action: 'schema_mutation_confirmed',
+        result,
+      });
+    },
+  );
 }

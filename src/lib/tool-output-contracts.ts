@@ -15,14 +15,16 @@ const actionOutputSchema = {
   action: z.string(),
 } satisfies ZodRawShape;
 
+const columnarRecordOutputSchema = z.object({
+  format: z.literal('columnar-v1'),
+  columns: z.array(z.string()),
+  rows: z.array(z.array(z.unknown())),
+  rowCount: z.number().int().nonnegative(),
+}).passthrough();
+
 const recordArrayOutputSchema = z.union([
   z.array(z.record(z.unknown())),
-  z.object({
-    format: z.literal('columnar-v1'),
-    columns: z.array(z.string()),
-    rows: z.array(z.array(z.unknown())),
-    rowCount: z.number().int().nonnegative(),
-  }).passthrough(),
+  columnarRecordOutputSchema,
 ]);
 
 const workflowDiscoveryOutputSchema = {
@@ -82,20 +84,26 @@ const queryTableOutputSchema = {
     deepValidated: z.literal(true),
     requestedTopLevelFields: z.array(z.string()),
     validatedPaths: z.array(z.string()),
-    pathMetadata: z.array(z.object({
-      path: z.string(),
-      tableName: z.string(),
-      fieldName: z.string(),
-      kind: z.enum(['column', 'relation', 'wildcard']),
-      isPublished: z.boolean().nullable(),
-      isEncrypted: z.boolean().nullable(),
-    }).passthrough()),
-    resolvedRelations: z.array(z.object({
-      path: z.string(),
-      sourceTable: z.string(),
-      targetTable: z.string(),
-      type: z.string().nullable(),
-    }).passthrough()),
+    pathMetadata: z.union([
+      z.array(z.object({
+        path: z.string(),
+        tableName: z.string(),
+        fieldName: z.string(),
+        kind: z.enum(['column', 'relation', 'wildcard']),
+        isPublished: z.boolean().nullable(),
+        isEncrypted: z.boolean().nullable(),
+      }).passthrough()),
+      columnarRecordOutputSchema,
+    ]),
+    resolvedRelations: z.union([
+      z.array(z.object({
+        path: z.string(),
+        sourceTable: z.string(),
+        targetTable: z.string(),
+        type: z.string().nullable(),
+      }).passthrough()),
+      columnarRecordOutputSchema,
+    ]),
     metadataTablesChecked: z.array(z.string()),
   }).passthrough(),
 } satisfies ZodRawShape;

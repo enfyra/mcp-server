@@ -210,10 +210,12 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_guard['"]/);
 	  assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_gateway['"]/);
 	  assert.match(platformTools, /server\.tool\(\s*['"]ensure_websocket_event['"]/);
-	  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_flow['"]/);
+	  assert.match(platformTools, /server\.tool\(\s*['"]ensure_flow['"]/);
 	  assert.match(platformTools, /server\.tool\(\s*['"]flow_workflow['"]/);
-	  assert.match(platformTools, /server\.tool\(\s*['"]ensure_manual_flow['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_scheduled_flow['"]/);
+	  assert.match(platformTools, /server\.tool\(\s*['"]ensure_flow_trigger['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]remove_flow_trigger['"]/);
+	  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_manual_flow['"]/);
+  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_scheduled_flow['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]choose_flow_step_tool['"]/);
   assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_script_flow_step['"]/);
@@ -290,7 +292,8 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(entry, /server\.tool\(\s*['"]create_extension['"]/);
   assert.match(platformTools, /sourceCode/);
   assert.match(platformTools, /stepOrder/);
-  assert.match(platformTools, /triggerType/);
+  assert.doesNotMatch(platformTools, /triggerType/);
+  assert.match(platformTools, /enfyra_flow_trigger/);
   assert.doesNotMatch(platformTools, /connectionHandlerScript/);
   assert.doesNotMatch(platformTools, /handlerScript/);
   assert.doesNotMatch(platformTools, /\/admin\/reload\/flows/);
@@ -357,8 +360,12 @@ test('GraphQL uses generated resolvers instead of script-backed source records',
     entry.indexOf('const SCRIPT_BACKED_TABLES'),
     entry.indexOf('const SCRIPT_SOURCE_FIELDS'),
   );
+  const mutationScriptTableBlock = mutationGuards.slice(
+    mutationGuards.indexOf('const SCRIPT_TABLES'),
+    mutationGuards.indexOf('const FORBIDDEN_RELATION_DEFINITION_KEYS'),
+  );
   assert.doesNotMatch(scriptTableBlock, /enfyra_graphql/);
-  assert.doesNotMatch(mutationGuards.slice(0, mutationGuards.indexOf('export function parseRecordData')), /enfyra_graphql/);
+  assert.doesNotMatch(mutationScriptTableBlock, /enfyra_graphql/);
   assert.match(runtimeZones, /enfyra_graphql[^\n]+metadata/);
   assert.doesNotMatch(runtimeZones, /enfyra_graphql[^\n]+sourceCode/);
   assert.match(entry, /server\.tool\(\s*['"]test_graphql['"]/);
