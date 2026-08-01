@@ -231,7 +231,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       return Array.isArray(value) ? value : parseJsonArrayParam(name, value);
     }
 
-  async function createOneTable(args, batchTableNames: Set<string> = new Set()) {
+  async function createOneTable(args, batchTableNames: Set<string> = new Set(), createdTableIds: Map<string, number | string> = new Map()) {
       const userColumns = arrayValue('columns', args.columns);
   	    const [metadataContext, columnMetadata] = await Promise.all([
         fetchMetadataContext(ENFYRA_API_URL),
@@ -255,10 +255,16 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
 	    const catalog = await fetchTableCatalog(ENFYRA_API_URL);
 	    const inlineRelations: AnyRecord[] = [];
 	    const deferredRelations: AnyRecord[] = [];
+	    const selfRefRelations: AnyRecord[] = [];
+	    const ownName = String(args.name || '').toLowerCase();
 	    for (const relation of allRelations) {
 	      const targetRef = relation.targetTable;
-	      const targetName = typeof targetRef === 'string' && !/^\d+$/.test(targetRef) ? targetRef : null;
-	      if (targetName && batchTableNames.has(targetName)) {
+	      const targetName = typeof targetRef === 'string' && !/^\d+$/.test(targetRef) ? String(targetRef).toLowerCase() : null;
+	      if (targetName && targetName === ownName) {
+	        selfRefRelations.push(relation);
+	      } else if (targetName && createdTableIds.has(targetName)) {
+	        inlineRelations.push({ ...relation, targetTable: createdTableIds.get(targetName) });
+	      } else if (targetName && batchTableNames.has(targetName)) {
 	        deferredRelations.push(relation);
 	      } else {
 	        const resolvedTargetId = resolveTableIdentifierFromMetadata(catalog, targetRef, `relation "${relation.propertyName}" targetTable`);
@@ -294,7 +300,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
           columnCount: normalizedUserColumns.length + 1,
           createdColumnCount: normalizedUserColumns.length,
           inlineRelationCount: inlineRelations.length,
-          deferredRelationCount: deferredRelations.length,
+          deferredRelationCount: deferredRelations.length + selfRefRelations.length,
   	        indexGroupCount: indexes.length,
   	        uniqueGroupCount: uniques.length,
   	        deferredConstraintCount: splitIndexes.deferred.length + splitUniques.deferred.length,
@@ -321,6 +327,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
           noGetById: true,
         },
   	      deferredRelations,
+  	      selfRefRelations,
   	      deferredConstraints: {
   	        indexes: splitIndexes.deferred,
   	        uniques: splitUniques.deferred,

@@ -218,24 +218,51 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
   	      preflightCreateTableDefinitions(parsedItems);
   	      const recordDeleteOrder = computeBatchCleanupOrder(parsedItems);
 	      const batchTableNames = new Set(parsedItems.map((item) => String(item.name || '').toLowerCase()).filter(Boolean));
-  		      const created: AnyRecord[] = [];
-  	      const deferredRelations: AnyRecord[] = [];
-  	      const deferredConstraints: AnyRecord[] = [];
- 
-  	      for (const [index, item] of parsedItems.entries()) {
-	        const result = await withSchemaQueue(() => createOneTable(item, batchTableNames));
-  	        created.push({ index, ...result, deferredRelations: undefined });
-  	        for (const relation of result.deferredRelations || []) {
-  	          deferredRelations.push({ index, sourceTableId: result.table.id || result.table.name, ...relation });
-  	        }
-  	        if ((result.deferredConstraints?.indexes || []).length || (result.deferredConstraints?.uniques || []).length) {
-  	          deferredConstraints.push({
-  	            index,
-  	            tableId: result.table.id || result.table.name,
-  	            ...result.deferredConstraints,
-  	          });
-  	        }
-  	      }
+	      if (batchTableNames.size !== parsedItems.length) {
+	        const seen = new Set<string>();
+	        const dupes: string[] = [];
+	        for (const item of parsedItems) {
+	          const n = String(item.name || '').toLowerCase();
+	          if (seen.has(n)) dupes.push(n);
+	          seen.add(n);
+	        }
+	        throw new Error(`create_tables batch contains duplicate table names after case normalization: ${dupes.join(', ')}`);
+	      }
+		      const created: AnyRecord[] = [];
+	      const deferredRelations: AnyRecord[] = [];
+	      const deferredConstraints: AnyRecord[] = [];
+	      const createdTableIds = new Map<string, number | string>();
+
+	      for (const [index, item] of parsedItems.entries()) {
+	        const result = await withSchemaQueue(() => createOneTable(item, batchTableNames, createdTableIds));
+	        const tableId = result.table.id || result.table.name;
+	        createdTableIds.set(String(item.name || '').toLowerCase(), tableId);
+	        created.push({ index, ...result, deferredRelations: undefined, selfRefRelations: undefined });
+	        for (const relation of result.selfRefRelations || []) {
+	          await withSchemaQueue(() => appendRelationToTable({
+	            sourceTableId: tableId,
+	            targetTableId: tableId,
+	            type: relation.type,
+	            propertyName: relation.propertyName,
+	            inversePropertyName: relation.inversePropertyName,
+	            mappedBy: relation.mappedBy,
+	            isNullable: relation.isNullable,
+	            onDelete: relation.onDelete,
+	            description: relation.description,
+	            globalRulesAckKey,
+	          }));
+	        }
+	        for (const relation of result.deferredRelations || []) {
+	          deferredRelations.push({ index, sourceTableId: tableId, ...relation });
+	        }
+	        if ((result.deferredConstraints?.indexes || []).length || (result.deferredConstraints?.uniques || []).length) {
+	          deferredConstraints.push({
+	            index,
+	            tableId,
+	            ...result.deferredConstraints,
+	          });
+	        }
+	      }
   
         const createdRelations: AnyRecord[] = [];
         deferredRelations.sort((left, right) => {
@@ -244,9 +271,11 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
           return leftPriority - rightPriority;
         });
         for (const relation of deferredRelations) {
+          const targetName = typeof relation.targetTable === 'string' ? String(relation.targetTable).toLowerCase() : null;
+          const resolvedTargetId = (targetName && createdTableIds.has(targetName)) ? createdTableIds.get(targetName) : relation.targetTable;
           const relationResult = await appendRelationToTable({
             sourceTableId: relation.sourceTableId,
-            targetTableId: relation.targetTable,
+            targetTableId: resolvedTargetId,
             type: relation.type,
             propertyName: relation.propertyName,
             inversePropertyName: relation.inversePropertyName,
@@ -441,12 +470,13 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
       const result = await fetchAPI(ENFYRA_API_URL, `${confirmPath}${separator}schemaConfirmHash=${encodeURIComponent(requiredConfirmHash)}`, {
         method: confirmMethod,
       });
-      const stillPreview = result?.data?._preview === true && result?.data?.requiredConfirmHash;
+      const previewData = Array.isArray(result?.data) ? result.data[0] : result?.data;
+      const stillPreview = previewData?._preview === true && previewData?.requiredConfirmHash;
       if (stillPreview) {
         return jsonContent({
           action: 'schema_mutation_still_pending',
-          message: 'The mutation still returned a preview. The hash may have expired or the schema changed. Re-run the original operation to get a fresh preview.',
-          newRequiredConfirmHash: result.data.requiredConfirmHash,
+          message: 'The mutation still returned a preview. The schema changed since the original preview. Re-run the original operation to get a fresh preview.',
+          newRequiredConfirmHash: previewData.requiredConfirmHash,
         });
       }
       return jsonContent({

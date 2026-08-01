@@ -158,22 +158,46 @@ export async function fetchTableWithDetails(ENFYRA_API_URL, tableId): Promise<An
   } as AnyRecord;
 }
 
+const REVISION_RETRY_LIMIT = 3;
+const REVISION_RETRY_DELAY_MS = 300;
+
+function isRevisionMismatch(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return message.includes('revision mismatch') || message.includes('revision stale');
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * PATCH enfyra_table with auto-confirm for schema changes.
  * First PATCH returns preview + requiredConfirmHash; this helper
  * automatically resends with ?schemaConfirmHash= to apply.
+ * Retries on revision mismatch (async metadata writes between preview and confirm).
  */
 export async function patchTableAutoConfirm(ENFYRA_API_URL, tableId, body) {
-  const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(body),
-  });
-  const preview = Array.isArray(result?.data) ? result.data[0] : result?.data;
-  if (preview?._preview && preview?.requiredConfirmHash) {
-    return fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}?schemaConfirmHash=${preview.requiredConfirmHash}`, {
+  for (let attempt = 0; attempt <= REVISION_RETRY_LIMIT; attempt++) {
+    const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}`, {
       method: 'PATCH',
       body: JSON.stringify(body),
     });
+    const preview = Array.isArray(result?.data) ? result.data[0] : result?.data;
+    if (preview?._preview && preview?.requiredConfirmHash) {
+      try {
+        return await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${tableId}?schemaConfirmHash=${preview.requiredConfirmHash}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        });
+      } catch (confirmError: unknown) {
+        if (isRevisionMismatch(confirmError) && attempt < REVISION_RETRY_LIMIT) {
+          await sleep(REVISION_RETRY_DELAY_MS * (attempt + 1));
+          continue;
+        }
+        throw confirmError;
+      }
+    }
+    return result;
   }
-  return result;
+  throw new Error(`patchTableAutoConfirm: exhausted ${REVISION_RETRY_LIMIT} retries for table ${tableId}`);
 }
