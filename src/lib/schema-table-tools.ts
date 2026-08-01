@@ -217,12 +217,13 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
   	      assertBulkLimit('create_tables', parsedItems, maxItems);
   	      preflightCreateTableDefinitions(parsedItems);
   	      const recordDeleteOrder = computeBatchCleanupOrder(parsedItems);
+	      const batchTableNames = new Set(parsedItems.map((item) => String(item.name || '').toLowerCase()).filter(Boolean));
   		      const created: AnyRecord[] = [];
   	      const deferredRelations: AnyRecord[] = [];
   	      const deferredConstraints: AnyRecord[] = [];
-  
+ 
   	      for (const [index, item] of parsedItems.entries()) {
-  	        const result = await withSchemaQueue(() => createOneTable(item));
+	        const result = await withSchemaQueue(() => createOneTable(item, batchTableNames));
   	        created.push({ index, ...result, deferredRelations: undefined });
   	        for (const relation of result.deferredRelations || []) {
   	          deferredRelations.push({ index, sourceTableId: result.table.id || result.table.name, ...relation });

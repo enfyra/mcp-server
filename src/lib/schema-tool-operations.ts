@@ -231,7 +231,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       return Array.isArray(value) ? value : parseJsonArrayParam(name, value);
     }
 
-  async function createOneTable(args) {
+  async function createOneTable(args, batchTableNames: Set<string> = new Set()) {
       const userColumns = arrayValue('columns', args.columns);
   	    const [metadataContext, columnMetadata] = await Promise.all([
         fetchMetadataContext(ENFYRA_API_URL),
@@ -245,19 +245,32 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
   	      ...(args._requestedTableName ? [{ field: 'name', from: args._requestedTableName, to: args.name, reason: 'Enfyra table names are lowercase.' }] : []),
   	      ...normalizations,
   	    ];
-  	    const deferredRelations = arrayValue('relations', args.relations).map(normalizeRelationForTablePatch);
-  	    const relationNames = new Set(deferredRelations.map((relation) => relation.propertyName).filter(Boolean));
+	    const allRelations = arrayValue('relations', args.relations).map(normalizeRelationForTablePatch);
+	    const relationNames = new Set(allRelations.map((relation) => relation.propertyName).filter(Boolean));
   	    assertNoColumnRelationNameCollision(
   	      normalizedUserColumns.map((column) => String(column.name || '')).filter(Boolean),
-  	      deferredRelations.map((relation) => String(relation.propertyName || '')).filter(Boolean),
+	      allRelations.map((relation) => String(relation.propertyName || '')).filter(Boolean),
   	      `create_tables item "${args.name}"`,
   	    );
+	    const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+	    const inlineRelations: AnyRecord[] = [];
+	    const deferredRelations: AnyRecord[] = [];
+	    for (const relation of allRelations) {
+	      const targetRef = relation.targetTable;
+	      const targetName = typeof targetRef === 'string' && !/^\d+$/.test(targetRef) ? targetRef : null;
+	      if (targetName && batchTableNames.has(targetName)) {
+	        deferredRelations.push(relation);
+	      } else {
+	        const resolvedTargetId = resolveTableIdentifierFromMetadata(catalog, targetRef, `relation "${relation.propertyName}" targetTable`);
+	        inlineRelations.push({ ...relation, targetTable: resolvedTargetId });
+	      }
+	    }
   	    const indexes = normalizeConstraintGroupsValue('indexes', args.indexes ?? []);
   	    const uniques = normalizeConstraintGroupsValue('uniques', args.uniques ?? []);
   	    assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
   	    const splitIndexes = splitRelationConstraintGroups(indexes, relationNames);
   	    const splitUniques = splitRelationConstraintGroups(uniques, relationNames);
-  	    const body: AnyRecord = { name: args.name, description: args.description, columns: [idColumn, ...normalizedUserColumns], relations: [] };
+	    const body: AnyRecord = { name: args.name, description: args.description, columns: [idColumn, ...normalizedUserColumns], relations: inlineRelations };
   	    if (args.isSingleRecord !== undefined) body.isSingleRecord = args.isSingleRecord;
   	    if (args.indexes !== undefined) body.indexes = splitIndexes.immediate;
   	    if (args.uniques !== undefined) body.uniques = splitUniques.immediate;
@@ -280,6 +293,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         summary: {
           columnCount: normalizedUserColumns.length + 1,
           createdColumnCount: normalizedUserColumns.length,
+          inlineRelationCount: inlineRelations.length,
           deferredRelationCount: deferredRelations.length,
   	        indexGroupCount: indexes.length,
   	        uniqueGroupCount: uniques.length,
@@ -291,9 +305,9 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
           intended: {
             tableName: args.name,
             primaryKey: idColumn.name,
-            fields: [idColumn.name, ...normalizedUserColumns.map((column) => column.name), ...deferredRelations.map((relation) => relation.propertyName)].filter(Boolean).sort(),
+            fields: [idColumn.name, ...normalizedUserColumns.map((column) => column.name), ...allRelations.map((relation) => relation.propertyName)].filter(Boolean).sort(),
             columns: [idColumn.name, ...normalizedUserColumns.map((column) => column.name)].filter(Boolean),
-            relations: deferredRelations.map((relation) => relation.propertyName).filter(Boolean),
+            relations: allRelations.map((relation) => relation.propertyName).filter(Boolean),
           },
           live: liveSchema,
           liveMetadataAvailable: Boolean(liveSchema),
@@ -408,7 +422,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_table/${resolvedTableId}`, {
         method: 'DELETE',
       });
-      const previewData = result?.data;
+      const previewData = Array.isArray(result?.data) ? result.data[0] : result?.data;
       if (previewData && previewData._preview === true && previewData.requiredConfirmHash) {
         return {
           action: 'table_delete_pending_confirmation',
