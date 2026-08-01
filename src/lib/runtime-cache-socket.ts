@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import { getValidToken, resetTokens } from './auth.js';
+import { getValidToken, isApiTokenPermanentlyInvalid, resetTokens } from './auth.js';
 import { fetchAPI } from './fetch.js';
 import { clearRuntimeCache, clearRuntimeCacheDomains, recordRuntimeCacheWarm, runtimeCacheDomainsForReloadSteps, runtimeCacheKeysForDomains } from './runtime-cache.js';
 
@@ -10,6 +10,7 @@ type ReloadPayload = {
 
 let socket: Socket | null = null;
 let socketStarting = false;
+let socketStopped = false;
 let warmTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
@@ -70,8 +71,21 @@ function invalidateAndWarm(apiUrl: string, steps: string[]) {
 }
 
 export function startRuntimeCacheSocket(apiUrl: string) {
-  if (socket || socketStarting) return;
+  if (socket || socketStarting || socketStopped) return;
   void connectRuntimeCacheSocket(apiUrl);
+}
+
+function stopReconnecting() {
+  socketStopped = true;
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+  if (socket) {
+    socket.disconnect();
+    socket = null;
+  }
+  console.error('[RuntimeCacheSocket] API token permanently invalid — socket reconnect stopped.');
 }
 
 function reconnectDelay() {
@@ -84,7 +98,7 @@ function reconnectDelay() {
 }
 
 function scheduleRuntimeCacheSocketReconnect(apiUrl: string) {
-  if (reconnectTimer || socketStarting) return;
+  if (reconnectTimer || socketStarting || socketStopped) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     void connectRuntimeCacheSocket(apiUrl);
@@ -115,7 +129,11 @@ function bindRuntimeCacheSocketEvents(nextSocket: Socket, apiUrl: string) {
     if (msg.includes('Invalid authentication token') || msg.includes('Authentication token required') || msg.includes('ENFYRA_AUTH_REQUIRED')) {
       resetTokens();
     }
-    scheduleRuntimeCacheSocketReconnect(apiUrl);
+    if (isApiTokenPermanentlyInvalid()) {
+      stopReconnecting();
+    } else {
+      scheduleRuntimeCacheSocketReconnect(apiUrl);
+    }
   });
 }
 
@@ -136,9 +154,12 @@ async function connectRuntimeCacheSocket(apiUrl: string) {
       nextSocket.connect();
     }
   } catch {
-    // Tools surface the real authentication failure when they need server data.
     socketStarting = false;
-    scheduleRuntimeCacheSocketReconnect(apiUrl);
+    if (isApiTokenPermanentlyInvalid()) {
+      stopReconnecting();
+    } else {
+      scheduleRuntimeCacheSocketReconnect(apiUrl);
+    }
     return;
   }
 

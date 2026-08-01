@@ -6,6 +6,7 @@ let tokenExpiry: number | null = null;
 let isRefreshing = false;
 let exchangePromise: { revision: number; promise: Promise<string> } | null = null;
 let authRevision = 0;
+let apiTokenPermanentlyInvalid = false;
 
 let API_URL = 'http://localhost:3000/api';
 let API_TOKEN = '';
@@ -39,8 +40,13 @@ export function initAuth(apiUrl: string, apiToken: string = ''): void {
   API_URL = apiUrl;
   API_TOKEN = apiToken;
   authRevision += 1;
+  apiTokenPermanentlyInvalid = false;
   resetTokens();
   clearRuntimeCache();
+}
+
+export function isApiTokenPermanentlyInvalid(): boolean {
+  return apiTokenPermanentlyInvalid;
 }
 
 export function needsRefresh(): boolean {
@@ -77,6 +83,9 @@ export async function exchangeApiToken(url?: string, apiToken?: string): Promise
     });
 
     if (!response.ok) {
+      if (response.status === 401 || response.status === 403) {
+        apiTokenPermanentlyInvalid = true;
+      }
       throw new Error(`API token exchange failed: ${await response.text()}`);
     }
 

@@ -4,6 +4,8 @@ import {
   chooseFlowStepTool,
   ensureFlow,
   ensureFlowStep,
+  ensureFlowTrigger,
+  removeFlowTrigger,
   jsonText,
   planFlowSteps,
   runFlowWorkflow,
@@ -24,8 +26,6 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
       ].join(' '),
       {
         name: z.string().describe('Flow name. Existing flow with this name is updated.'),
-        triggerType: z.enum(['manual', 'schedule']).optional().default('manual').describe('manual for API/admin/hook/child flow usage, schedule for cron/time-based flows.'),
-        triggerConfig: z.union([z.record(z.any()), z.string()]).optional().describe('Trigger config object or JSON string. Required for scheduled flows.'),
         steps: z.array(z.union([
           z.string(),
           z.object({
@@ -53,8 +53,8 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
     );
 
   server.tool(
-      'ensure_manual_flow',
-      'Business operation: create or update a manually triggered Enfyra flow. Use this when the flow is run by API, admin action, another flow, or hook.',
+      'ensure_flow',
+      'Business operation: create or update an Enfyra flow. Flows are always triggerable from code ($trigger, trigger_flow step, admin API). Use ensure_flow_trigger to add schedule/event/webhook triggers.',
       {
         name: z.string().describe('Flow name. Existing flow with this name is updated.'),
         timeout: z.number().int().positive().optional().describe('Flow timeout in ms.'),
@@ -65,8 +65,6 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
       },
       async ({ name, timeout, maxExecutions, isEnabled, description, globalRulesAckKey }) => jsonText(await ensureFlow(ENFYRA_API_URL, {
         name,
-        triggerType: 'manual',
-        triggerConfig: {},
         timeout,
         maxExecutions,
         isEnabled,
@@ -76,27 +74,33 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
     );
 
   server.tool(
-      'ensure_scheduled_flow',
-      'Business operation: create or update a scheduled Enfyra flow. Use this only for cron/time-based flows.',
+      'ensure_flow_trigger',
+      'Business operation: create or update a trigger for an Enfyra flow. Types: schedule (cron), event (table mutation), webhook (route).',
       {
-        name: z.string().describe('Flow name. Existing flow with this name is updated.'),
-        triggerConfig: z.string().describe('Schedule config JSON object.'),
-        timeout: z.number().int().positive().optional().describe('Flow timeout in ms.'),
-        maxExecutions: z.number().int().positive().optional().default(100).describe('Execution history cap.'),
-        isEnabled: z.boolean().optional().default(true).describe('Enable flow.'),
-        description: z.string().optional().describe('Admin note.'),
+        flowName: z.string().optional().describe('Flow name to attach trigger to.'),
+        flowId: z.union([z.string(), z.number()]).optional().describe('Flow ID to attach trigger to.'),
+        type: z.enum(['schedule', 'event', 'webhook']).describe('Trigger type.'),
+        config: z.union([z.record(z.any()), z.string()]).optional().describe('Type-specific config JSON. Schedule: {cron, timezone}.'),
+        tableEvent: z.enum(['create', 'update', 'delete']).optional().describe('Required for event triggers: which mutation activates the flow.'),
+        routeId: z.union([z.string(), z.number()]).optional().describe('Required for webhook triggers: route ID that triggers the flow.'),
+        tableId: z.union([z.string(), z.number()]).optional().describe('Required for event triggers: table ID whose mutations trigger the flow.'),
+        isEnabled: z.boolean().optional().default(true).describe('Enable trigger.'),
         globalRulesAckKey: globalRulesAckParam(z),
       },
-      async ({ name, triggerConfig, timeout, maxExecutions, isEnabled, description, globalRulesAckKey }) => jsonText(await ensureFlow(ENFYRA_API_URL, {
-        name,
-        triggerType: 'schedule',
-        triggerConfig,
-        timeout,
-        maxExecutions,
-        isEnabled,
-        description,
-        globalRulesAckKey,
-      })),
+      async (input) => jsonText(await ensureFlowTrigger(ENFYRA_API_URL, input)),
+    );
+
+  server.tool(
+      'remove_flow_trigger',
+      'Business operation: remove a trigger from an Enfyra flow by trigger ID, or by flow + type.',
+      {
+        triggerId: z.union([z.string(), z.number()]).optional().describe('Trigger record ID to remove.'),
+        flowName: z.string().optional().describe('Flow name (used with type to find trigger).'),
+        flowId: z.union([z.string(), z.number()]).optional().describe('Flow ID (used with type to find trigger).'),
+        type: z.enum(['schedule', 'event', 'webhook']).optional().describe('Trigger type to remove.'),
+        globalRulesAckKey: globalRulesAckParam(z),
+      },
+      async (input) => jsonText(await removeFlowTrigger(ENFYRA_API_URL, input)),
     );
 
   server.tool(

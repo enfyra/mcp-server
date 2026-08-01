@@ -21,8 +21,6 @@ import {
 
 export async function ensureFlow(apiUrl, {
   name,
-  triggerType = 'manual',
-  triggerConfig,
   timeout,
   maxExecutions = 100,
   isEnabled = true,
@@ -33,8 +31,6 @@ export async function ensureFlow(apiUrl, {
   const existing = await findRecord(apiUrl, 'enfyra_flow', { name: { _eq: name } }, 'id,_id,name');
   const operation = await createOrPatch(apiUrl, 'enfyra_flow', existing, {
     name,
-    triggerType,
-    triggerConfig: parseJsonObjectArg('triggerConfig', triggerConfig, {}),
     timeout,
     maxExecutions,
     isEnabled,
@@ -42,6 +38,78 @@ export async function ensureFlow(apiUrl, {
   });
   const reload = naturalPartialReload('Flow metadata writes trigger the server partial reload contract; there is no dedicated flow reload endpoint.');
   return { action: 'flow_ensured', flow: { id: operation.id, name }, operation, reload };
+}
+
+export async function ensureFlowTrigger(apiUrl, {
+  flowName,
+  flowId,
+  type,
+  config,
+  tableEvent,
+  routeId,
+  tableId,
+  isEnabled = true,
+  globalRulesAckKey,
+}) {
+  assertGlobalRulesAck(globalRulesAckKey);
+  const parsedConfig = parseJsonObjectArg('config', config, {});
+  if (!flowName && !flowId) throw new Error('Provide flowName or flowId.');
+  const flow = flowId
+    ? await findRecord(apiUrl, 'enfyra_flow', { id: { _eq: flowId } }, 'id,_id,name')
+    : await findRecord(apiUrl, 'enfyra_flow', { name: { _eq: flowName } }, 'id,_id,name');
+  if (!flow) throw new Error(`Flow not found: ${flowId || flowName}`);
+  const fid = getId(flow);
+  if (type === 'schedule' && !parsedConfig?.cron) throw new Error('Schedule trigger requires config.cron.');
+  if (type === 'event' && !tableId) throw new Error('Event trigger requires tableId.');
+  if (type === 'event' && !tableEvent) throw new Error('Event trigger requires tableEvent (create|update|delete).');
+  if (type === 'webhook' && !routeId) throw new Error('Webhook trigger requires routeId.');
+  const existing = await findRecord(apiUrl, 'enfyra_flow_trigger', {
+    flow: { id: { _eq: fid } },
+    type: { _eq: type },
+    ...(type === 'event' ? { tableEvent: { _eq: tableEvent }, table: { id: { _eq: tableId } } } : {}),
+    ...(type === 'webhook' ? { route: { id: { _eq: routeId } } } : {}),
+  }, 'id,_id,type');
+  const body = {
+    type,
+    isEnabled,
+    config: parsedConfig,
+    tableEvent: type === 'event' ? tableEvent : null,
+    route: type === 'webhook' ? { id: routeId } : null,
+    table: type === 'event' ? { id: tableId } : null,
+  };
+  const operation = await createOrPatch(apiUrl, 'enfyra_flow_trigger', existing, {
+    ...body,
+    flow: { id: fid },
+  });
+  const reload = naturalPartialReload('Flow trigger writes trigger the server partial reload contract.');
+  return { action: 'flow_trigger_ensured', flow: { id: fid, name: flow.name }, trigger: { id: operation.id, type }, operation, reload };
+}
+
+export async function removeFlowTrigger(apiUrl, {
+  flowName,
+  flowId,
+  type,
+  triggerId,
+  globalRulesAckKey,
+}) {
+  assertGlobalRulesAck(globalRulesAckKey);
+  if (!triggerId && !flowName && !flowId) throw new Error('Provide triggerId, or flowName/flowId with optional type.');
+  let filter;
+  let flowRef = null;
+  if (triggerId) {
+    filter = { id: { _eq: triggerId } };
+  } else {
+    const flow = flowId
+      ? await findRecord(apiUrl, 'enfyra_flow', { id: { _eq: flowId } }, 'id,_id,name')
+      : await findRecord(apiUrl, 'enfyra_flow', { name: { _eq: flowName } }, 'id,_id,name');
+    if (!flow) throw new Error(`Flow not found: ${flowId || flowName}`);
+    flowRef = { id: getId(flow), name: flow.name };
+    filter = { flow: { id: { _eq: flowRef.id } }, ...(type ? { type: { _eq: type } } : {}) };
+  }
+  const existing = await findRecord(apiUrl, 'enfyra_flow_trigger', filter, 'id,_id,type,isEnabled');
+  if (!existing) return { action: 'flow_trigger_not_found', ...(flowRef ? { flow: flowRef } : {}) };
+  const operation = await createOrPatch(apiUrl, 'enfyra_flow_trigger', existing, { isEnabled: false });
+  return { action: 'flow_trigger_disabled', ...(flowRef ? { flow: flowRef } : {}), trigger: { id: getId(existing), type: existing.type }, operation };
 }
 
 export async function ensureFlowStep(apiUrl, {
@@ -259,11 +327,8 @@ export async function runFlowWorkflow(apiUrl, opts) {
   const steps = parseJsonArrayArg('steps', opts.steps, []);
   const plan = steps.map(normalizeFlowWorkflowStep);
   const hasDynamicCode = plan.some((step) => ['script', 'condition'].includes(step.type) && step.sourceCode);
-  const triggerType = opts.triggerType || 'manual';
   const flowInput = {
     name: opts.name,
-    triggerType,
-    triggerConfig: triggerType === 'schedule' ? opts.triggerConfig : (opts.triggerConfig ?? {}),
     timeout: opts.timeout,
     maxExecutions: opts.maxExecutions,
     isEnabled: opts.isEnabled,
@@ -276,7 +341,6 @@ export async function runFlowWorkflow(apiUrl, opts) {
       action: 'flow_workflow_planned',
       flow: {
         name: opts.name,
-        triggerType,
       },
       stepCount: plan.length,
       plan,

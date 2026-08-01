@@ -32,7 +32,8 @@ export const ZONE_TABLES: Record<Exclude<RuntimeZone, 'admin_ui' | 'schema_data'
     { tableName: 'enfyra_route_permission', fields: 'id,_id,description,isEnabled,route.id,route.path,role.name,methods.name,allowedUsers.id', labelFields: ['description', 'route.path', 'role.name'], pathFields: ['route.path'] },
   ],
   flow_runtime: [
-    { tableName: 'enfyra_flow', fields: 'id,_id,name,description,triggerType,triggerConfig,isEnabled,timeout,maxExecutions', labelFields: ['name', 'description', 'triggerType', 'triggerConfig'] },
+    { tableName: 'enfyra_flow', fields: 'id,_id,name,description,isEnabled,timeout,maxExecutions,triggers.id,triggers.type,triggers.isEnabled', labelFields: ['name', 'description'] },
+    { tableName: 'enfyra_flow_trigger', fields: 'id,_id,type,isEnabled,config,tableEvent,flow.id,flow.name,route.id,route.path,table.id,table.name', labelFields: ['type', 'flow.name', 'tableEvent', 'route.path', 'table.name'] },
     { tableName: 'enfyra_flow_step', fields: 'id,_id,name,key,type,description,sourceCode,condition,config,flow.id,flow.name,nextStep.id,errorStep.id,isEnabled', sourceFields: ['sourceCode', 'condition'], labelFields: ['name', 'key', 'type', 'description', 'flow.name', 'config'] },
   ],
   websocket_runtime: [
@@ -92,4 +93,3 @@ export function buildRuntimeZoneCatalog() {
     ],
   };
 }
-
