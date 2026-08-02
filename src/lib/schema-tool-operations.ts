@@ -276,7 +276,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
   	    assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
   	    const splitIndexes = splitRelationConstraintGroups(indexes, relationNames);
   	    const splitUniques = splitRelationConstraintGroups(uniques, relationNames);
-	    const body: AnyRecord = { name: args.name, description: args.description, columns: [idColumn, ...normalizedUserColumns], relations: inlineRelations };
+	    const body: AnyRecord = { name: args.name, description: args.description, columns: [idColumn, ...normalizedUserColumns] };
   	    if (args.isSingleRecord !== undefined) body.isSingleRecord = args.isSingleRecord;
   	    if (args.indexes !== undefined) body.indexes = splitIndexes.immediate;
   	    if (args.uniques !== undefined) body.uniques = splitUniques.immediate;
@@ -286,6 +286,15 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       });
       const createdTable = Array.isArray(result?.data) ? result.data[0] : result;
       const createdTableId = createdTable?.id ?? createdTable?._id;
+      if (inlineRelations.length > 0) {
+        const existingRelations = (createdTable?.relations || []).map((relation: AnyRecord) => {
+          const { id, _id, ...rest } = relation;
+          return rest;
+        });
+        await patchTableAutoConfirm(ENFYRA_API_URL, createdTableId, {
+          relations: [...existingRelations, ...inlineRelations],
+        });
+      }
       const liveMetadataAfterCreate = await fetchAPI(ENFYRA_API_URL, `/metadata/${encodeURIComponent(args.name)}`)
         .catch((error: any) => ({ error: error?.message || String(error) }));
       const liveTableAfterCreate = liveMetadataAfterCreate?.error

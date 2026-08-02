@@ -217,3 +217,21 @@ export interface OAuthProviderToolDependencies {
   fetchApi?: OAuthToolFetch;
   assertGlobalRulesAck?: (key: unknown) => void;
 }
+
+export type RateLimitState = {
+  limit?: number;
+  remaining?: number;
+  resetAtMs?: number;
+  windowSeconds?: number;
+  scope?: string;
+  used?: number;
+  retryAfterMs?: number;
+  observedAtMs: number;
+};
+
+export type RateLimitDelayOptions = {
+  nowMs?: number;
+  maxDelayMs?: number;
+  jitterMs?: number;
+  random?: () => number;
+};

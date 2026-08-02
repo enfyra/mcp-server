@@ -10,7 +10,9 @@ import {
 } from '../dist/lib/runtime-cache.js';
 import {
   applyRuntimeCacheSocketToken,
+  isRuntimeCacheSocketAuthError,
   runtimeCacheSocketConnection,
+  runtimeCacheSocketReauthDelay,
 } from '../dist/lib/runtime-cache-socket.js';
 
 test('runtime cache reports hit rate and timestamped reload recovery without recording paths', () => {
@@ -61,4 +63,39 @@ test('runtime cache socket replaces both handshake credentials before a manual r
   assert.deepEqual(socket.io.opts.extraHeaders, {
     Authorization: 'Bearer fresh-token',
   });
+});
+
+test('runtime cache socket recognizes bridge and backend authentication failures', () => {
+  assert.equal(
+    isRuntimeCacheSocketAuthError(new Error('Invalid authentication token')),
+    true,
+  );
+  assert.equal(
+    isRuntimeCacheSocketAuthError(new Error('ENFYRA_AUTH_REQUIRED')),
+    true,
+  );
+  assert.equal(
+    isRuntimeCacheSocketAuthError({
+      message: 'connection rejected',
+      data: { code: 'AUTH_INVALID' },
+    }),
+    true,
+  );
+  assert.equal(
+    isRuntimeCacheSocketAuthError({
+      message: 'connection rejected',
+      data: { data: { code: 'AUTH_REQUIRED' } },
+    }),
+    true,
+  );
+  assert.equal(isRuntimeCacheSocketAuthError(new Error('timeout')), false);
+});
+
+test('runtime cache socket schedules credential rotation before finite token expiry', () => {
+  const now = 1_000_000;
+
+  assert.equal(runtimeCacheSocketReauthDelay(now + 60_000, now), 55_000);
+  assert.equal(runtimeCacheSocketReauthDelay(now + 4_000, now), 0);
+  assert.equal(runtimeCacheSocketReauthDelay(Infinity, now), null);
+  assert.equal(runtimeCacheSocketReauthDelay(null, now), null);
 });

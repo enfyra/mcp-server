@@ -1,5 +1,5 @@
 import { io, type Socket } from 'socket.io-client';
-import { getValidToken, isApiTokenPermanentlyInvalid, resetTokens } from './auth.js';
+import { getTokenExpiry, getValidToken, isApiTokenPermanentlyInvalid, resetTokens } from './auth.js';
 import { fetchAPI } from './fetch.js';
 import { clearRuntimeCache, clearRuntimeCacheDomains, recordRuntimeCacheWarm, runtimeCacheDomainsForReloadSteps, runtimeCacheKeysForDomains } from './runtime-cache.js';
 
@@ -13,10 +13,13 @@ let socketStarting = false;
 let socketStopped = false;
 let warmTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reauthTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectAttempt = 0;
 
 const RECONNECT_DELAY_MS = 2_000;
 const RECONNECT_DELAY_MAX_MS = 30_000;
+const SOCKET_REAUTH_BUFFER_MS = 5_000;
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 function socketOrigin(apiUrl: string) {
   return apiUrl.replace(/\/api\/?$/, '');
@@ -43,6 +46,30 @@ export function applyRuntimeCacheSocketToken(socket: Pick<Socket, 'auth' | 'io'>
     ...headers,
     Authorization: `Bearer ${token}`,
   };
+}
+
+export function isRuntimeCacheSocketAuthError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as {
+    message?: unknown;
+    data?: { code?: unknown; data?: { code?: unknown } };
+  };
+  const message = typeof candidate.message === 'string' ? candidate.message : '';
+  const code = candidate.data?.code ?? candidate.data?.data?.code;
+  return code === 'AUTH_INVALID' ||
+    code === 'AUTH_REQUIRED' ||
+    message.includes('Invalid authentication token') ||
+    message.includes('Authentication token required') ||
+    message.includes('ENFYRA_AUTH_REQUIRED') ||
+    message.includes('ENFYRA_SOCKET_AUTH_ERROR');
+}
+
+export function runtimeCacheSocketReauthDelay(
+  expiry: number | null,
+  now = Date.now(),
+) {
+  if (!expiry || !Number.isFinite(expiry)) return null;
+  return Math.max(0, expiry - now - SOCKET_REAUTH_BUFFER_MS);
 }
 
 async function refreshCachedEntries(apiUrl: string, paths: string[]) {
@@ -81,11 +108,39 @@ function stopReconnecting() {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
+  if (reauthTimer) {
+    clearTimeout(reauthTimer);
+    reauthTimer = null;
+  }
   if (socket) {
     socket.disconnect();
     socket = null;
   }
   console.error('[RuntimeCacheSocket] API token permanently invalid — socket reconnect stopped.');
+}
+
+function clearRuntimeCacheSocketReauth() {
+  if (!reauthTimer) return;
+  clearTimeout(reauthTimer);
+  reauthTimer = null;
+}
+
+function scheduleRuntimeCacheSocketReauth(apiUrl: string) {
+  clearRuntimeCacheSocketReauth();
+  const delay = runtimeCacheSocketReauthDelay(getTokenExpiry());
+  if (delay == null) return;
+  const timerDelay = Math.min(delay, MAX_TIMER_DELAY_MS);
+  reauthTimer = setTimeout(() => {
+    reauthTimer = null;
+    if (delay > MAX_TIMER_DELAY_MS) {
+      scheduleRuntimeCacheSocketReauth(apiUrl);
+      return;
+    }
+    resetTokens();
+    const wasConnected = socket?.connected === true;
+    socket?.disconnect();
+    if (!wasConnected) scheduleRuntimeCacheSocketReconnect(apiUrl);
+  }, timerDelay);
 }
 
 function reconnectDelay() {
@@ -118,15 +173,17 @@ function bindRuntimeCacheSocketEvents(nextSocket: Socket, apiUrl: string) {
     }
     hasConnectedBefore = true;
     reconnectAttempt = 0;
+    scheduleRuntimeCacheSocketReauth(apiUrl);
   });
 
   nextSocket.on('disconnect', () => {
+    clearRuntimeCacheSocketReauth();
     scheduleRuntimeCacheSocketReconnect(apiUrl);
   });
 
   nextSocket.on('connect_error', (err: Error) => {
-    const msg = err?.message || '';
-    if (msg.includes('Invalid authentication token') || msg.includes('Authentication token required') || msg.includes('ENFYRA_AUTH_REQUIRED')) {
+    clearRuntimeCacheSocketReauth();
+    if (isRuntimeCacheSocketAuthError(err)) {
       resetTokens();
     }
     if (isApiTokenPermanentlyInvalid()) {
