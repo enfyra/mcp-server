@@ -83,6 +83,8 @@ test('extension and schema profiles isolate normal domain tools', () => {
 
 test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('discover_enfyra_workflows', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('confirm_schema_mutation', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('confirm_schema_mutation', 'guided', 'schema'), true);
   assert.equal(isToolVisibleInToolset('search_admin_extensions', 'guided'), true);
   assert.equal(isToolVisibleInToolset('search_runtime_zone', 'guided'), true);
   assert.equal(isToolVisibleInToolset('inspect_rest_projection', 'guided'), true);
@@ -263,6 +265,7 @@ test('every guided mutation belongs to at least one dynamic workflow pack', () =
   assert.deepEqual(orphanMutations, []);
   assert.equal(workflowSurfaceForTool('delete_route'), 'api-endpoint');
   assert.equal(workflowSurfaceForTool('delete_method'), 'api-endpoint');
+  assert.equal(workflowSurfaceForTool('confirm_schema_mutation'), 'schema');
 });
 
 test('extension workflow pack supports safe lifecycle cleanup', () => {

@@ -66,6 +66,7 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     'create_tables',
     'update_tables',
     'delete_tables',
+    'confirm_schema_mutation',
     'create_columns',
     'update_columns',
     'delete_columns',

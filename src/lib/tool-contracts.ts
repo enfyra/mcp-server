@@ -12,6 +12,7 @@ const DESTRUCTIVE_TOOLS = new Set([
 const MUTATION_TOOL_PATTERN = /^(?:create|update|delete|ensure|patch|install|enable|disable|reorder|reload|trigger|set|add|remove)_/;
 const MUTATION_TOOLS = new Set([
   'api_endpoint_workflow',
+  'confirm_schema_mutation',
   'extension_workflow',
   'flow_workflow',
   'public_route_methods',

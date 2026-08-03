@@ -49,7 +49,8 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(2, 'get_schema_design_context', 'Step zero: read live column types, table/column/relation attributes, constraint shape, and creation order.'),
         step(3, 'get_all_tables or inspect_table', 'Check existing tables before naming new tables or adding to an existing table.', { when: 'Use get_all_tables for new app schemas; inspect_table for a known existing table.' }),
         step(4, 'create_tables / create_columns / create_relations / update_tables', 'Apply schema changes with native array inputs using only live types and relation propertyName values from the design context. Put relation-based unique/index groups in the same create_tables item as the owning relations, or add them later with update_tables after relations exist.'),
-        step(5, 'inspect_table', 'Re-read saved metadata before creating records, queries, handlers, or UI against the table.'),
+        step(5, 'delete_tables / confirm_schema_mutation', 'delete_tables confirm returns table_delete_pending_confirmation with requiredConfirmHash, confirmPath, and confirmMethod; call confirm_schema_mutation directly with that exact hash to execute the deletion.', { when: 'Deleting a table definition.' }),
+        step(6, 'inspect_table', 'Re-read saved metadata before creating records, queries, handlers, or UI against the table.'),
       ];
     case 'record-data':
       return [
