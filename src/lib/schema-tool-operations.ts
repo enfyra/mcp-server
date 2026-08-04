@@ -481,7 +481,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       };
     }
 
-  async function updateOneColumn({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options, allowContractBroadening }) {
+  async function updateOneColumn({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options, metadata, placeholder, allowContractBroadening }) {
       const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
       if (!tableData) {
         throw new Error(`Table with ID ${tableId} not found.`);
@@ -510,6 +510,8 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
           if (defaultValue !== undefined) rest.defaultValue = defaultValue;
           if (description !== undefined) rest.description = description;
           if (options !== undefined) rest.options = normalizeColumnOptionsValue(options);
+          if (metadata !== undefined) rest.metadata = metadata;
+          if (placeholder !== undefined) rest.placeholder = placeholder;
         }
         return rest;
       });

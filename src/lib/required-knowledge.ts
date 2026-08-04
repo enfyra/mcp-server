@@ -2,7 +2,7 @@ export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-07-20.dynamic-script-runtime-types';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-08-04.dynamic-http-fetch-stream-richtext-contract';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -162,6 +162,8 @@ const GLOBAL_RULES_SECTIONS = [
       'Do not declare id, _id, createdAt, or updatedAt columns; Enfyra manages them automatically.',
       'For one-pass relation-based unique/index constraints, declare the owning relations in the same create_tables item as the constraints. If relations already exist or will be created separately, add those constraints afterward with update_tables.',
       'Use live Enfyra column types, not SQL dialect names. Common safe choices: varchar for short text, text/richtext for long prose, float for price/amount/rating/decimal-like values, int/bigint for counts, boolean, date/datetime/timestamp, enum, simple-json for structured objects/arrays when listed by live metadata, and code for source fields.',
+      'For a richtext column, store the eApp editor configuration under column.metadata.richText. The JSON-safe contract includes toolbar, customButtons, and formats with static CSS/classes/attributes; function callbacks and function-valued theme resolvers belong in the eApp source config and cannot be serialized through MCP.',
+      'MCP schema mutations preserve column metadata on create_tables, create_columns, and update_columns. After changing metadata.richText, inspect the exact table metadata to verify the saved editor configuration before claiming it is active.',
       'Do not use json/jsonb/longtext/decimal unless the live enfyra_column.type enum lists them. The MCP schema tools normalize common aliases where possible and return schemaNormalization.',
       'Use Enfyra relations instead of scalar FK/id columns for normalized links. Do not create fields such as userId, course_id, categoryIds, authorId, or JSON arrays of related ids unless the user explicitly asks for denormalized snapshots.',
       'If the app must deep-read a parent with child collections, create the child owning relation with inversePropertyName from the start; otherwise parent.deepChild queries will fail until an inverse relation is added.',
@@ -265,6 +267,12 @@ const DYNAMIC_CODE_SECTIONS = [
       'Inside user-facing dynamic scripts, prefer #secure.table_name.find with limit:1 and explicit fields for one-record lookups. If a primary-key id filter fails in a runtime, fetch a small bounded candidate set by a unique business field or use the canonical route/main-table context; do not keep retrying repository id filter shapes.',
       'Relation filters use relation propertyName values, not physical FK-shaped names. Use { incident: { id: { _eq: id } } }, not { incidentId: { _eq: id } }.',
       'Use @REPOS.main for the route main table and #secure.table_name or @REPOS.secure.table_name for explicit user-facing table access. Reserve #table_name/@REPOS.table_name for trusted internal work that intentionally bypasses field permissions.',
+      'HTTP fetch contract: @HELPERS.$fetch(url, options?) is the bounded request helper for JSON, text, or ArrayBuffer responses. It buffers the upstream body, applies the helper timeout/request/byte limits, and is not a streaming transport. Do not use it for SSE, chat-completions streaming, file proxying, or any response whose body must be forwarded chunk-by-chunk.',
+      'HTTP streaming contract: @RES.stream(readable, options?) is the response boundary for a custom HTTP handler. It accepts a server-side Node readable or a Web ReadableStream exposed by an approved server package bridge, then pipes it directly to the client. The handler must await @RES.stream(...) and must not return a second JSON payload afterward.',
+      'Streaming options may carry statusCode, mimetype, filename, and response headers. Forward only safe upstream headers; never forward upstream request Authorization or any secret. Set status/content type deliberately and preserve upstream error status without exposing provider credentials or raw secret-bearing diagnostics.',
+      'The dynamic sandbox does not provide native fetch/Readable/AbortController as a portable script API. For upstream streaming, use an installed Server package only after package_runtime inspection, context discovery, script validation, and a non-saving admin test prove that the package exposes a readable compatible with @RES.stream.',
+      'Do not claim package-bridge stream compatibility from package installation alone: prove the complete chain package request -> readable handle -> @RES.stream -> client response. If that proof is missing, keep the proxy buffered or report the feature as unverified.',
+      'For streaming proxy handlers, validate method/path/body and allowlist the upstream base URL before making the request; keep API keys server-side, avoid logging raw headers/body, handle upstream and client-disconnect errors, and write usage only from bounded upstream metadata after the response lifecycle is understood.',
       'When using repository find({ deep }) in handlers/hooks/flows, include each deep relation name in top-level fields, then choose nested fields under deep.<relation>.fields.',
       'Repository calls are async. Always await secure and trusted repository find/create/update/delete/exists calls; reads return { data: [...], meta? }.',
       'Every @HELPERS method call crosses the async executor bridge and must be awaited before property access, string interpolation, concatenation, or persistence. Example: const id = await @HELPERS.$crypto.randomUUID().',

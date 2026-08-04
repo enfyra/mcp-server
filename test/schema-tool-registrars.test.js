@@ -147,6 +147,68 @@ test('get_all_tables applies search and explicit all contract', async () => {
   }
 });
 
+test('update_columns persists rich-text metadata through the table cascade patch', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let currentMetadata = {
+    id: 10,
+    name: 'articles',
+    columns: [{
+      id: 100,
+      name: 'body',
+      type: 'richtext',
+      metadata: { richText: { toolbar: 'bold italic' } },
+    }],
+    relations: [],
+  };
+  const patchBodies = [];
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    }
+    if (urlText.includes('/enfyra_table?')) {
+      return jsonResponse({ data: [{ id: 10, name: 'articles' }] });
+    }
+    if (urlText.endsWith('/metadata/articles')) {
+      return jsonResponse({ data: currentMetadata });
+    }
+    if (urlText.includes('/enfyra_table/10') && init.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patchBodies.push(body);
+      if (!urlText.includes('schemaConfirmHash=')) {
+        return jsonResponse({ data: { _preview: true, requiredConfirmHash: 'confirm-richtext' } });
+      }
+      currentMetadata = { ...currentMetadata, columns: body.columns };
+      return jsonResponse({ data: [{ id: 10, name: 'articles' }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await server.get('update_columns').handler({
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      items: [{
+        tableId: 10,
+        columnId: 100,
+        metadata: { richText: { toolbar: 'bold | link' } },
+      }],
+    });
+
+    assert.equal(patchBodies.length, 2);
+    assert.deepEqual(patchBodies[1].columns[0].metadata, {
+      richText: { toolbar: 'bold | link' },
+    });
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
 test('create_relations resolves table names before schema patch', async () => {
   const originalFetch = global.fetch;
   const server = createToolHarness();

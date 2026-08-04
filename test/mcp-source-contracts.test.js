@@ -91,6 +91,9 @@ test('code-writing tools require session or explicit required-knowledge acknowle
   assert.match(requiredKnowledge, /DYNAMIC_CODE_KNOWLEDGE_ACK_KEY/);
   assert.match(requiredKnowledge, /EXTENSION_KNOWLEDGE_ACK_KEY/);
   assert.match(requiredKnowledge, /secure-vs-trusted-repositories/);
+  assert.match(requiredKnowledge, /bounded request helper/);
+  assert.match(requiredKnowledge, /package request -> readable handle -> @RES\.stream/);
+  assert.match(requiredKnowledge, /native fetch\/Readable\/AbortController/);
   assert.match(requiredKnowledge, /theme-contract-first/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(instructions, /discover_enfyra_workflows/);
@@ -618,7 +621,7 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260717M$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-07-20.dynamic-script-runtime-types');
+  assert.equal(payload.version, '2026-08-04.dynamic-http-fetch-stream-richtext-contract');
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);

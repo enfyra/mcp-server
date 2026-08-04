@@ -15,7 +15,7 @@ const BASELINES = [
     },
     unsetDynamic: true,
     count: 88,
-    hash: 'c2dc66cb45818c992c15cf39022dc728e7a306cb58fe7fa5eadbfa8a5ab46c60',
+    hash: 'bd223b54c9ba7e0bc065a6e60dc83892cef9b70dddbbc76c8e0c8a705b75be84',
     maxTokens: 34000,
   },
   {
@@ -37,7 +37,7 @@ const BASELINES = [
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
     count: 88,
-    hash: 'c2dc66cb45818c992c15cf39022dc728e7a306cb58fe7fa5eadbfa8a5ab46c60',
+    hash: 'bd223b54c9ba7e0bc065a6e60dc83892cef9b70dddbbc76c8e0c8a705b75be84',
     maxTokens: 34000,
   },
   {
@@ -48,7 +48,7 @@ const BASELINES = [
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
     count: 135,
-    hash: '9abb469be3d6bdb82d81c893238809c410740fa6d9cfccd6d164ea5d61ba9e00',
+    hash: '87dd676522e6400df221b7a319c79d14d67e13cdbd43a5be1fc8058c514d444f',
     maxTokens: 49000,
   },
 ];

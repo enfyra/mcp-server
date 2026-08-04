@@ -128,6 +128,8 @@ export function buildColumnDefinition({
   defaultValue,
   description,
   options,
+  metadata,
+  placeholder,
 }: AnyRecord): ColumnPatch {
   const normalizedType = normalizeColumnTypeForLiveMetadata(type, supportedTypes).type;
   const column: ColumnPatch = {
@@ -145,5 +147,7 @@ export function buildColumnDefinition({
   if (defaultValue !== undefined) column.defaultValue = defaultValue;
   if (description !== undefined) column.description = description;
   if (options !== undefined) column.options = normalizeColumnOptionsValue(options);
+  if (metadata !== undefined) column.metadata = metadata;
+  if (placeholder !== undefined) column.placeholder = placeholder;
   return column;
 }

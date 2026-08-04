@@ -28,7 +28,7 @@ export function registerSchemaColumnTools(server, ENFYRA_API_URL, options: { too
       'create_columns',
       'Create one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue.',
       {
-        items: bulkObjectArrayParam(z, 'Column definitions').optional().describe('Native JSON array of column definitions. Each item uses create_columns fields: { tableId, name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, isPrimary?, isGenerated?, isSystem?, defaultValue?, description?, options? }.'),
+        items: bulkObjectArrayParam(z, 'Column definitions').optional().describe('Native JSON array of column definitions. Each item uses create_columns fields: { tableId, name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, isPrimary?, isGenerated?, isSystem?, defaultValue?, description?, options?, placeholder?, metadata? }. For a richtext column, put the editor configuration under metadata.richText as JSON-safe data.'),
         columns: bulkObjectArrayParam(z, 'Column definitions').optional().describe('Alias for items when the caller naturally names the batch columns. Pass either items or columns, not both.'),
         maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
         globalRulesAckKey: globalRulesAckParam(z),
@@ -49,9 +49,9 @@ export function registerSchemaColumnTools(server, ENFYRA_API_URL, options: { too
 
   server.tool(
       'update_columns',
-      'Update one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue. Guided mode blocks isUpdatable/isPublished false→true broadening. Do not set isUpdatable=true merely to seed E2E data or let a custom action change a server-owned field; use an exact trusted internal write after authorization and preserve the canonical metadata contract.',
+      'Update one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue. Guided mode blocks isUpdatable/isPublished false→true broadening. Metadata and placeholder changes are supported; for richtext use metadata.richText with JSON-safe editor configuration. Do not set isUpdatable=true merely to seed E2E data or let a custom action change a server-owned field; use an exact trusted internal write after authorization and preserve the canonical metadata contract.',
       {
-        items: bulkObjectArrayParam(z, 'Column update items').describe('Native JSON array of column update items: [{ tableId, columnId, name?, type?, isNullable?, isPublished?, isUpdatable?, defaultValue?, description?, options?, allowContractBroadening? }]. Guided mode blocks false→true isUpdatable/isPublished changes. Expert full mode requires allowContractBroadening=true; never use broadening only for custom-action writes or test fixtures.'),
+        items: bulkObjectArrayParam(z, 'Column update items').describe('Native JSON array of column update items: [{ tableId, columnId, name?, type?, isNullable?, isPublished?, isUpdatable?, defaultValue?, description?, options?, placeholder?, metadata?, allowContractBroadening? }]. For richtext, metadata.richText is the editor configuration path. Guided mode blocks false→true isUpdatable/isPublished changes. Expert full mode requires allowContractBroadening=true; never use broadening only for custom-action writes or test fixtures.'),
         maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
         globalRulesAckKey: globalRulesAckParam(z),
       },

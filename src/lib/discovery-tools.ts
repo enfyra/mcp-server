@@ -215,7 +215,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
           updateTable: 'PATCH /enfyra_table/:id is the canonical path for table property changes and column/relation schema changes.',
           columns: 'enfyra_column has no REST route; use create_tables/create_columns/update_columns/delete_columns. Use liveColumnTypes below; do not invent SQL dialect names.',
           liveColumnTypes: getSupportedColumnTypesFromMetadata(columnMetadata),
-          columnTypeGuidance: 'Use varchar for short strings, text/richtext for long prose, float for price/amount/rating/decimal-like values unless decimal is listed, simple-json for structured objects/arrays only when listed, and relations instead of *_id columns for links.',
+          columnTypeGuidance: 'Use varchar for short strings, text/richtext for long prose, float for price/amount/rating/decimal-like values unless decimal is listed, simple-json for structured objects/arrays only when listed, and relations instead of *_id columns for links. For richtext, configure the eApp editor through column.metadata.richText with JSON-safe toolbar/customButtons/formats values.',
           relations: routeTables.has('enfyra_relation')
             ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relations/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
             : 'Use create_relations/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',

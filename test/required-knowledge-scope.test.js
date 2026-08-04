@@ -134,6 +134,17 @@ test('dynamic code knowledge requires awaiting helper bridge calls', () => {
   assert.match(section.rules.join('\n'), /Every @HELPERS method call crosses the async executor bridge and must be awaited/);
 });
 
+test('dynamic code knowledge distinguishes buffered fetch from streaming response', () => {
+  const payload = buildRequiredKnowledgePayload('dynamic-code');
+  const section = payload.dynamicServerCode.find(rule => rule.id === 'dynamic-script-shape');
+  const rules = section.rules.join('\n');
+  assert.ok(rules.includes('@HELPERS.$fetch(url, options?) is the bounded request helper'));
+  assert.match(rules, /not a streaming transport/);
+  assert.ok(rules.includes('@RES.stream(readable, options?) is the response boundary'));
+  assert.match(rules, /package request -> readable handle -> @RES\.stream/);
+  assert.match(rules, /native fetch\/Readable\/AbortController/);
+});
+
 test('extensions sections contain expected ids', () => {
   const payload = buildRequiredKnowledgePayload('extension');
   const ids = payload.extensions.map(r => r.id);

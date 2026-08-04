@@ -18,6 +18,8 @@ export type ColumnPatch = AnyRecord & {
   defaultValue?: unknown;
   description?: string;
   options?: unknown;
+  metadata?: unknown;
+  placeholder?: string;
 };
 
 export type RelationPatch = AnyRecord & {

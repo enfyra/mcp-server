@@ -3,6 +3,60 @@ export const schemaRelationsExamples = {
     useWhen: 'Use when creating or changing persisted data models.',
     examples: [
       {
+        name: 'Rich-text column with JSON-safe eApp editor configuration',
+        code: `create_tables({
+  globalRulesAckKey: "<globalRulesAckKey>",
+  items: [{
+    name: "articles",
+    columns: [
+      { name: "title", type: "varchar", isNullable: false },
+      {
+        name: "body",
+        type: "richtext",
+        isNullable: true,
+        metadata: {
+          richText: {
+            plugins: ["link", "lists", "code", "table"],
+            toolbar: "clear | h1 h2 h3 | bold italic underline | bullist numlist | link image table blockquote hr codeblock",
+            customButtons: [
+              { name: "callout", text: "Callout", tooltip: "Insert a callout", format: "callout" }
+            ],
+            formats: {
+              callout: {
+                wrapper: true,
+                tag: "aside",
+                classes: "callout",
+                css: {
+                  backgroundColor: "var(--surface-muted)",
+                  borderLeft: "4px solid var(--primary-500)",
+                  padding: "12px"
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  }]
+})
+
+// The same JSON-safe configuration can be changed later.
+update_columns({
+  globalRulesAckKey: "<globalRulesAckKey>",
+  items: [{
+    tableId: "<table_id>",
+    columnId: "<body_column_id>",
+    metadata: { richText: { toolbar: "bold italic | link" } }
+  }]
+})`,
+        notes: [
+          'Use metadata.richText only on a column whose type is richtext.',
+          'MCP accepts JSON-safe editor configuration: strings, arrays, objects, static CSS/classes/attributes, and string action names.',
+          'Function callbacks and function-valued theme resolvers cannot be serialized through MCP; define those in the eApp source config instead.',
+          'After a metadata write, inspect the exact table metadata and verify the column metadata before reporting the editor as configured.',
+        ],
+      },
+      {
         name: 'Bulk schema creation with one-item-or-many arrays',
         code: `// 0. First call get_schema_design_context and get_enfyra_required_knowledge.
 // 1. create_tables is always native-array-shaped. One table = one item.

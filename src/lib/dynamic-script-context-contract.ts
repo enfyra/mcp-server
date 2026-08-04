@@ -130,7 +130,7 @@ export function buildDynamicScriptContextTypeContract() {
         global: 'HTTP/flow global socket: emitToUser(userId, event, data), emitToRoom(path, room, event, data), emitToGateway(path, event, data), broadcast(event, data) return Promise<void>; roomSize(room) returns Promise<number>.',
         bound: 'The bound websocket socket also exposes reply(event, data), join(room), leave(room), emitToCurrentRoom(room, event, data), broadcastToRoom(room, event, data), and disconnect(), all returning Promise<void>.',
       },
-      '@RES': 'HTTP handler only: stream(readable, options?): Promise<void>. The response stream starts asynchronously; return after awaiting it.',
+      '@RES': 'HTTP handler only: stream(readable, options?): Promise<void>. The readable must be a server-side Node readable or approved Web ReadableStream exposed by a server package bridge. Options may include statusCode, mimetype, filename, and headers. It pipes directly to the client, so await @RES.stream(...) and do not return another payload afterward. This is the streaming response boundary; use @HELPERS.$fetch only for buffered json/text/ArrayBuffer responses.',
       '@TRIGGER': 'trigger(flowIdOrName: Id, payload?: JsonValue): Promise<{ jobId: string; flowId: Id } | { triggered: true; flowId: Id; flowName: string }>.',
       '$ctx.$transaction': 'Raw-only $ctx.$transaction.run<T>(callback: () => Promise<T>): Promise<T>. Only repository operations participate in rollback.',
       '@LOGS': 'Synchronous callable: (...values: unknown[]) => void. Prefer @LOGS(message, details?).',

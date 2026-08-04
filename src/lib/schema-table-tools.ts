@@ -138,7 +138,7 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             reservedColumnRule: 'Do not declare id, _id, createdAt, or updatedAt in create_tables/create_columns. create_tables strips them before save and reports skippedAutoColumns; create_columns rejects them.',
           },
           columnDefinitionInput: {
-            allowedFields: ['name', 'type', 'isNullable', 'isUnique', 'isPublished', 'isUpdatable', 'isEncrypted', 'defaultValue', 'description', 'options'],
+            allowedFields: ['name', 'type', 'isNullable', 'isUnique', 'isPublished', 'isUpdatable', 'isEncrypted', 'defaultValue', 'description', 'options', 'placeholder', 'metadata'],
             liveTypes: liveColumnTypes,
             typeSelection: [
               'varchar: short text, labels, slugs, status strings.',
@@ -153,6 +153,13 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             ],
             forbiddenGuesses: ['json', 'jsonb', 'longtext', 'decimal'].filter((type) => !liveColumnTypes.includes(type)),
             aliasNormalization: 'Schema tools normalize common aliases where possible and return schemaNormalization, but models should choose from liveTypes directly.',
+            metadataGuidance: {
+              columnField: 'metadata',
+              richTextPath: 'metadata.richText for columns with type richtext.',
+              jsonSafeShape: '{ plugins?: string[], toolbar?: string, customButtons?: [{ name, text?, tooltip?, format?, icon?, onAction?: string }], formats?: { [name]: { tag?, inline?, block?, wrapper?, classes?: string|string[], classStyles?: object, css?: object, attributes?: object } } }',
+              staticOnly: 'Column metadata is persisted as JSON. Use static strings, arrays, objects, and JSON-safe CSS; function callbacks belong in the eApp source config and cannot be sent through MCP.',
+              updateRule: 'create_tables, create_columns, and update_columns preserve metadata. Inspect the column after a write when the editor configuration matters.',
+            },
             namespaceRule: 'Column names and relation propertyName values share one table namespace. Do not define a scalar column and a relation with the same name in one table.',
           },
           relationDefinitionInput: {
@@ -198,9 +205,10 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
         'Create one or more table definitions. Always pass items as a native JSON array; for one table, pass one item.',
         'The tool creates tables sequentially, creates columns with each table, then creates all requested relations after every table in the batch exists. This avoids relation target races for weak agents.',
         'Each item supports { name, description?, isSingleRecord?, columns?, relations?, indexes?, uniques? }. columns/relations/indexes/uniques may be arrays inside the item.',
+        'Column items may include metadata and placeholder. For type richtext, store editor configuration at column.metadata.richText using JSON-safe values; function callbacks are eApp source configuration, not column JSON.',
         'Do not include id, _id, createdAt, or updatedAt in columns; Enfyra manages them and create_tables strips them before save.',
         'Every field named in indexes/uniques must be a scalar column, auto-managed column, or relation propertyName in the same table item; otherwise the tool rejects the whole batch before creating tables.',
-        'Use get_schema_design_context first for live column types and relation rules. Do not include physical FK fields.',
+        'Use get_schema_design_context first for live column types, metadata fields, and relation rules. Do not include physical FK fields.',
         'The response includes cleanupHints.recordCreateOrder; use it when seeding records so parent/target rows are created before child/source rows.',
         'The response includes cleanupHints.recordDeleteOrder; use it when deleting seeded test records so child/source rows are removed before parent/target rows.',
       ].join(' '),

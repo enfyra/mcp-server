@@ -106,6 +106,13 @@ test('GraphQL has focused enablement and execution examples', () => {
   assert.match(content, /test_graphql/);
 });
 
+test('schema examples cover JSON-safe rich-text column metadata', () => {
+  const schema = JSON.stringify(EXAMPLE_CATEGORIES['schema-relations']);
+  assert.match(schema, /metadata\.richText/);
+  assert.match(schema, /type:\s*\\?"richtext\\?"/);
+  assert.match(schema, /function callbacks.*cannot be serialized|Function callbacks.*cannot be serialized/i);
+});
+
 test('dynamic endpoint examples preserve TypeORM body usage and shape trusted output', () => {
   const examples = EXAMPLE_CATEGORIES['handlers-hooks'].examples;
   const thirdPartyCreate = examples.find((example) => example.name === 'Third-party create endpoint with server-owned identity');

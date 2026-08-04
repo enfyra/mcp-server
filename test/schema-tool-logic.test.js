@@ -335,6 +335,37 @@ test('new column definitions include system-table validation defaults', () => {
   );
 });
 
+test('column definitions preserve rich-text metadata and placeholders', () => {
+  const metadata = {
+    richText: {
+      toolbar: 'bold italic | link',
+      customButtons: [{ name: 'callout', format: 'callout' }],
+    },
+  };
+
+  assert.deepEqual(
+    buildColumnDefinition({
+      name: 'body',
+      type: 'richtext',
+      metadata,
+      placeholder: 'Write the article…',
+    }),
+    {
+      name: 'body',
+      type: 'richtext',
+      isNullable: true,
+      isPrimary: false,
+      isGenerated: false,
+      isSystem: false,
+      isPublished: true,
+      isUpdatable: true,
+      isEncrypted: false,
+      metadata,
+      placeholder: 'Write the article…',
+    },
+  );
+});
+
 test('primary column definition follows metadata dbType without pkField', () => {
   assert.deepEqual(buildPrimaryColumnForDbType('postgres'), {
     name: 'id',
