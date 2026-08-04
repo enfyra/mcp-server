@@ -2,7 +2,7 @@ export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-08-05.guard-engine-hook-layering-contract';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-08-05.guard-engine-hook-layering-and-extension-navigation-contract';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -338,7 +338,7 @@ const EXTENSION_SECTIONS = [
       'Page extensions should be full-bleed by default and responsive from the first version.',
       'Do not wrap whole pages in decorative cards; use cards only for repeated items, modals, or genuinely framed tools.',
       'Register dynamic page header actions inside onMounted after setup refs and handlers exist. Use the page_shell builder instead of writing immediate registry callbacks from memory.',
-      'Use NuxtLink or Nuxt UI components with :to for visible navigation links; reserve navigateTo for imperative side effects.',
+      'For internal navigation triggered by an extension action (for example a button or inline action that opens /me), call navigateTo("/path") in the click handler so the Enfyra SPA stays mounted; do not use window.location or a raw href for that action. Use NuxtLink or Nuxt UI components with :to for static visible navigation links.',
       'Admin extension links for record management should point to /data/<table>, not public website paths stored on records.',
     ],
   },

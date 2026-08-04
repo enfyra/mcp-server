@@ -684,7 +684,8 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260717M$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-08-05.guard-engine-hook-layering-contract');
+  assert.equal(payload.version, '2026-08-05.guard-engine-hook-layering-and-extension-navigation-contract');
+  assert.match(payloadText, /internal navigation triggered by an extension action.*navigateTo/);
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {
     assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);
