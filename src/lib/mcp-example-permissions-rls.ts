@@ -80,6 +80,55 @@ test_rest_endpoint({
         ],
       },
       {
+        name: 'Audit global versus route-specific guards',
+        code: `search_runtime_zone({
+  zone: "api_runtime",
+  query: "guard",
+  mode: "search",
+  maxResults: 50
+})
+
+inspect_route({ path: "/orders" })
+
+query_table({
+  tableName: "enfyra_guard",
+  fields: ["id", "name", "type", "isGlobal", "isEnabled", "position", "route", "methods"],
+  all: true
+})
+
+query_table({
+  tableName: "enfyra_guard_rule",
+  fields: ["id", "guard", "type", "config", "isEnabled", "priority"],
+  all: true
+})`,
+        notes: [
+          'Use this audit before adding a guard: distinguish enabled global roots from route-attached roots and inspect the rule type/config under each root.',
+          'A global IP/user rule shares its subject bucket across every route covered by that guard rule; add a route-specific guard when sections need isolated quotas.',
+          'Inspect route permissions separately. A guard is request gating/rate control, not RBAC or owner/tenant row authorization.',
+          'For a GraphQL audit, search graphql_runtime and inspect type=graphql guards separately; do not treat /graphql-schema or REST route guards as GraphQL guard coverage.',
+        ],
+      },
+      {
+        name: 'Isolate a public route from the global IP bucket',
+        code: `ensure_route_rate_limit({
+  path: "/auth/login",
+  methods: ["POST"],
+  scope: "ip",
+  maxRequests: 10,
+  perSeconds: 60,
+  name: "Auth login IP burst limit",
+  description: "Isolate login abuse from the global API IP bucket.",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>"
+})
+
+inspect_route({ path: "/auth/login" })`,
+        notes: [
+          'Use pre_auth + scope ip for public routes because user identity is not available yet.',
+          'This adds a route guard without removing the global baseline. Do not replace the global guard unless the user explicitly asks.',
+          'Choose limits from observed traffic; example numbers are anchors, not production defaults.',
+        ],
+      },
+      {
         name: 'Restrict an admin-only route to office IPs',
         code: `ensure_guard({
   name: "Admin reports office allowlist",

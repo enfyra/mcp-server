@@ -65,19 +65,28 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
       return [
         step(1, 'get_enfyra_required_knowledge', 'Read dynamic-code contracts and collect acknowledgement keys.'),
         step(2, 'discover_script_contexts', 'Load macros, repository trust paths, per-surface helpers, and the fields+deep projection contract for script repository reads.'),
-        step(3, 'build_dynamic_repository_usage', 'Generate secure or intentional trusted repository access when the script reads or writes table data.'),
-        step(4, 'search_runtime_zone', 'Locate the script-backed runtime artifact in api_runtime, flow_runtime, or websocket_runtime.'),
+        step(3, 'search_runtime_zone', 'Locate and inspect the route plus linked pre-hooks, handlers, and post-hooks before deciding where each concern belongs.'),
+        step(4, 'build_dynamic_repository_usage', 'Generate secure or intentional trusted repository access when the script reads or writes table data.'),
         step(5, 'patch_script_source or update_script_source', 'Patch or replace the inspected source artifact with validation and hash checks.'),
-        step(6, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify through the runtime path that owns the script.'),
+        step(6, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify each selected layer, including pre-hook short-circuit and post-hook error behavior when those layers are part of the contract.'),
       ];
     case 'route-access':
-    case 'guards-permissions-rules':
       return [
         step(1, 'get_enfyra_required_knowledge', 'Read access/security contracts.'),
         step(2, 'inspect_route or inspect_table', 'Inspect the exact route/table access surface.'),
         step(3, 'audit_route_access', 'Compare current route permissions against expected roles/users/methods.'),
-        step(4, 'ensure_route_access / ensure_route_rate_limit / create_pre_hook / ensure_field_permission / ensure_guard / ensure_column_rule', 'Apply the specific access/rule operation. Use ensure_route_rate_limit for request throttling and create_pre_hook for owner/tenant row filters.'),
+        step(4, 'ensure_route_access', 'Apply authenticated route authority. Use public_route_methods only when anonymous access is intentional.'),
         step(5, 'audit_route_access or test_rest_endpoint', 'Verify the access behavior.'),
+      ];
+    case 'guards-permissions-rules':
+      return [
+        step(1, 'get_enfyra_required_knowledge', 'Read the guard-engine contract and access/rule boundaries.'),
+        step(2, 'search_runtime_zone', 'Audit existing global and route-specific guards/rules in api_runtime before adding a scoped policy.'),
+        step(3, 'inspect_route', 'Inspect the exact route, available/public methods, current guard attachment, hooks, and handlers.'),
+        step(4, 'audit_route_access', 'Check RBAC separately; route permission is authority and guard rejection is request gating.'),
+        step(5, 'ensure_route_rate_limit / ensure_guard / ensure_field_permission / ensure_column_rule / create_pre_hook', 'Choose the specific boundary: simple throttle, advanced guard tree, field visibility, body validation, or owner/tenant row filtering.'),
+        step(6, 'search_runtime_zone / inspect_route', 'Verify the saved guard root/rule, position, methods, enabled state, and route attachment. Use query_table only as an explicit full-toolset escape hatch when the focused runtime inspectors cannot prove the postcondition.'),
+        step(7, 'test_rest_endpoint or test_graphql', 'Run a bounded runtime check without accidentally consuming a production quota; GraphQL guards use the separate GraphQL path.'),
       ];
     case 'flow':
       return [
@@ -267,6 +276,7 @@ function scoreWorkflow(workflow: ToolWorkflow, { intent, surface, risk }: { inte
   if (risk === 'destructive' && workflow.avoidTools.some((item) => normalize(item.when).includes('delete'))) score += 2;
   if (workflow.key === 'dynamic-script' && /\b(patch|edit|update|fix|change)\b/.test(text) && /\b(sourcecode|source|compiledcode|script)\b/.test(text)) score += 10;
   if (workflow.key === 'dynamic-script' && /flow step/.test(text) && /\b(sourcecode|source|compiledcode|script)\b/.test(text)) score += 6;
+  if (workflow.key === 'dynamic-script' && /\b(pre[- ]?hook|post[- ]?hook|handler)\b/.test(text) && /\b(split|layer|separate|divide|god|all in one|trách nhiệm|chia)\b/.test(text)) score += 12;
   if (workflow.key === 'flow' && /\b(patch|edit|update|fix|change)\b/.test(text) && /\b(sourcecode|source|compiledcode|script)\b/.test(text)) score -= 4;
   return score;
 }

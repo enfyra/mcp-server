@@ -730,6 +730,16 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
   assert.equal(flowSourcePatch.primaryPath.some((step) => step.tool === 'get_script_source'), false);
   assert.ok(flowSourcePatch.primaryPath.some((step) => step.tool === 'patch_script_source or update_script_source'));
 
+  const layeredHooks = discoverWorkflowRoutes({
+    intent: 'split one god hook into separate pre-hook handler and post-hook layers',
+    surface: 'dynamic-script',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(layeredHooks.key, 'dynamic-script');
+  assert.match(JSON.stringify(layeredHooks.primaryPath), /linked pre-hooks, handlers, and post-hooks/);
+  assert.match(JSON.stringify(layeredHooks.primaryPath), /pre-hook short-circuit and post-hook error behavior/);
+
   const schema = discoverWorkflowRoutes({
     intent: 'create a multi table app schema with columns relations and sample records',
     surface: 'schema',

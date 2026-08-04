@@ -120,6 +120,7 @@ test('dynamic endpoint examples preserve TypeORM body usage and shape trusted ou
   const serverAction = examples.find((example) => example.name === 'Third-party action updates a non-updatable server field');
   const registration = examples.find((example) => example.name === 'Custom register handler');
   const canonicalRls = examples.find((example) => example.name === 'Canonical route pre-hook RLS filter merge');
+  const layeredHooks = examples.find((example) => example.name === 'Split hook layers instead of one god script');
 
   assert.ok(thirdPartyCreate);
   assert.match(thirdPartyCreate.code, /#secure\.orders\.create/);
@@ -137,4 +138,9 @@ test('dynamic endpoint examples preserve TypeORM body usage and shape trusted ou
   assert.match(registration.code, /return \{ id: user\.id, email: user\.email \}/);
   assert.ok(canonicalRls);
   assert.match(canonicalRls.notes.join(' '), /every consumer.*eApp/i);
+  assert.ok(layeredHooks);
+  assert.match(layeredHooks.code, /create_pre_hook/);
+  assert.match(layeredHooks.code, /create_handler/);
+  assert.match(layeredHooks.code, /create_post_hook/);
+  assert.match(layeredHooks.notes.join(' '), /rate limits\/IP allow-deny.*Guard Engine/i);
 });

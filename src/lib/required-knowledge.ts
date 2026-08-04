@@ -2,7 +2,7 @@ export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-08-04.dynamic-http-fetch-stream-richtext-contract';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-08-05.guard-engine-hook-layering-contract';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -135,6 +135,21 @@ const GLOBAL_RULES_SECTIONS = [
     ],
   },
   {
+    id: 'guard-engine-contract',
+    rules: [
+      'Use the Enfyra guard engine for request gating and abuse controls such as rate limits and IP allow/deny. Guards are not RBAC: use ensure_route_access for authenticated route authority, pre-hooks/handlers for owner or tenant row scope, ensure_field_permission for field visibility, and ensure_column_rule for body validation.',
+      'Before changing guard metadata, audit the live surface with search_runtime_zone(zone="api_runtime", query="guard") and inspect_route({ path }) for the exact route. For a coverage audit, inventory enabled en_fyra_guard/enfyra_guard_rule rows and classify global roots, route roots, position, methods, rule types, and enabled state before creating a new guard.',
+      'A route guard root targets one route through routeId/path; isGlobal=true is a route-type root that applies to every detected metadata route. An empty methods list means every HTTP method. Route-specific guards are required when a quota or IP policy must not share one global bucket across unrelated APIs.',
+      'pre_auth runs before JWT and may use client-IP or route rules only. post_auth runs after authentication/RoleGuard and is required for rate_limit_by_user. Do not put userIds or rate_limit_by_user in pre_auth guards.',
+      'Supported route rule types are rate_limit_by_ip, rate_limit_by_user, rate_limit_by_route, ip_whitelist, and ip_blacklist. rate_limit_by_operation is GraphQL-only. rate_limit_by_ip and rate_limit_by_user buckets are scoped by guard-rule id plus subject, not by route; use a route-specific guard when isolation is required.',
+      'Use ensure_route_rate_limit for one simple route throttle: scope ip for public/pre-auth routes, scope user for authenticated/post-auth routes, and scope route only when an intentionally shared route-wide bucket is desired. Use ensure_guard for composed AND/OR trees, IP allowlists/blacklists, or other advanced guard rules.',
+      'Do not replace a global guard blindly. Keep the existing global baseline unless the user explicitly asks to change it, then add scoped guards for sensitive sections such as auth, public registration/webhooks, Cloud mutations, storage/uploads, admin operations, and gateway traffic.',
+      'When a route is public but authenticates a credential inside a pre-hook (for example a PAT gateway), a post_auth user guard cannot see that identity automatically. Use a pre_auth IP/route guard for transport abuse and keep token/role authorization in the hook or handler until a task-scoped identity is available to the guard engine.',
+      'GraphQL guards are a separate type=graphql matrix over (table, gqlOperation), where null means all; they cannot use route, isGlobal, or HTTP methods. Audit them separately through graphql_runtime. The current ensure_guard route tool does not expose GraphQL target fields, so do not guess or raw-CRUD GraphQL guard rows; report that tool-contract gap or use a dedicated GraphQL guard operation when available.',
+      'Guard writes must use ensure_route_rate_limit or ensure_guard, never raw create_records/update_records on guard tables. After a write, inspect the exact route/guard rows, allow the guard reload performed by the operation, and verify a bounded positive/negative request without consuming a production quota unnecessarily. Route permissions and guard rejection are separate verification dimensions.',
+    ],
+  },
+  {
     id: 'oauth-provider-third-app-handoff',
     rules: [
       'Connect the third app to Enfyra before asking for provider credentials. Load category=connect, identify the target framework, and install the matching official SDK package (@enfyra/sdk-nuxt, @enfyra/sdk-next, @enfyra/sdk-react, @enfyra/sdk-vue, or @enfyra/sdk-core). Do not write manual proxy configs, route handlers, cookie bridges, or middleware when an SDK exists for the framework.',
@@ -242,6 +257,21 @@ const DYNAMIC_CODE_SECTIONS = [
       'Do not bypass a custom-endpoint canonical collision by calling create_handler on the table route. create_handler requires explicit canonical acknowledgement for a new main-table handler; third-party endpoint-specific behavior belongs on a separate route.',
       'Canonical POST/PATCH routes run metadata column-rule/Zod body validation. Custom repository handlers do not inherit that middleware and must validate endpoint-specific body semantics when required.',
       'For canonical table reads and shared RLS, merge security filters into @QUERY.filter and preserve @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, @QUERY.aggregate, and debugMode.',
+    ],
+  },
+  {
+    id: 'hook-layering-contract',
+    rules: [
+      'Do not put every concern into one hook or handler. Split the request lifecycle by responsibility: Guard Engine for request gating and abuse controls, pre-hook for shared pre-handler policy/normalization, handler for endpoint-specific business orchestration, post-hook for response or best-effort side effects, column rules for deterministic body validation, field permissions for field visibility, and flows for durable asynchronous work.',
+      'The runtime order is route detection and method filtering, pre-auth guards, authentication/RoleGuard, post-auth guards, body validation, route pre-hooks, the route handler, then post-hooks and response finalization. A pre-hook that returns a value short-circuits the handler; a pre-hook that returns undefined lets the next block continue.',
+      'Use a route pre-hook only for a policy shared by every consumer of that canonical route, such as merging owner/tenant/membership scope into @QUERY.filter or normalizing protected input before canonical CRUD. Keep it small, deterministic, and early; do not make it a second business handler.',
+      'Use the route handler for endpoint-specific validation, business decisions, secure repository reads/writes, orchestration, and the explicit response shape. A custom route has no @REPOS.main; use #secure.<table> or @REPOS.secure.<table>. Do not make the handler a universal rate limiter, RBAC layer, or post-write dispatcher.',
+      'Use a post-hook for response shaping, audit/logging, or non-critical notifications after the handler/pre-hook phase. The worker runs post-hooks after success and also after a handler error with @ERROR populated; each post-hook failure is isolated and does not stop later post-hooks. Never rely on a post-hook to authorize, rescue a failed mutation, or provide a required durable side effect.',
+      'For a required durable side effect, queue or trigger a flow (or keep the write in the handler transaction boundary when the operation is synchronous). Do not hide a saga, retry loop, scheduled job, or cross-system delivery workflow inside a post-hook.',
+      'Use column rules for deterministic metadata-backed body validation and field permissions for field read/write visibility. Do not replace either with a script hook just because the hook can inspect the same payload.',
+      'Choose one authority for each invariant. Defense-in-depth is acceptable when boundaries differ, but do not copy the same owner check, rate limit, or response transformation into pre-hook, handler, and post-hook without a documented reason.',
+      'When a rule applies only to one custom endpoint, keep it in that handler. When it must protect every canonical CRUD consumer, put the shared row policy in the route pre-hook. When it is only IP/user/rate gating, use a guard instead of script code.',
+      'Inspect the route and its linked preHooks, handlers, and postHooks before editing. Verify each layer independently with the matching route test; a passing handler test does not prove the pre-hook short-circuit, post-hook error path, guard position, or flow delivery contract.',
     ],
   },
   {

@@ -124,8 +124,22 @@ test('dynamicServerCode sections contain expected ids', () => {
   const ids = payload.dynamicServerCode.map(r => r.id);
   assert.ok(ids.includes('secure-vs-trusted-repositories'));
   assert.ok(ids.includes('authorization-is-separate'));
+  assert.ok(ids.includes('hook-layering-contract'));
   assert.ok(ids.includes('hidden-field-query-surfaces'));
   assert.ok(ids.includes('dynamic-script-shape'));
+});
+
+test('dynamic code knowledge defines hook layer responsibilities', () => {
+  const payload = buildRequiredKnowledgePayload('dynamic-code');
+  const section = payload.dynamicServerCode.find(rule => rule.id === 'hook-layering-contract');
+  const rules = section.rules.join('\n');
+  assert.match(rules, /Guard Engine/);
+  assert.match(rules, /route pre-hook/);
+  assert.match(rules, /route handler/);
+  assert.match(rules, /post-hook/);
+  assert.match(rules, /column rules/);
+  assert.match(rules, /flows/);
+  assert.match(rules, /post-hook failure is isolated/);
 });
 
 test('dynamic code knowledge requires awaiting helper bridge calls', () => {

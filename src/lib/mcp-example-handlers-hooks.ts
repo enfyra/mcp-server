@@ -275,6 +275,64 @@ const scope = {
         ],
       },
       {
+        name: 'Split hook layers instead of one god script',
+        code: `create_pre_hook({
+  routeId: "<canonical_orders_route_id>",
+  name: "scope_orders_to_current_user",
+  methods: ["GET"],
+  priority: -20,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
+  code: \`const incoming = @QUERY.filter || {}
+const scope = { owner: { id: { _eq: @USER.id } } }
+@QUERY.filter = Object.keys(incoming).length
+  ? { _and: [incoming, scope] }
+  : scope\`
+})
+
+create_handler({
+  routeId: "<custom_order_action_route_id>",
+  method: "POST",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
+  sourceCode: \`const title = @BODY.title
+if (!title) @THROW400("title is required")
+
+const result = await #secure.orders.create({
+  data: { ...@BODY, owner: @USER.id },
+  fields: ["id", "title", "owner"]
+})
+const order = result.data?.[0]
+if (!order) @THROW500("Order was not returned after create")
+return { id: order.id, title: order.title, owner: order.owner?.id || order.owner }\`
+})
+
+create_post_hook({
+  routeId: "<canonical_orders_route_id>",
+  name: "add_display_title",
+  methods: ["GET"],
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
+  knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
+  code: \`if (@ERROR) {
+  @LOGS("Orders read failed", @ERROR.message)
+  return
+}
+const payload = @DATA
+const rows = Array.isArray(payload?.data) ? payload.data : [payload]
+for (const row of rows) {
+  if (row) row.displayTitle = row.title || String(row.id)
+}
+return payload\`
+})`,
+        notes: [
+          'This is a layering pattern, not a copy-paste table contract: inspect the real route, methods, columns, and ownership relation first.',
+          'The pre-hook owns canonical shared row scope and may short-circuit before the handler. Keep endpoint-specific validation and writes in the handler.',
+          'The post-hook owns response-only or best-effort work. It can observe @ERROR; post-hook failures are isolated, so required delivery belongs in a flow or the synchronous handler boundary.',
+          'Put rate limits/IP allow-deny in Guard Engine, deterministic body checks in column rules, and field visibility in field permissions instead of adding more script code.',
+          'Do not duplicate one invariant in all three scripts. If two checks remain for defense-in-depth, document that they protect different boundaries.',
+        ],
+      },
+      {
         name: 'Encrypted field table definition',
         code: `create_tables({
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
