@@ -27,4 +27,7 @@ test('dynamic script context contract exposes trusted script-visible runtime typ
   assert.match(text, /@UPLOADED_FILE/);
   assert.match(text, /HTTP\/flow global socket/);
   assert.match(text, /bound websocket socket/);
+  assert.match(text, /observer\?: \(chunkText: string, kind:.*chunk.*end.*error/);
+  assert.match(text, /single deadline for observer work and stream relay/);
+  assert.match(text, /client abort\/response close cancels the task/);
 });

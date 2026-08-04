@@ -156,7 +156,10 @@ test('dynamic code knowledge distinguishes buffered fetch from streaming respons
   assert.match(rules, /not a streaming transport/);
   assert.ok(rules.includes('@RES.stream(readable, options?) is the response boundary'));
   assert.match(rules, /package request -> readable handle -> @RES\.stream/);
-  assert.match(rules, /native fetch\/Readable\/AbortController/);
+  assert.match(rules, /native fetch, Readable, or AbortController/);
+  assert.match(rules, /observer\(chunkText, kind\)/);
+  assert.match(rules, /one timeout for the request/);
+  assert.match(rules, /If the client stops listening/);
 });
 
 test('extensions sections contain expected ids', () => {

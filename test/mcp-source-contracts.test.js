@@ -93,7 +93,7 @@ test('code-writing tools require session or explicit required-knowledge acknowle
   assert.match(requiredKnowledge, /secure-vs-trusted-repositories/);
   assert.match(requiredKnowledge, /bounded request helper/);
   assert.match(requiredKnowledge, /package request -> readable handle -> @RES\.stream/);
-  assert.match(requiredKnowledge, /native fetch\/Readable\/AbortController/);
+  assert.match(requiredKnowledge, /native fetch, Readable, or AbortController/);
   assert.match(requiredKnowledge, /theme-contract-first/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(instructions, /discover_enfyra_workflows/);
@@ -684,7 +684,7 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260717M$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-08-05.guard-engine-hook-layering-and-extension-navigation-contract');
+  assert.equal(payload.version, '2026-08-05.gateway-stream-observer-abort-timeout-contract');
   assert.match(payloadText, /internal navigation triggered by an extension action.*navigateTo/);
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {

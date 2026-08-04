@@ -244,12 +244,17 @@ return { data: response }
 // After the package-readable chain has passed a non-saving admin test:
 // await @RES.stream(upstream.body, {
 //   statusCode: upstream.statusCode,
-//   mimetype: upstream.headers["content-type"]
+//   mimetype: upstream.headers["content-type"],
+//   observer: async (fragment, kind) => {
+//     // A fragment is not a complete SSE/JSON message; buffer before parsing.
+//   }
 // })
 `,
         notes: [
           '@HELPERS.$fetch is bounded and buffered; use it for JSON, text, or ArrayBuffer responses only.',
           '@RES.stream is the direct HTTP response boundary and must be awaited. Do not return another payload after starting it.',
+          'The optional observer is for lightweight usage inspection; chunks are fragments, so buffer message framing before parsing.',
+          'Set one method timeout for the complete upstream request and stream. If the client disconnects, do not try to send a second response; required audit work belongs in a Flow.',
           'The sandbox does not expose native fetch/Readable/AbortController as a portable script API.',
           'A Server package must be inspected and the complete package-readable -> @RES.stream -> client chain must pass a non-saving test before a streaming handler is persisted.',
           'Never forward Authorization or other secret-bearing request headers to the client; allowlist response headers and keep provider keys server-side.',

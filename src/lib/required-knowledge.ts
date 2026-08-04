@@ -2,7 +2,7 @@ export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-08-05.guard-engine-hook-layering-and-extension-navigation-contract';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-08-05.gateway-stream-observer-abort-timeout-contract';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -301,9 +301,11 @@ const DYNAMIC_CODE_SECTIONS = [
       'Use @REPOS.main for the route main table and #secure.table_name or @REPOS.secure.table_name for explicit user-facing table access. Reserve #table_name/@REPOS.table_name for trusted internal work that intentionally bypasses field permissions.',
       'HTTP fetch contract: @HELPERS.$fetch(url, options?) is the bounded request helper for JSON, text, or ArrayBuffer responses. It buffers the upstream body, applies the helper timeout/request/byte limits, and is not a streaming transport. Do not use it for SSE, chat-completions streaming, file proxying, or any response whose body must be forwarded chunk-by-chunk.',
       'HTTP streaming contract: @RES.stream(readable, options?) is the response boundary for a custom HTTP handler. It accepts a server-side Node readable or a Web ReadableStream exposed by an approved server package bridge, then pipes it directly to the client. The handler must await @RES.stream(...) and must not return a second JSON payload afterward.',
-      'Streaming options may carry statusCode, mimetype, filename, and response headers. Forward only safe upstream headers; never forward upstream request Authorization or any secret. Set status/content type deliberately and preserve upstream error status without exposing provider credentials or raw secret-bearing diagnostics.',
-      'The dynamic sandbox does not provide native fetch/Readable/AbortController as a portable script API. For upstream streaming, use an installed Server package only after package_runtime inspection, context discovery, script validation, and a non-saving admin test prove that the package exposes a readable compatible with @RES.stream.',
-      'Do not claim package-bridge stream compatibility from package installation alone: prove the complete chain package request -> readable handle -> @RES.stream -> client response. If that proof is missing, keep the proxy buffered or report the feature as unverified.',
+      'Streaming options may carry statusCode, mimetype, filename, safe response headers, and an optional observer(chunkText, kind) callback. Use the observer only for lightweight inspection such as accumulating provider usage; chunks are arbitrary fragments, so buffer SSE/JSON framing across callbacks and never expose secrets in logs or response data.',
+      'Set the method timeout high enough for the complete upstream call and stream. It is one timeout for the request; do not add a fresh full timeout to each phase or package call.',
+      'If the client stops listening, the stream request ends and no second response is sent. Put required audit or billing work in a durable flow instead of relying on code that runs after a disconnected response.',
+      'Do not use native fetch, Readable, or AbortController in a dynamic script. For streaming, use an installed Server package and run a successful non-saving end-to-end test before saving the proxy handler.',
+      'Package installation alone is not enough to promise streaming. Verify the complete package request -> readable handle -> @RES.stream -> client response test before saving; if it is not successful, keep the endpoint buffered or report streaming as unverified.',
       'For streaming proxy handlers, validate method/path/body and allowlist the upstream base URL before making the request; keep API keys server-side, avoid logging raw headers/body, handle upstream and client-disconnect errors, and write usage only from bounded upstream metadata after the response lifecycle is understood.',
       'When using repository find({ deep }) in handlers/hooks/flows, include each deep relation name in top-level fields, then choose nested fields under deep.<relation>.fields.',
       'Repository calls are async. Always await secure and trusted repository find/create/update/delete/exists calls; reads return { data: [...], meta? }.',
