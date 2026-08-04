@@ -23,7 +23,10 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
         icon: z.string().optional().describe('Menu icon name.'),
         type: z.enum(['Menu', 'Dropdown Menu']).optional().default('Menu').describe('Menu type.'),
         order: z.number().optional().default(0).describe('Display order.'),
-        permission: z.string().optional().describe('Menu permission JSON object. Omit to preserve existing permissions on update; new menus default to null. Empty objects are normalized to null.'),
+        permission: z.string().optional().describe([
+          'Menu permission JSON controlling sidebar visibility (not API authority). Use { or: [{ route: "/<path>", methods: ["GET"] }] } to show the menu only to operators who can use the page; { allowAll: true } for globally visible; { rootAdmin: true } for root-only; null for unrestricted public menus. An empty object is normalized to null (unrestricted).',
+          'For a page extension, set this to the same route+method set the page calls so the menu is hidden from operators who would 403. Backend route permission is a separate layer: grant it via ensure_route_access for the target role, not here.',
+        ].join(' ')),
         description: z.string().optional().describe('Admin note.'),
         isEnabled: z.boolean().optional().default(true).describe('Enable menu.'),
         globalRulesAckKey: globalRulesAckParam(z),

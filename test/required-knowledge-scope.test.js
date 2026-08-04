@@ -151,6 +151,21 @@ test('extensions sections contain expected ids', () => {
   assert.ok(ids.includes('theme-contract-first'));
   assert.ok(ids.includes('extension-shell-boundary'));
   assert.ok(ids.includes('extension-runtime-contract'));
+  assert.ok(ids.includes('extension-menu-permission-sync'));
+});
+
+test('extension menu-permission-sync distinguishes menu visibility from route authority', () => {
+  const payload = buildRequiredKnowledgePayload('extension');
+  const section = payload.extensions.find(rule => rule.id === 'extension-menu-permission-sync');
+  assert.ok(section, 'extension-menu-permission-sync section exists');
+  const rules = section.rules.join('\n');
+  assert.match(rules, /Menu permission controls whether the menu item is visible/);
+  assert.match(rules, /backend route permission \(RoleGuard\) controls/);
+  assert.match(rules, /only when the route is intentionally anonymous/);
+  assert.match(rules, /ensure_route_access/);
+  assert.match(rules, /menu permission must reference that exact route path/);
+  assert.match(rules, /normalizes an empty permission object to null/);
+  assert.match(rules, /Menu visibility without route permission still yields a 403/);
 });
 
 test('empty scope treated as full', () => {

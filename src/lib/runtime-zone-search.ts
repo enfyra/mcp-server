@@ -540,6 +540,7 @@ export async function inspectRuntimeZoneLocation(apiUrl: string, input: any) {
     const artifact = writeSourceArtifact({ tableName: table.tableName, id: getId(record) ?? 'record', fieldName: field, source });
     sources.push(artifact);
   }
+  const nextWrite = buildNextWriteGuidance(table.tableName);
   return {
     action: 'runtime_zone_location_inspected',
     zone,
@@ -548,9 +549,11 @@ export async function inspectRuntimeZoneLocation(apiUrl: string, input: any) {
     id: getId(record),
     record,
     sources,
-    nextWrite: buildNextWriteGuidance(table.tableName),
+    nextWrite,
     nextSteps: [
-      'Use the nextWrite guidance above for mutations. Generic create_records/update_records/delete_records are blocked for domain-owned tables.',
+      nextWrite
+        ? 'Use the nextWrite guidance above for mutations; generic record CRUD is blocked for this domain-owned table.'
+        : 'Use create_records/update_records/delete_records for this route-backed table when the backend RBAC policy permits it.',
       'When sources are returned, use those exact artifacts. Call get_script_source only with this concrete record id when a fresh source artifact is needed.',
       'Re-run search_runtime_zone or the specific inspector after mutation.',
     ],

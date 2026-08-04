@@ -311,6 +311,17 @@ const EXTENSION_SECTIONS = [
     ],
   },
   {
+    id: 'extension-menu-permission-sync',
+    rules: [
+      'Menu permission and backend route permission are two separate layers. Menu permission controls whether the menu item is visible in the sidebar (app checkPermissionCondition); backend route permission (RoleGuard) controls whether the API call actually returns 200 or 403. Setting a menu permission alone does not grant API access, and omitting it does not remove the 403 when the page calls a protected route.',
+      'Before saving a page extension, infer which API routes its useApi/composable calls hit. For every protected route it calls, ensure the target role has that route+method permission (ensure_route_access) so the page does not 403 when the operator opens it. Use public_route_methods only when the route is intentionally anonymous; otherwise grant authenticated route access.',
+      'Set the menu permission to the same route+method set the page needs (or narrower) so the menu item is hidden from operators who cannot use the page. Use { or: [{ route: "/<path>", methods: ["GET"] }] } style conditions; use { allowAll: true } only for globally visible menus, { rootAdmin: true } only for root-admin-only menus, and null for unrestricted public menus.',
+      'When the extension calls a non-table route (for example a custom endpoint or /admin surface), the menu permission must reference that exact route path and the needed methods, not a guessed table name.',
+      'Treat "{ }" as an unrestricted menu, not an empty permission: ensure_menu normalizes an empty permission object to null (unrestricted). Do not pass an empty object intending to restrict.',
+      'After wiring menu + extension, verify the authority boundary: check the role has the route permission the page needs (audit_route_access/ensure_route_access) and confirm the menu permission matches that route set. Menu visibility without route permission still yields a 403 on API call.',
+    ],
+  },
+  {
     id: 'extension-runtime-contract',
     rules: [
       'Save extensions as enfyra_extension Vue SFC records; no static import statements in extension code.',

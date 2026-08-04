@@ -201,6 +201,9 @@ test('generic CRUD cannot bypass domain-owned schema and route operations', () =
   assert.throws(() => assertGenericRecordMutationAllowed('delete', 'enfyra_extension'), /full toolset/);
   assert.throws(() => assertGenericRecordMutationAllowed('create', 'enfyra_flow_trigger'), /ensure_flow_trigger/);
   assert.throws(() => assertGenericRecordMutationAllowed('delete', 'enfyra_flow_trigger'), /remove_flow_trigger/);
+  assert.doesNotThrow(() => assertGenericRecordMutationAllowed('create', 'enfyra_role'));
+  assert.doesNotThrow(() => assertGenericRecordMutationAllowed('update', 'enfyra_role'));
+  assert.doesNotThrow(() => assertGenericRecordMutationAllowed('delete', 'enfyra_role'));
 });
 
 test('full knowledge scope and disabled-flow verification paths are explicit', () => {

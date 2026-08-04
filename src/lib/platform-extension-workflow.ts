@@ -205,7 +205,9 @@ export async function runExtensionWorkflow(apiUrl, opts) {
       'PermissionGate renders the permitted slot directly and is UX-only; backend permissions and owner checks remain authoritative.',
       'For menu/account-panel notifications, use counts only when the signal source already owns an exact count; otherwise use a dot/chip for new attention.',
       'Do not fetch destination domain lists solely to decorate the shell; destination pages own domain fetching after click.',
+      'For a page extension, infer every API route its useApi/composable calls hit and set the menu permission to that route+method set (or narrower) so the menu is hidden from operators who would 403. Grant the backend route permission for the target role via ensure_route_access; menu permission alone does not grant API access.',
       'Unrestricted menu permission is null, not {}. Empty permission objects are normalized to null by ensure_menu.',
+      'If the page calls a protected route, verify the role has that route+method permission (audit_route_access / ensure_route_access) before marking the extension complete; otherwise the operator still gets a 403 on the API call even though the menu is visible.',
     ],
   };
 }

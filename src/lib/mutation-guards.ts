@@ -161,11 +161,6 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
     update: 'full toolset with identity safeguards',
     delete: 'full toolset with identity safeguards',
   },
-  enfyra_role: {
-    create: 'full toolset — inspect enfyra_role schema and check system-role protections first',
-    update: 'full toolset — check system-role protections first',
-    delete: 'full toolset — check role usage impact first',
-  },
   enfyra_oauth_account: {
     create: 'identity-owned — OAuth accounts are created through the OAuth login flow',
     update: 'full toolset',

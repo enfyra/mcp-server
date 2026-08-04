@@ -101,14 +101,20 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'search_admin_extensions'],
     inspectTools: ['search_admin_extensions(mode=search)', 'search_admin_extensions(mode=inspect)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'build_extension_ui'],
-    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension', 'delete_records'],
-    verifyTools: ['verify_extension_runtime', 'build_extension_ui(kind=runtime_review|theme_review|review)', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
+    writeTools: ['extension_workflow', 'ensure_menu', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension', 'ensure_route_access', 'delete_records'],
+    verifyTools: ['verify_extension_runtime', 'build_extension_ui(kind=runtime_review|theme_review|review)', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)', 'audit_route_access'],
     avoidTools: [
       {
         tool: 'create_records/update_records on enfyra_extension',
         when: 'creating or changing extension code',
         useInstead: 'update_extension_code for an existing extension id/name, or extension_workflow/ensure_*_extension for create/wire flows',
         reason: 'Extension operation tools validate local guards plus /enfyra_extension/preview and save only after validation succeeds.',
+      },
+      {
+        tool: 'setting menu permission as the only access control',
+        when: 'a page extension calls a protected backend route',
+        useInstead: 'grant the target role the route+method via ensure_route_access, and set the menu permission to the same route+method set (or narrower) for visibility',
+        reason: 'Menu permission only controls sidebar visibility. Backend route permission (RoleGuard) is what prevents a 403 on the API call the page makes.',
       },
       {
         tool: 'query_table on destination domain lists',
@@ -133,6 +139,7 @@ export const TOOL_WORKFLOWS = [
       'For temporary extension cleanup, inspect the exact extension id, preview delete_records on enfyra_extension with confirm=false, repeat with confirm=true, then verify absence with search_admin_extensions.',
       'Choose count only when the source already owns an exact count; choose dot/chip for new-attention signals.',
       'Validate extension code or use an ensure_*_extension tool that validates before saving.',
+      'For a page extension, infer every API route its useApi/composable calls hit, set the menu permission to that route+method set (or narrower) for visibility, and grant the target role the backend route permission via ensure_route_access so the page does not 403. Verify with audit_route_access.',
     ],
     recommendedScope: 'extension',
   },

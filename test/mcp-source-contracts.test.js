@@ -233,8 +233,10 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_log_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu['"]/);
   assert.match(platformTools, /normalizeMenuPermissionArg/);
-  assert.match(platformTools, /new menus default to null/);
-  assert.match(platformTools, /Empty objects are normalized to null/);
+  assert.match(platformTools, /\{ allowAll: true \} for globally visible/);
+  assert.match(platformTools, /An empty object is normalized to null \(unrestricted\)/);
+  assert.match(platformTools, /[Bb]ackend route permission is a separate layer/);
+  assert.match(platformTools, /grant it via ensure_route_access/);
   assert.match(platformTools, /server\.tool\(\s*['"]reorder_menus['"]/);
   assert.match(platformTools, /\/admin\/menu\/reorder/);
   assert.match(platformTools, /Duplicate menu id in reorder payload/);
