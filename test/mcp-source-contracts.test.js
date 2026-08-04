@@ -518,6 +518,67 @@ test('dynamic endpoint guidance distinguishes canonical policy from custom endpo
   assert.doesNotMatch(entry, /explicit repos such as `\$ctx\.\$repos\.orders`/);
 });
 
+test('gateway guard guidance keeps PAT transport limits on pre-auth IP guards', () => {
+  const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
+  assert.match(requiredKnowledge, /production `\/gateway\/v1\/\*` route is explicitly IP-limited in pre_auth/);
+  assert.match(requiredKnowledge, /Do not use rate_limit_by_user for this gateway/);
+});
+
+test('ensure_guard exposes GraphQL target fields and pre-validates the conflict matrix', () => {
+  const platformTools = readPlatformSource();
+  const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
+
+  // GraphQL target surface is exposed on the existing tool.
+  assert.match(platformTools, /z\.enum\(\['route', 'graphql'\]\)\.optional\(\)\.default\('route'\)\.describe\('Guard type\./);
+  assert.match(platformTools, /z\.union\(\[z\.enum\(\['QUERY', 'CREATE', 'UPDATE', 'DELETE'\]\), z\.literal\('all'\)\]\)\.optional\(\)/);
+  assert.match(platformTools, /table: z\.string\(\)\.optional\(\)\.describe\('Optional table name\/alias\/id\./);
+  assert.match(platformTools, /Guard type=graphql cannot target a route/);
+  assert.match(platformTools, /Guard type=graphql cannot set methods/);
+  assert.match(platformTools, /Guard type=graphql cannot set isGlobal=true/);
+  assert.match(platformTools, /Guard type=route cannot set table/);
+  assert.match(platformTools, /Guard type=route cannot set gqlOperation/);
+  assert.match(platformTools, /Rule rate_limit_by_route is only valid on guards with type=route/);
+  assert.match(platformTools, /Rule rate_limit_by_operation is only valid on guards with type=graphql/);
+  assert.match(platformTools, /fetchTableMetadataByRef\(ENFYRA_API_URL, table\)/);
+  assert.match(platformTools, /table: \{ id: getId\(resolvedTable\) \}/);
+
+  // Existing-guard lookup reads the saved type and blocks in-place type flips
+  // before the server rejects the merged record.
+  assert.match(platformTools, /'id,_id,name,type'/);
+  assert.match(platformTools, /already exists with type=/);
+  assert.match(platformTools, /Re-run with type='/);
+  assert.match(platformTools, /Switching a guard type in place is rejected/);
+
+  // The literal "all" sentinel resets one targeting axis back to null = all on
+  // update, and the reset is echoed in the response.
+  assert.match(platformTools, /table === 'all'/);
+  assert.match(platformTools, /gqlOperation === 'all'/);
+  assert.match(platformTools, /\{ table: null \}/);
+  assert.match(platformTools, /\{ gqlOperation: null \}/);
+  assert.match(platformTools, /targetingReset/);
+
+  // Required knowledge is updated to point GraphQL guard writes at ensure_guard.
+  assert.match(requiredKnowledge, /Use ensure_guard with type="graphql" plus optional table and\/or gqlOperation/);
+  assert.match(requiredKnowledge, /the literal value "all" resets that axis back to null = all/);
+  assert.match(requiredKnowledge, /updating a guard whose saved type differs from the requested type is rejected/);
+  assert.doesNotMatch(requiredKnowledge, /do not guess or raw-CRUD GraphQL guard rows; report that tool-contract gap/);
+  assert.doesNotMatch(requiredKnowledge, /current ensure_guard route tool does not expose GraphQL target fields/);
+});
+
+test('dynamic handler timeout guidance is method-scoped', () => {
+  const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
+  const dynamicSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-dynamic-code/SKILL.md', import.meta.url), 'utf8');
+  const routeTools = readSourceFiles('lib/route-definition-tools.ts');
+  const platformRouteTools = readSourceFiles('lib/platform-route-tools.ts');
+
+  assert.match(requiredKnowledge, /Handler timeout is method-scoped/);
+  assert.match(requiredKnowledge, /enfyra_route_handler\.timeout/);
+  assert.match(dynamicSkill, /individual `\(route, method\)` handler row/);
+  assert.match(dynamicSkill, /not a route-level setting/);
+  assert.match(routeTools, /for each route\+method handler row/);
+  assert.match(platformRouteTools, /timeout in ms for this method handler row/);
+});
+
 test('guidance rejects sql-like filter operators', () => {
   const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
   assert.match(requiredKnowledge, /do not use _like/);

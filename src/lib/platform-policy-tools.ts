@@ -200,49 +200,103 @@ export function registerPlatformPolicyTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_guard',
-      'Advanced business operation: create or update a custom request guard tree and optional guard rules. For simple request throttling use ensure_route_rate_limit instead.',
+      'Advanced business operation: create or update a custom request guard tree and optional guard rules. Supports type=route (default; targets one route or isGlobal=true) and type=graphql (targets (table, gqlOperation) matrix with null meaning all). On update, omitting table/gqlOperation keeps the current target; pass the literal string "all" to reset that axis back to all. For simple route throttling use ensure_route_rate_limit instead.',
       {
         name: z.string().describe('Guard name. Existing guard with this name is updated unless guardId is provided.'),
         guardId: z.union([z.string(), z.number()]).optional().describe('Optional existing guard id.'),
+        type: z.enum(['route', 'graphql']).optional().default('route').describe('Guard type. type=route targets one route or isGlobal=true; type=graphql targets the (table, gqlOperation) matrix and must not set routeId/path/methods or isGlobal=true. Updating a guard whose saved type differs from this value is rejected; pass the saved type or use a new name.'),
         position: z.enum(['pre_auth', 'post_auth']).optional().default('pre_auth').describe('Guard position.'),
-        routeId: z.union([z.string(), z.number()]).optional().describe('Optional route id.'),
-        path: z.string().optional().describe('Optional route path.'),
-        methods: z.array(z.string()).optional().describe('HTTP method names.'),
+        routeId: z.union([z.string(), z.number()]).optional().describe('Optional route id. Required for type=route root (unless isGlobal=true); forbidden for type=graphql.'),
+        path: z.string().optional().describe('Optional route path. Required for type=route root (unless isGlobal=true); forbidden for type=graphql.'),
+        methods: z.array(z.string()).optional().describe('HTTP method names. Only valid for type=route; forbidden for type=graphql.'),
+        table: z.string().optional().describe('Optional table name/alias/id. Only valid for type=graphql; forbidden for type=route. Omitting it on update keeps the current table target. Pass the literal string "all" on update to clear table targeting back to every table (null = all).'),
+        gqlOperation: z.union([z.enum(['QUERY', 'CREATE', 'UPDATE', 'DELETE']), z.literal('all')]).optional().describe('Optional GraphQL operation. Only valid for type=graphql; forbidden for type=route. Omitting it on update keeps the current operation target. Pass the literal string "all" on update to clear operation targeting back to every operation (null = all).'),
         combinator: z.enum(['and', 'or']).optional().default('and').describe('Rule combinator.'),
         priority: z.number().optional().default(0).describe('Lower runs earlier.'),
-        isGlobal: z.boolean().optional().default(false).describe('Apply globally.'),
+        isGlobal: z.boolean().optional().default(false).describe('Apply globally. Only valid for type=route; type=graphql rejects isGlobal=true.'),
         isEnabled: z.boolean().optional().default(false).describe('Enable guard. Defaults false to avoid lockout.'),
         description: z.string().optional().describe('Admin note.'),
-        rules: z.string().optional().describe('Rules JSON array: [{type, config, priority, isEnabled, description, userIds}].'),
+        rules: z.string().optional().describe('Rules JSON array: [{type, config, priority, isEnabled, description, userIds}]. rate_limit_by_route is type=route only; rate_limit_by_operation is type=graphql only.'),
         rulesMode: z.enum(['append', 'replace', 'none']).optional().default('append').describe('append creates rules, replace disables existing rules first, none leaves rules unchanged.'),
         globalRulesAckKey: globalRulesAckParam(z),
       },
-      async ({ name, guardId, position, routeId, path, methods, combinator, priority, isGlobal, isEnabled, description, rules, rulesMode, globalRulesAckKey }) => {
+      async ({ name, guardId, type, position, routeId, path, methods, table, gqlOperation, combinator, priority, isGlobal, isEnabled, description, rules, rulesMode, globalRulesAckKey }) => {
         assertGlobalRulesAck(globalRulesAckKey);
         if (path && routeId) throw new Error('Provide path or routeId, not both.');
         const ruleInputs = parseJsonArrayArg('rules', rules, []);
+        const guardType = type || 'route';
+        const tableReset = table === 'all';
+        const operationReset = gqlOperation === 'all';
+        const activeGqlOperation = operationReset ? null : gqlOperation;
         if (position === 'pre_auth') {
           const invalid = ruleInputs.filter((rule) => rule.type === 'rate_limit_by_user' || (Array.isArray(rule.userIds) && rule.userIds.length));
           if (invalid.length) throw new Error('pre_auth guards cannot use user-based rules or userIds. Use post_auth.');
         }
+        if (guardType === 'graphql') {
+          if (routeId || path) {
+            throw new Error('Guard type=graphql cannot target a route. Drop routeId/path and use (table, gqlOperation) instead.');
+          }
+          if (methods && methods.length) {
+            throw new Error('Guard type=graphql cannot set methods. GraphQL guards have no HTTP methods.');
+          }
+          if (isGlobal === true) {
+            throw new Error('Guard type=graphql cannot set isGlobal=true. Use the (table, gqlOperation) matrix with null = all.');
+          }
+          const forbiddenRouteRules = ruleInputs.filter((rule) => rule.type === 'rate_limit_by_route');
+          if (forbiddenRouteRules.length) {
+            throw new Error('Rule rate_limit_by_route is only valid on guards with type=route.');
+          }
+        } else {
+          if (table) {
+            throw new Error('Guard type=route cannot set table. table targeting is only valid for type=graphql.');
+          }
+          if (gqlOperation) {
+            throw new Error('Guard type=route cannot set gqlOperation. gqlOperation is only valid for type=graphql.');
+          }
+          const forbiddenOperationRules = ruleInputs.filter((rule) => rule.type === 'rate_limit_by_operation');
+          if (forbiddenOperationRules.length) {
+            throw new Error('Rule rate_limit_by_operation is only valid on guards with type=graphql.');
+          }
+        }
         let route = null;
-        if (!isGlobal && (routeId || path)) {
-          route = (await resolveRoute(ENFYRA_API_URL, { path, routeId })).route;
+        let resolvedTable = null;
+        if (guardType === 'route') {
+          if (!isGlobal && (routeId || path)) {
+            route = (await resolveRoute(ENFYRA_API_URL, { path, routeId })).route;
+          }
+        } else if (table && !tableReset) {
+          resolvedTable = await fetchTableMetadataByRef(ENFYRA_API_URL, table);
         }
         const { methodMap } = await getMethodContext(ENFYRA_API_URL);
         const existing = guardId
-          ? await findRecord(ENFYRA_API_URL, 'enfyra_guard', { id: { _eq: guardId } }, 'id,_id,name')
-          : await findRecord(ENFYRA_API_URL, 'enfyra_guard', { name: { _eq: name } }, 'id,_id,name');
+          ? await findRecord(ENFYRA_API_URL, 'enfyra_guard', { id: { _eq: guardId } }, 'id,_id,name,type')
+          : await findRecord(ENFYRA_API_URL, 'enfyra_guard', { name: { _eq: name } }, 'id,_id,name,type');
+        const existingType = existing ? (existing.type === 'graphql' ? 'graphql' : 'route') : null;
+        if (existing && existingType !== guardType) {
+          const guardRef = existing.name && String(existing.name) === String(name) ? `"${name}"` : `id ${getId(existing)}`;
+          throw new Error(
+            `Guard ${guardRef} already exists with type=${existingType}, but this call requests type=${guardType}. ` +
+            `Re-run with type='${existingType}' to update it in place, or use a different name to create a new guard. ` +
+            'Switching a guard type in place is rejected because stale targeting fields (route/methods or table/gqlOperation) would remain on the merged record.',
+          );
+        }
+        const appliedTableReset = guardType === 'graphql' && tableReset && !!existing;
+        const appliedOperationReset = guardType === 'graphql' && operationReset && !!existing;
         const guardBody = {
           name,
+          type: guardType,
           position,
           combinator,
           priority,
-          isGlobal,
+          isGlobal: guardType === 'graphql' ? false : isGlobal,
           isEnabled,
           description,
           ...(route ? { route: { id: getId(route) } } : {}),
-          ...(methods?.length ? { methods: resolveMethodRefs(methodMap, methods) } : {}),
+          ...(methods?.length && guardType === 'route' ? { methods: resolveMethodRefs(methodMap, methods) } : {}),
+          ...(resolvedTable ? { table: { id: getId(resolvedTable) } } : {}),
+          ...(appliedTableReset ? { table: null } : {}),
+          ...(activeGqlOperation && guardType === 'graphql' ? { gqlOperation: activeGqlOperation } : {}),
+          ...(appliedOperationReset ? { gqlOperation: null } : {}),
         };
         const guardOperation = await createOrPatch(ENFYRA_API_URL, 'enfyra_guard', existing, guardBody);
         const resolvedGuardId = guardOperation.id || getId(existing);
@@ -276,7 +330,18 @@ export function registerPlatformPolicyTools(server, ENFYRA_API_URL) {
         const reload = await reloadBestEffort(ENFYRA_API_URL, '/admin/reload/guards');
         return jsonText({
           action: 'guard_ensured',
-          guard: { id: resolvedGuardId, name, route: route ? route.path : null, isGlobal },
+          guard: {
+            id: resolvedGuardId,
+            name,
+            type: guardType,
+            route: route ? route.path : null,
+            table: resolvedTable ? { id: getId(resolvedTable), name: resolvedTable.name } : null,
+            gqlOperation: guardType === 'graphql' ? (activeGqlOperation || null) : null,
+            isGlobal: guardType === 'route' ? isGlobal : false,
+            targetingReset: guardType === 'graphql'
+              ? { table: appliedTableReset, gqlOperation: appliedOperationReset }
+              : null,
+          },
           guardOperation,
           disabledRuleCount: disabledRules.length,
           createdRuleCount: createdRules.length,

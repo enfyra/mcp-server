@@ -162,7 +162,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
           .describe('Batch create multiple handlers. Use only when the same sourceCode applies to every method.'),
         sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic. Use @REPOS.main for the route main table or #secure.table_name/@REPOS.secure.table_name for explicit user-facing access; trusted repos require intentional bypass and explicit authorization.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
-        timeout: z.number().optional().describe('Timeout in ms (default: system DEFAULT_HANDLER_TIMEOUT, usually 30000)'),
+        timeout: z.number().optional().describe('Timeout in ms for each route+method handler row (not a route-level setting; default system timeout is usually 30000).'),
         globalRulesAckKey: globalRulesAckParam(z),
         knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
         allowCanonicalRoute: z.boolean().optional().default(false).describe('Explicit acknowledgement for adding a new handler to a canonical main-table route. Use only when the new method intentionally belongs to the shared eApp/admin CRUD surface; third-party endpoint-specific behavior must use a separate custom route.'),
