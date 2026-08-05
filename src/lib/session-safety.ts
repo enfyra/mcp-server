@@ -8,6 +8,7 @@ const PREVIEW_IGNORED_KEYS = new Set([
   'expectedPath',
   'expectedRouteId',
   'expectedTableId',
+  'expectedPermissionId',
   'globalRulesAckKey',
   'maxItems',
   'skipNotFound',

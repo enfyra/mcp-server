@@ -23,6 +23,11 @@ import {
   assertGlobalRulesAck,
   globalRulesAckParam
 } from './required-knowledge.js';
+import { destructivePreviewContent } from './destructive-preview.js';
+import {
+  canonicalFieldPermissionCondition,
+  validateFieldPermissionCondition,
+} from './field-permission-contract.js';
 
 export function registerPlatformPolicyTools(server, ENFYRA_API_URL) {
   server.tool(
@@ -90,21 +95,37 @@ export function registerPlatformPolicyTools(server, ENFYRA_API_URL) {
           resolveRole(ENFYRA_API_URL, { roleId, roleName }),
         ]);
         const field = columnName ? resolveColumn(table, columnName) : resolveRelation(table, relationName);
+        const parsedCondition = parseJsonObjectArg('condition', condition, null);
+        const conditionValidation = validateFieldPermissionCondition(parsedCondition);
+        if (conditionValidation.ok === false) throw new Error(conditionValidation.errors.join('; '));
         const filter = {
           action: { _eq: action },
-          effect: { _eq: effect },
           ...(columnName ? { column: { id: { _eq: getId(field) } } } : { relation: { id: { _eq: getId(field) } } }),
           ...(role ? { role: { id: { _eq: role.id } } } : {}),
         };
-        const existing = role
-          ? await findRecord(ENFYRA_API_URL, 'enfyra_field_permission', filter, 'id,_id,column.id,relation.id,role.id,action,effect')
-          : null;
+        const candidates = await fetchRecords(
+          ENFYRA_API_URL,
+          'enfyra_field_permission',
+          filter,
+          'id,_id,column.id,relation.id,role.id,action,effect,condition,allowedUsers.id',
+          100,
+        );
+        const expectedUsers = (allowedUserIds || []).map(String).sort();
+        const expectedCondition = canonicalFieldPermissionCondition(parsedCondition);
+        const matches = candidates.filter((candidate) => {
+          const actualUsers = (candidate.allowedUsers || []).map((user) => String(getId(user))).sort();
+          return candidate.effect === effect
+            && canonicalFieldPermissionCondition(candidate.condition) === expectedCondition
+            && JSON.stringify(actualUsers) === JSON.stringify(expectedUsers);
+        });
+        if (matches.length > 1) throw new Error('Multiple field permissions match; pass a permission id before changing the scope.');
+        const existing = matches[0] || null;
         const body = {
           action,
           effect,
           isEnabled,
           description,
-          condition: parseJsonObjectArg('condition', condition, null),
+          condition: parsedCondition,
           ...(columnName ? { column: { id: getId(field) } } : { relation: { id: getId(field) } }),
           ...(role ? { role: { id: role.id } } : {}),
           ...(allowedUserIds?.length ? { allowedUsers: allowedUserIds.map((id) => ({ id })) } : {}),
@@ -117,6 +138,115 @@ export function registerPlatformPolicyTools(server, ENFYRA_API_URL) {
           field: { id: getId(field), name: columnName ? field.name : field.propertyName, kind: columnName ? 'column' : 'relation' },
           scope: { role, allowedUserIds: allowedUserIds || [] },
           operation,
+          reload,
+        });
+      },
+    );
+
+  server.tool(
+      'remove_field_permission',
+      'Remove one field permission by id or exact logical scope.',
+      {
+        permissionId: z.union([z.string(), z.number()]).optional(),
+        tableName: z.string().optional(),
+        columnName: z.string().optional(),
+        relationName: z.string().optional(),
+        action: z.enum(['read', 'create', 'update']).optional(),
+        effect: z.enum(['allow', 'deny']).optional(),
+        roleId: z.union([z.string(), z.number()]).optional(),
+        roleName: z.string().optional(),
+        allowedUserIds: z.array(z.union([z.string(), z.number()])).optional(),
+        expectedPermissionId: z.union([z.string(), z.number()]).optional(),
+        confirm: z.boolean().optional().default(false),
+        globalRulesAckKey: globalRulesAckParam(z),
+      },
+      async ({ permissionId, tableName, columnName, relationName, action, effect, roleId, roleName, allowedUserIds, expectedPermissionId, confirm, globalRulesAckKey }) => {
+        assertGlobalRulesAck(globalRulesAckKey);
+        if (permissionId != null && (tableName || columnName || relationName || action != null || effect || roleId || roleName || allowedUserIds?.length)) {
+          throw new Error('Pass permissionId alone, or use an exact logical selector without permissionId.');
+        }
+        let permission;
+        let table = null;
+        let field = null;
+
+        if (permissionId != null) {
+          permission = await findRecord(
+            ENFYRA_API_URL,
+            'enfyra_field_permission',
+            { id: { _eq: permissionId } },
+            'id,_id,column.id,column.name,column.table.id,column.table.name,relation.id,relation.propertyName,relation.sourceTable.id,relation.sourceTable.name,action,effect,role.id,allowedUsers.id',
+          );
+          if (!permission) throw new Error(`Field permission not found: ${String(permissionId)}`);
+          table = permission.column?.table ?? permission.relation?.sourceTable ?? null;
+          field = permission.column ?? permission.relation ?? null;
+        } else {
+          if (!tableName) throw new Error('tableName is required when permissionId is omitted.');
+          if (!!columnName === !!relationName) throw new Error('Provide exactly one of columnName or relationName.');
+          assertOneScope({ roleId, roleName, allowedUserIds });
+          table = await fetchTableMetadataByRef(ENFYRA_API_URL, tableName);
+          const role = await resolveRole(ENFYRA_API_URL, { roleId, roleName });
+          field = columnName ? resolveColumn(table, columnName) : resolveRelation(table, relationName);
+          const effectiveAction = action ?? 'read';
+          const filter = {
+            action: { _eq: effectiveAction },
+            ...(effect ? { effect: { _eq: effect } } : {}),
+            ...(columnName ? { column: { id: { _eq: getId(field) } } } : { relation: { id: { _eq: getId(field) } } }),
+            ...(role ? { role: { id: { _eq: role.id } } } : {}),
+          };
+          const candidates = await fetchRecords(
+            ENFYRA_API_URL,
+            'enfyra_field_permission',
+            filter,
+            'id,_id,column.id,relation.id,role.id,action,effect,allowedUsers.id',
+            100,
+          );
+          const expectedUsers = (allowedUserIds || []).map(String).sort();
+          const scoped = candidates.filter((candidate) => {
+            if (!allowedUserIds?.length) return true;
+            const actualUsers = (candidate.allowedUsers || []).map((user) => String(getId(user))).sort();
+            return JSON.stringify(actualUsers) === JSON.stringify(expectedUsers);
+          });
+          if (scoped.length === 0) throw new Error('Field permission not found for the requested target and scope.');
+          if (scoped.length > 1) throw new Error('Multiple field permissions match; pass permissionId to remove exactly one rule.');
+          permission = scoped[0];
+        }
+
+        const id = getId(permission);
+        const resolved = {
+          permissionId: id,
+          table: table ? { id: getId(table), name: table.name } : null,
+          target: permission.column
+            ? { kind: 'column', id: getId(permission.column), name: permission.column.name }
+            : { kind: 'relation', id: getId(permission.relation), name: permission.relation?.propertyName },
+          scope: {
+            roleId: getId(permission.role),
+            allowedUserIds: (permission.allowedUsers || []).map((user) => getId(user)),
+          },
+          action: permission.action,
+          effect: permission.effect,
+        };
+        if (!confirm) {
+          return destructivePreviewContent('remove_field_permission', {
+            action: 'field_permission_remove_preview',
+            ...resolved,
+            next: 'Call remove_field_permission again with confirm=true and expectedPermissionId from this preview after explicit approval.',
+          }, 1);
+        }
+        if (expectedPermissionId == null || String(expectedPermissionId) !== String(id)) {
+          throw new Error('expectedPermissionId must match the id returned by the successful preview.');
+        }
+        const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_field_permission/${encodeURIComponent(String(id))}`, {
+          method: 'DELETE',
+        });
+        const reload = await reloadBestEffort(ENFYRA_API_URL, '/admin/reload/metadata');
+        if (!reload.succeeded) throw new Error(`Field permission was deleted but metadata reload failed: ${reload.error}`);
+        const remaining = await findRecord(ENFYRA_API_URL, 'enfyra_field_permission', { id: { _eq: id } }, 'id,_id');
+        if (remaining) throw new Error(`Field permission ${String(id)} still exists after deletion.`);
+        return jsonText({
+          action: 'field_permission_removed',
+          ...resolved,
+          confirmedAbsent: true,
+          result,
           reload,
         });
       },

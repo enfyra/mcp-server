@@ -26,7 +26,7 @@ export const ALL_DETAILS = ['summary', 'plan', 'full'] as const;
 
 export const WORKFLOW_SURFACES_BY_PROFILE: Record<Exclude<WorkflowProfile, 'all'>, readonly WorkflowSurface[]> = {
   extension: ['extension'],
-  schema: ['schema', 'record-data'],
+  schema: ['schema', 'record-data', 'guards-permissions-rules'],
   runtime: ['api-endpoint', 'dynamic-script', 'route-access', 'guards-permissions-rules', 'flow', 'websocket', 'graphql'],
   operations: ['storage-file', 'oauth', 'identity-access', 'platform-config', 'package', 'cache', 'logs-debug', 'auth-context'],
 };
@@ -325,7 +325,7 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'search_runtime_zone', 'inspect_route'],
     inspectTools: ['search_runtime_zone', 'inspect_route', 'audit_route_access', 'inspect_table'],
     knowledgeTools: ['get_enfyra_required_knowledge'],
-    writeTools: ['ensure_route_rate_limit', 'ensure_guard', 'ensure_field_permission', 'ensure_column_rule', 'create_pre_hook'],
+    writeTools: ['ensure_route_rate_limit', 'ensure_guard', 'ensure_field_permission', 'remove_field_permission', 'ensure_column_rule', 'create_pre_hook'],
     verifyTools: ['search_runtime_zone', 'inspect_route', 'audit_route_access', 'test_rest_endpoint', 'test_graphql'],
     avoidTools: [
       {
@@ -352,15 +352,21 @@ export const TOOL_WORKFLOWS = [
         useInstead: 'create_pre_hook for canonical shared policy, or api_endpoint_workflow for third-party-only policy',
         reason: 'Field permissions protect field visibility. Canonical shared row ownership belongs in a route pre-hook; endpoint-specific ownership belongs in the custom handler.',
       },
+      {
+        tool: 'remove_field_permission',
+        when: 'the requirement is to physically remove an existing field permission rule',
+        useInstead: 'remove_field_permission with permissionId or an exact table field + scope',
+        reason: 'A permanent removal is different from changing a rule to effect=deny; the removal tool verifies an exact target before deleting it.',
+      },
     ],
     requiredAck: ['globalRulesAckKey'],
     exampleCategories: ['permissions-rls', 'schema-relations'],
     nextStepTemplate: [
-      'Read the guard-engine contract, search api_runtime for existing guards, and inspect the exact route before changing anything.',
-      'Choose the boundary: RBAC for route authority, pre_auth IP/route guard for anonymous traffic, post_auth user guard for authenticated quotas, pre-hook/handler for owner or tenant rows, field permission for field visibility, or column rule for body validation.',
+      'Read the guard and field-permission contracts, then search api_runtime for guards or schema_data for field permissions/column rules before changing anything.',
+      'Choose the boundary: RBAC for route authority, pre_auth IP/route guard for anonymous traffic, post_auth user guard for authenticated quotas, pre-hook/handler for owner or tenant rows, field permission for role/user field visibility, or column rule for body validation.',
       'Keep a global baseline unless explicitly changing it; add route-specific guards when unrelated APIs must have isolated quotas or IP policies.',
-      'Use ensure_route_rate_limit for one simple throttle and ensure_guard for composed trees or IP allow/deny rules. Do not raw-CRUD guard metadata.',
-      'Verify the saved guard attachment, enabled rule, route permission separately, and a bounded runtime positive/negative result. GraphQL guards require the separate GraphQL guard contract; do not force them into REST route fields.',
+      'Use ensure_route_rate_limit for one simple throttle, ensure_guard for composed trees or IP allow/deny rules, ensure_field_permission/remove_field_permission for field visibility, and ensure_column_rule for body validation. Do not raw-CRUD policy metadata.',
+      'For field permissions verify exactly one columnName/relationName, role XOR allowedUsers, action/effect/condition/isEnabled, and the resulting REST/GraphQL projection. For guards verify attachment and bounded positive/negative behavior; GraphQL guards use the separate GraphQL guard contract.',
     ],
     recommendedScope: 'schema',
   },

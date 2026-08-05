@@ -183,6 +183,29 @@ inspect_route({ path: "/auth/login" })`,
         notes: [
           'Field permissions are for field-level access.',
           'Use route/pre-hook filters for row-level access.',
+          'Scope is role XOR allowedUsers; actions are read/create/update, and deny wins within the most specific matching tier.',
+          'Conditions use record fields plus _and/_or/_not, comparison operators, and @USER.id/@USER._id macros.',
+        ],
+      },
+      {
+        name: 'User-scoped relation permission and removal',
+        code: `ensure_field_permission({
+  tableName: "project",
+  relationName: "members",
+  action: "read",
+  effect: "deny",
+  allowedUserIds: ["<userId>"],
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>"
+})
+
+remove_field_permission({
+  permissionId: "<permissionId>",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>"
+})`,
+        notes: [
+          'relationName is the live relation propertyName, not a physical FK column.',
+          'Use remove_field_permission for permanent removal; use effect=deny when the rule should remain as an explicit override.',
+          'After either mutation, inspect the saved rule and verify REST or GraphQL field exposure with the matching subject.',
         ],
       },
       {

@@ -7,6 +7,7 @@ const DESTRUCTIVE_TOOLS = new Set([
   'delete_relations',
   'delete_method',
   'delete_route',
+  'remove_field_permission',
 ]);
 
 const MUTATION_TOOL_PATTERN = /^(?:create|update|delete|ensure|patch|install|enable|disable|reorder|reload|trigger|set|add|remove)_/;

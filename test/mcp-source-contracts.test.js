@@ -95,6 +95,10 @@ test('code-writing tools require session or explicit required-knowledge acknowle
   assert.match(requiredKnowledge, /DYNAMIC_CODE_KNOWLEDGE_ACK_KEY/);
   assert.match(requiredKnowledge, /EXTENSION_KNOWLEDGE_ACK_KEY/);
   assert.match(requiredKnowledge, /secure-vs-trusted-repositories/);
+  assert.match(requiredKnowledge, /field-permission-contract/);
+  assert.match(requiredKnowledge, /roleId\/roleName or a non-empty allowedUserIds/);
+  assert.match(requiredKnowledge, /_is_not_null/);
+  assert.match(requiredKnowledge, /remove_field_permission/);
   assert.match(requiredKnowledge, /bounded request helper/);
   assert.match(requiredKnowledge, /package request -> readable handle -> @RES\.stream/);
   assert.match(requiredKnowledge, /native fetch, Readable, or AbortController/);
@@ -205,6 +209,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]set_table_graphql['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_column_rule['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_field_permission['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]remove_field_permission['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_route_rate_limit['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_guard['"]/);
   assert.match(platformTools, /ensure_column_rule[\s\S]*globalRulesAckKey[\s\S]*assertGlobalRulesAck/);

@@ -59,8 +59,12 @@ export async function resolveRole(apiUrl, { roleId, roleName }) {
 }
 
 export function assertOneScope({ roleId, roleName, allowedUserIds }) {
-  if (!roleId && !roleName && (!allowedUserIds || allowedUserIds.length === 0)) {
-    throw new Error('Provide roleId, roleName, or allowedUserIds.');
+  const hasRole = Boolean(roleId || roleName);
+  const hasUsers = Array.isArray(allowedUserIds) && allowedUserIds.length > 0;
+  if (hasRole === hasUsers) throw new Error('Provide exactly one scope: roleId/roleName or allowedUserIds.');
+  if (hasUsers) {
+    const ids = allowedUserIds.map(String);
+    if (new Set(ids).size !== ids.length) throw new Error('allowedUserIds must not contain duplicates.');
   }
 }
 

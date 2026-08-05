@@ -81,12 +81,12 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
     case 'guards-permissions-rules':
       return [
         step(1, 'get_enfyra_required_knowledge', 'Read the guard-engine contract and access/rule boundaries.'),
-        step(2, 'search_runtime_zone', 'Audit existing global and route-specific guards/rules in api_runtime before adding a scoped policy.'),
-        step(3, 'inspect_route', 'Inspect the exact route, available/public methods, current guard attachment, hooks, and handlers.'),
-        step(4, 'audit_route_access', 'Check RBAC separately; route permission is authority and guard rejection is request gating.'),
-        step(5, 'ensure_route_rate_limit / ensure_guard / ensure_field_permission / ensure_column_rule / create_pre_hook', 'Choose the specific boundary: simple throttle, advanced guard tree, field visibility, body validation, or owner/tenant row filtering.'),
-        step(6, 'search_runtime_zone / inspect_route', 'Verify the saved guard root/rule, position, methods, enabled state, and route attachment. Use query_table only as an explicit full-toolset escape hatch when the focused runtime inspectors cannot prove the postcondition.'),
-        step(7, 'test_rest_endpoint or test_graphql', 'Run a bounded runtime check without accidentally consuming a production quota; GraphQL guards use the separate GraphQL path.'),
+        step(2, 'search_runtime_zone', 'For guards search api_runtime; for field permissions and column rules search schema_data before editing.'),
+        step(3, 'inspect_route / inspect_table', 'Inspect the route for guard/RBAC work; inspect the table and live field propertyName for field-permission work.'),
+        step(4, 'audit_route_access', 'Use only for route RBAC. Field permissions are a separate role/user field-visibility layer.'),
+        step(5, 'ensure_route_rate_limit / ensure_guard / ensure_field_permission / remove_field_permission / ensure_column_rule / create_pre_hook', 'Choose the boundary: throttle, guard tree, field visibility lifecycle, body validation, or owner/tenant row filtering.'),
+        step(6, 'search_runtime_zone / inspect_table / inspect_route', 'Verify the saved field-permission target, action/effect, scope, condition, and enabled state; verify guard attachment separately. Use query_table only as an explicit full-toolset escape hatch when focused inspectors cannot prove the postcondition.'),
+        step(7, 'test_rest_endpoint or test_graphql', 'For field permissions verify projected field presence/absence with a bounded REST or GraphQL check; for guards verify rejection/rate behavior without consuming production quota.'),
       ];
     case 'flow':
       return [

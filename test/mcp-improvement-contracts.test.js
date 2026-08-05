@@ -32,6 +32,9 @@ import {
   getMcpSafetySessionState,
   resetMcpSafetySession,
 } from '../dist/lib/session-safety.js';
+import { isDestructiveTool } from '../dist/lib/tool-contracts.js';
+import { assertOneScope } from '../dist/lib/platform-data-operations.js';
+import { validateFieldPermissionCondition } from '../dist/lib/field-permission-contract.js';
 import { normalizeEscapedVueSource, normalizeSnippetChars, normalizeStrictBoolean, normalizeTableName } from '../dist/lib/tool-input-normalization.js';
 
 function jsonResponse(body, status = 200) {
@@ -110,6 +113,21 @@ test('destructive confirmation requires a matching successful preview', () => {
   );
 
   resetMcpSafetySession();
+});
+
+test('field permission removal is preview-first and scope validation is XOR', () => {
+  assert.equal(isDestructiveTool('remove_field_permission'), true);
+  assert.throws(
+    () => assertOneScope({ roleId: 'role-1', allowedUserIds: ['user-1'] }),
+    /exactly one scope/i,
+  );
+});
+
+test('field permission condition contract rejects no-op DSL before mutation', () => {
+  assert.equal(validateFieldPermissionCondition({ owner: { id: { _eq: '@USER.id' } } }).ok, true);
+  assert.equal(validateFieldPermissionCondition({ owner: { id: { _equals: 'x' } } }).ok, false);
+  assert.equal(validateFieldPermissionCondition({ _and: [] }).ok, false);
+  assert.equal(validateFieldPermissionCondition({ owner: { id: { _eq: '@USER.email' } } }).ok, false);
 });
 
 test('failed or unreceipted destructive previews never unlock confirmation', () => {

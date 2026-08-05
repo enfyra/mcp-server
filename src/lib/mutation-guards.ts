@@ -91,7 +91,7 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   enfyra_field_permission: {
     create: 'ensure_field_permission',
     update: 'ensure_field_permission',
-    delete: 'ensure_field_permission with effect=deny to override — physical removal requires full toolset',
+    delete: 'remove_field_permission',
   },
   enfyra_column_rule: {
     create: 'ensure_column_rule',

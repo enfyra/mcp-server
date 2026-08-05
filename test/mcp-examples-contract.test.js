@@ -13,6 +13,7 @@ const WRITE_TOOLS = [
   'ensure_guard',
   'ensure_column_rule',
   'ensure_field_permission',
+  'remove_field_permission',
   'set_table_graphql',
   'create_records',
   'update_records',
@@ -62,6 +63,14 @@ test('mutation examples include the required global acknowledgement', () => {
       `${example.category}/${example.name} calls ${used.join(', ')} without globalRulesAckKey`,
     );
   }
+});
+
+test('field permission examples cover user scopes, relation property names, and removal', () => {
+  const permissions = JSON.stringify(EXAMPLE_CATEGORIES['permissions-rls']);
+  assert.match(permissions, /allowedUserIds/);
+  assert.match(permissions, /relationName/);
+  assert.match(permissions, /remove_field_permission/);
+  assert.match(permissions, /@USER\.id/);
 });
 
 test('connect examples contain app wiring but no provider credential or callback configuration', () => {

@@ -151,6 +151,20 @@ const GLOBAL_RULES_SECTIONS = [
     ],
   },
   {
+    id: 'field-permission-contract',
+    rules: [
+      'Field permissions control column/relation visibility for an explicit role or user scope. They do not grant route access, filter rows, replace owner/tenant RLS, validate bodies, or publish a field globally.',
+      'Target exactly one field: pass columnName or relationName, never both. relationName is the relation propertyName from live metadata, not a physical FK column or guessed id field.',
+      'Scope is exactly one of roleId/roleName or a non-empty allowedUserIds array. Resolve live role/user ids; do not combine role and allowedUsers. The evaluator treats an enabled rule with no role and no allowed users as broadly applicable, so never create that shape through raw CRUD.',
+      'Actions are only read, create, and update. effect=allow or deny controls the decision, and isEnabled=false is ignored. There is no field-permission delete action: use remove_field_permission for physical removal, or keep an enabled deny rule when an explicit deny override is intended.',
+      'Conditions are record predicates evaluated after scope matching. Supported operators are _eq, _neq, _gt, _gte, _lt, _lte, _in, _not_in, _nin, _is_null, _is_not_null plus _and, _or, and _not. User macros include @USER, @USER.id, and @USER._id; nested object keys follow the persisted record shape. An invalid condition or missing field does not match.',
+      'Rule precedence is user-specific + condition, role + condition, user-specific without condition, then role/general without condition. Within one precedence tier, deny wins; if no rule matches, the surface default remains in effect.',
+      'Before a field-permission mutation, read get_enfyra_required_knowledge, confirm the target with get_enfyra_api_context, search_runtime_zone(zone="schema_data") for the table/field/rules, and use auth_security only to resolve the role/user scope.',
+      'Use ensure_field_permission for create/update and remove_field_permission for permanent removal. Do not raw-CRUD enfyra_field_permission when a dedicated operation exists; do not use ensure_route_access, ensure_guard, or a pre-hook as a substitute for field visibility.',
+      'After a write, inspect the exact field-permission row and table field exposure. For REST use inspect_rest_projection or a bounded test_rest_endpoint; for generated GraphQL use test_graphql. isPublished=false is global publication metadata and is separate from role/user field permissions.',
+    ],
+  },
+  {
     id: 'oauth-provider-third-app-handoff',
     rules: [
       'Connect the third app to Enfyra before asking for provider credentials. Load category=connect, identify the target framework, and install the matching official SDK package (@enfyra/sdk-nuxt, @enfyra/sdk-next, @enfyra/sdk-react, @enfyra/sdk-vue, or @enfyra/sdk-core). Do not write manual proxy configs, route handlers, cookie bridges, or middleware when an SDK exists for the framework.',
