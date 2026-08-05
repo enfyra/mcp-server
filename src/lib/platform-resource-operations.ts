@@ -5,7 +5,6 @@ import {
 } from './platform-data-operations.js';
 import {
   normalizeMenuPermissionArg,
-  resolveExtensionSource,
   sha256Text,
   validateExtensionCode,
   verifyExtensionRuntime,
@@ -18,6 +17,7 @@ import {
   assertExtensionKnowledgeAck,
   assertGlobalRulesAck
 } from './required-knowledge.js';
+import { materializeSourceInput } from './source-artifacts.js';
 
 export async function ensureMenu(apiUrl, {
   label,
@@ -110,7 +110,15 @@ export async function ensureExtension(apiUrl, {
 }) {
   assertGlobalRulesAck(globalRulesAckKey);
   assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
-  const resolvedCode = resolveExtensionSource({ code, sourceFile, sourceResourceUri });
+  const materialized = materializeSourceInput({
+    source: code,
+    sourceFile,
+    sourceResourceUri,
+    fieldName: 'code',
+    tableName: 'enfyra_extension',
+    id: name,
+  });
+  const resolvedCode = materialized.source;
   if (type === 'page' && !menuId) {
     throw new Error('menuId is required for page extensions. Use ensure_menu first, then ensure_page_extension.');
   }
@@ -142,6 +150,7 @@ export async function ensureExtension(apiUrl, {
     action: operation.action,
     operation: { action: operation.action, id: extensionId },
     validation,
+    sourceArtifact: materialized.sourceArtifact,
     verification,
   };
 }

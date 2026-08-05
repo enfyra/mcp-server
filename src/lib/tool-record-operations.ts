@@ -12,6 +12,7 @@ import {
 } from './metadata-client.js';
 import { parseRecordBatchData, parseRecordData, prepareRecordBatchMutation, prepareRecordMutation } from './mutation-guards.js';
 import { validateExtensionCode } from './platform-operation-tools.js';
+import { materializeSourceInput } from './source-artifacts.js';
 import {
   assertDynamicCodeKnowledgeAckIf,
   assertExtensionKnowledgeAckIf
@@ -255,7 +256,15 @@ export function assertNoDuplicateBulkIds(name, items) {
 
 export async function validateExtensionCodeForGenericMutation(tableName, payload, fallbackName) {
   if (tableName !== 'enfyra_extension' || typeof payload?.code !== 'string') return null;
-  return validateExtensionCode(ENFYRA_API_URL, payload.code, payload.name || fallbackName);
+  const materialized = materializeSourceInput({
+    source: payload.code,
+    fieldName: 'code',
+    tableName,
+    id: payload.name || fallbackName || 'extension',
+  });
+  payload.code = materialized.source;
+  const validation = await validateExtensionCode(ENFYRA_API_URL, materialized.source, payload.name || fallbackName);
+  return { ...validation, sourceArtifact: materialized.sourceArtifact };
 }
 
 export function parseQueryParamsArg(queryParams) {

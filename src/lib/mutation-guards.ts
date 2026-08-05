@@ -1,3 +1,5 @@
+import { materializeSourceInput } from './source-artifacts.js';
+
 const SCRIPT_TABLES = new Set([
   'enfyra_route_handler',
   'enfyra_pre_hook',
@@ -379,24 +381,32 @@ export function rejectUnsafeRelationDefinitionPayload(tableName, payload) {
 }
 
 export async function validateScriptSourceIfPresent(fetchAPI, apiUrl, tableName, payload) {
-  if (!SCRIPT_TABLES.has(tableName) || typeof payload.sourceCode !== 'string') {
+  if (!SCRIPT_TABLES.has(tableName) || (typeof payload.sourceCode !== 'string' && payload.sourceFile === undefined && payload.sourceResourceUri === undefined)) {
     return { validated: false, reason: 'no script source' };
   }
 
-  validatePortableScriptSource(payload.sourceCode);
+  const materialized = materializeSourceInput({
+    source: payload.sourceCode,
+    sourceFile: payload.sourceFile,
+    sourceResourceUri: payload.sourceResourceUri,
+    fieldName: 'sourceCode',
+    tableName,
+    id: 'mutation',
+  });
+  validatePortableScriptSource(materialized.source);
 
   try {
     const result = await fetchAPI(apiUrl, '/admin/script/validate', {
       method: 'POST',
       body: JSON.stringify({
-        sourceCode: payload.sourceCode,
+        sourceCode: materialized.source,
         scriptLanguage: payload.scriptLanguage || 'javascript',
       }),
     });
     if (result?.valid === false || result?.success === false) {
       throw new Error(result?.error?.message || 'Script validation failed.');
     }
-    return { validated: true, skipped: false };
+    return { validated: true, skipped: false, sourceCode: materialized.source, sourceArtifact: materialized.sourceArtifact };
   } catch (error) {
     const message = String(error?.message || error);
     throw new Error(`Script validation failed before save: ${message}`);
@@ -415,6 +425,7 @@ export async function prepareRecordMutation({ fetchAPI, apiUrl, tables, tableNam
   rejectUnsafeScriptPayload(table.name, payload);
   rejectUnsafeRelationDefinitionPayload(table.name, payload);
   const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, apiUrl, table.name, payload);
+  if (scriptValidation.sourceCode !== undefined) payload.sourceCode = scriptValidation.sourceCode;
 
   return {
     table,
@@ -438,6 +449,7 @@ export async function prepareRecordBatchMutation({ fetchAPI, apiUrl, tables, tab
       rejectUnsafeScriptPayload(table.name, payload);
       rejectUnsafeRelationDefinitionPayload(table.name, payload);
       const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, apiUrl, table.name, payload);
+      if (scriptValidation.sourceCode !== undefined) payload.sourceCode = scriptValidation.sourceCode;
       preparedRecords.push({
         index,
         payload,

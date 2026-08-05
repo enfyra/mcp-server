@@ -38,6 +38,7 @@ import {
   assertDynamicCodeKnowledgeAck,
   assertGlobalRulesAck
 } from './required-knowledge.js';
+import { materializeSourceInput } from './source-artifacts.js';
 
 function normalizeEndpointAccess(anonymousAccess, makePublic) {
   if (makePublic !== undefined) return makePublic ? 'public' : 'private';
@@ -369,6 +370,15 @@ async function applyApiEndpointWorkflowStep(apiUrl, state, opts, stepId) {
 }
 
 export async function runApiEndpointWorkflow(apiUrl, opts) {
+  const sourceArtifact = materializeSourceInput({
+    source: opts.sourceCode,
+    sourceFile: opts.sourceFile,
+    sourceResourceUri: opts.sourceResourceUri,
+    fieldName: 'sourceCode',
+    tableName: 'enfyra_route_handler',
+    id: opts.path,
+  });
+  opts.sourceCode = sourceArtifact.source;
   let state = await resolveApiEndpointWorkflowState(apiUrl, opts);
   const operations = [];
   let completedEphemeralStepId = null;
@@ -403,6 +413,7 @@ export async function runApiEndpointWorkflow(apiUrl, opts) {
     : latestState.nextSteps;
   return {
     action: operations.length ? 'api_endpoint_workflow_advanced' : 'api_endpoint_workflow_planned',
+    sourceArtifact: sourceArtifact.sourceArtifact,
     endpoint: latestState.endpoint,
     scriptValidation: latestState.scriptValidation,
     contractReview: latestState.contractReview,

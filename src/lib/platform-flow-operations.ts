@@ -18,6 +18,7 @@ import {
   assertDynamicCodeKnowledgeAckIf,
   assertGlobalRulesAck
 } from './required-knowledge.js';
+import { materializeSourceInput } from './source-artifacts.js';
 
 export async function ensureFlow(apiUrl, {
   name,
@@ -120,6 +121,8 @@ export async function ensureFlowStep(apiUrl, {
   order,
   config,
   sourceCode,
+  sourceFile,
+  sourceResourceUri,
   scriptLanguage,
   timeout,
   isEnabled,
@@ -134,9 +137,24 @@ export async function ensureFlowStep(apiUrl, {
     : await findRecord(apiUrl, 'enfyra_flow', { name: { _eq: flowName } }, 'id,_id,name');
   if (!flow) throw new Error(`Flow not found: ${flowId || flowName}`);
   const parsedConfig = parseJsonObjectArg('config', config, {});
-  assertDynamicCodeKnowledgeAckIf(Boolean(sourceCode && ['script', 'condition'].includes(type)), knowledgeAckKey);
-  const validation = sourceCode && ['script', 'condition'].includes(type)
-    ? await validateDynamicScript(apiUrl, sourceCode, scriptLanguage)
+  const dynamicType = ['script', 'condition'].includes(type);
+  if (dynamicType && sourceCode === undefined && sourceFile === undefined && sourceResourceUri === undefined) {
+    throw new Error(`${type} flow steps require sourceCode, sourceFile, or sourceResourceUri.`);
+  }
+  const materialized = dynamicType && (sourceCode !== undefined || sourceFile !== undefined || sourceResourceUri !== undefined)
+    ? materializeSourceInput({
+      source: sourceCode,
+      sourceFile,
+      sourceResourceUri,
+      fieldName: 'sourceCode',
+      tableName: 'enfyra_flow_step',
+      id: key,
+    })
+    : null;
+  const effectiveSourceCode = materialized?.source;
+  assertDynamicCodeKnowledgeAckIf(Boolean(effectiveSourceCode), knowledgeAckKey);
+  const validation = effectiveSourceCode
+    ? await validateDynamicScript(apiUrl, effectiveSourceCode, scriptLanguage)
     : { validated: false, reason: 'no script validation required' };
   const existing = await findRecord(apiUrl, 'enfyra_flow_step', {
     flow: { id: { _eq: getId(flow) } },
@@ -147,13 +165,13 @@ export async function ensureFlowStep(apiUrl, {
     type,
     order,
     config: parsedConfig,
-    sourceCode,
+    sourceCode: effectiveSourceCode,
     scriptLanguage,
     timeout,
     isEnabled,
   }, getId(flow)));
   const reload = naturalPartialReload('Flow step writes trigger the server partial reload contract; there is no dedicated flow reload endpoint.');
-  return { action: 'flow_step_ensured', flow: { id: getId(flow), name: flow.name }, step: { id: operation.id, key, type }, validation, operation, reload };
+  return { action: 'flow_step_ensured', flow: { id: getId(flow), name: flow.name }, step: { id: operation.id, key, type }, validation, ...(materialized ? { sourceArtifact: materialized.sourceArtifact } : {}), operation, reload };
 }
 
 export const FLOW_STEP_TOOL_GUIDANCE = [
@@ -312,7 +330,9 @@ function normalizeFlowWorkflowStep(step, index) {
     type,
     order: input.order ?? index * 10,
     config: input.config ?? guidance.config ?? {},
-    sourceCode: input.sourceCode ?? guidance.sourceCode,
+    sourceCode: input.sourceCode ?? (input.sourceFile || input.sourceResourceUri ? undefined : guidance.sourceCode),
+    sourceFile: input.sourceFile,
+    sourceResourceUri: input.sourceResourceUri,
     scriptLanguage: input.scriptLanguage || 'javascript',
     timeout: input.timeout,
     isEnabled: input.isEnabled ?? true,
@@ -326,7 +346,7 @@ function normalizeFlowWorkflowStep(step, index) {
 export async function runFlowWorkflow(apiUrl, opts) {
   const steps = parseJsonArrayArg('steps', opts.steps, []);
   const plan = steps.map(normalizeFlowWorkflowStep);
-  const hasDynamicCode = plan.some((step) => ['script', 'condition'].includes(step.type) && step.sourceCode);
+  const hasDynamicCode = plan.some((step) => ['script', 'condition'].includes(step.type) && (step.sourceCode || step.sourceFile || step.sourceResourceUri));
   const flowInput = {
     name: opts.name,
     timeout: opts.timeout,
@@ -368,6 +388,8 @@ export async function runFlowWorkflow(apiUrl, opts) {
       order: step.order,
       config: step.config,
       sourceCode: step.sourceCode,
+      sourceFile: step.sourceFile,
+      sourceResourceUri: step.sourceResourceUri,
       scriptLanguage: step.scriptLanguage,
       timeout: step.timeout,
       isEnabled: step.isEnabled,

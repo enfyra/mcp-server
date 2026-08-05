@@ -19,6 +19,7 @@ import {
 } from './enfyra-tool-logic.js';
 import { fetchAPI } from './fetch.js';
 import { validatePortableScriptSource } from './mutation-guards.js';
+import { materializeSourceInput } from './source-artifacts.js';
 import {
   assertGlobalRulesAck,
   globalRulesAckParam
@@ -229,18 +230,40 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
     {
       kind: z.enum(['script', 'flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
       body: z.union([z.record(z.any()), z.string()]).describe('Test body as a native JSON object. A JSON string is accepted for compatibility. Include script and optional context for script; type/config plus payload for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
+      sourceFile: z.string().optional().describe('Previously returned script source artifact tmpFile. Use this when the exact reviewed source is already in tmp.'),
+      sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the script under test.'),
     },
-    async ({ kind, body }) => {
+    async ({ kind, body, sourceFile, sourceResourceUri }) => {
       const parsed = parseJsonObjectInput(body, 'body');
+      const parsedFlowConfig = kind === 'flow_step' ? parseJsonObjectInput(parsed?.config, 'body.config') : null;
       const sourceCode = kind === 'flow_step'
-        ? parsed?.config?.sourceCode ?? parsed?.config?.code
+        ? parsedFlowConfig?.sourceCode ?? parsedFlowConfig?.code
         : parsed?.script ?? parsed?.sourceCode;
-      if (typeof sourceCode === 'string') validatePortableScriptSource(sourceCode);
+      const materialized = sourceFile || sourceResourceUri || typeof sourceCode === 'string'
+        ? materializeSourceInput({
+          source: sourceFile || sourceResourceUri ? undefined : sourceCode,
+          sourceFile,
+          sourceResourceUri,
+          fieldName: 'sourceCode',
+          tableName: 'mcp-admin-test',
+          id: kind,
+        })
+        : null;
+      if (materialized) {
+        validatePortableScriptSource(materialized.source);
+        if (kind === 'flow_step') {
+          parsed.config = { ...(parsedFlowConfig || {}), sourceCode: materialized.source };
+        } else if (Object.prototype.hasOwnProperty.call(parsed, 'sourceCode')) {
+          parsed.sourceCode = materialized.source;
+        } else {
+          parsed.script = materialized.source;
+        }
+      }
       const result = await fetchAPI(ENFYRA_API_URL, '/admin/test/run', {
         method: 'POST',
         body: JSON.stringify({ ...parsed, kind }),
       });
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ ...result, ...(materialized ? { sourceArtifact: materialized.sourceArtifact } : {}) }, null, 2) }] };
     },
   );
 
@@ -254,11 +277,26 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
       key: z.string().optional().describe('Optional step key for mock flow context'),
       payload: z.union([z.record(z.any()), z.string()]).optional().describe('Runtime payload object exposed to the script as @FLOW_PAYLOAD. A JSON object string is accepted for compatibility.'),
       mockFlow: z.union([z.record(z.any()), z.string()]).optional().describe('Optional advanced mockFlow object for $last/$meta or other flow context. A JSON string is accepted for compatibility. Use payload for @FLOW_PAYLOAD.'),
+      sourceFile: z.string().optional().describe('Previously returned script source artifact tmpFile. Use this when the exact reviewed source is already in tmp.'),
+      sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the script under test.'),
     },
-    async ({ type, config, timeout, key, payload, mockFlow }) => {
+    async ({ type, config, timeout, key, payload, mockFlow, sourceFile, sourceResourceUri }) => {
       const parsedConfig = parseJsonObjectInput(config, 'config');
       const sourceCode = parsedConfig?.sourceCode ?? parsedConfig?.code;
-      if (typeof sourceCode === 'string') validatePortableScriptSource(sourceCode);
+      const materialized = sourceFile || sourceResourceUri || typeof sourceCode === 'string'
+        ? materializeSourceInput({
+          source: sourceFile || sourceResourceUri ? undefined : sourceCode,
+          sourceFile,
+          sourceResourceUri,
+          fieldName: 'sourceCode',
+          tableName: 'mcp-flow-test',
+          id: key || type,
+        })
+        : null;
+      if (materialized) {
+        validatePortableScriptSource(materialized.source);
+        parsedConfig.sourceCode = materialized.source;
+      }
       const parsedPayload = typeof payload === 'string' ? JSON.parse(payload) : payload;
       if (parsedPayload !== undefined && (!parsedPayload || typeof parsedPayload !== 'object' || Array.isArray(parsedPayload))) {
         throw new Error('payload must be a JSON object.');
@@ -275,7 +313,7 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
         method: 'POST',
         body: JSON.stringify({ ...body, kind: 'flow_step' }),
       });
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ ...result, ...(materialized ? { sourceArtifact: materialized.sourceArtifact } : {}) }, null, 2) }] };
     },
   );
 

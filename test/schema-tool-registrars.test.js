@@ -849,6 +849,8 @@ test('prepareRecordMutation validates sourceCode and rejects compiledCode/code a
   });
 
   assert.equal(prepared.scriptValidation.validated, true);
+  assert.match(prepared.scriptValidation.sourceArtifact.tmpFile, /enfyra-mcp-sources/);
+  assert.equal(prepared.payload.sourceCode, 'return true;');
   assert.equal(calls[0].path, '/admin/script/validate');
   await assert.rejects(
     () => prepareRecordMutation({

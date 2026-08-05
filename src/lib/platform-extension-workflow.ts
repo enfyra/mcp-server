@@ -22,6 +22,7 @@ import {
   assertExtensionKnowledgeAck,
   assertGlobalRulesAck
 } from './required-knowledge.js';
+import { materializeSourceInput } from './source-artifacts.js';
 
 async function resolveExtensionWorkflowState(apiUrl, opts) {
   const type = opts.type || 'page';
@@ -177,6 +178,17 @@ async function applyExtensionWorkflowStep(apiUrl, state, opts, stepId) {
 }
 
 export async function runExtensionWorkflow(apiUrl, opts) {
+  const sourceArtifact = materializeSourceInput({
+    source: opts.code,
+    sourceFile: opts.sourceFile,
+    sourceResourceUri: opts.sourceResourceUri,
+    fieldName: 'code',
+    tableName: 'enfyra_extension',
+    id: opts.name,
+  });
+  opts.code = sourceArtifact.source;
+  opts.sourceFile = undefined;
+  opts.sourceResourceUri = undefined;
   let state = await resolveExtensionWorkflowState(apiUrl, opts);
   const operations = [];
   if (opts.apply || opts.applyAll) {
@@ -193,6 +205,7 @@ export async function runExtensionWorkflow(apiUrl, opts) {
   const latestState = operations.length ? await resolveExtensionWorkflowState(apiUrl, opts) : state;
   return {
     action: operations.length ? 'extension_workflow_advanced' : 'extension_workflow_planned',
+    sourceArtifact: sourceArtifact.sourceArtifact,
     extension: latestState.extension,
     validation: latestState.validation,
     menu: latestState.menu,

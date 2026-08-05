@@ -34,6 +34,7 @@ import {
 import {
   normalizeEscapedVueSource
 } from './tool-input-normalization.js';
+import { materializeSourceInput } from './source-artifacts.js';
 
 export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
   const extensionFooterActionSchema = z.object({
@@ -68,13 +69,26 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         'This calls the same server compiler contract used by Enfyra, but does not save anything.',
       ].join(' '),
       {
-        sourceCode: z.string().describe('Raw dynamic script sourceCode.'),
+        sourceCode: z.string().optional().describe('Raw dynamic script sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned dynamic script source artifact tmpFile.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the dynamic script.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language to validate.'),
       },
-      async ({ sourceCode, scriptLanguage }) => jsonText({
+      async ({ sourceCode, sourceFile, sourceResourceUri, scriptLanguage }) => {
+        const materialized = materializeSourceInput({
+          source: sourceCode,
+          sourceFile,
+          sourceResourceUri,
+          fieldName: 'sourceCode',
+          tableName: 'mcp-validation',
+          id: 'dynamic-script',
+        });
+        return jsonText({
         action: 'dynamic_script_validated',
-        validation: await validateDynamicScript(ENFYRA_API_URL, sourceCode, scriptLanguage),
-      }),
+          sourceArtifact: materialized.sourceArtifact,
+          validation: await validateDynamicScript(ENFYRA_API_URL, materialized.source, scriptLanguage),
+        });
+      },
     );
 
   server.tool(
@@ -86,14 +100,27 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         'Call get_extension_theme_contract first when generating or reviewing UI.',
       ].join(' '),
       {
-        code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC or compiled extension bundle code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
+        code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC or compiled extension bundle code. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned extension source artifact tmpFile.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the extension source.'),
         name: z.string().optional().describe('Optional extension name/id used by the preview compiler.'),
         uiPattern: z.enum(['resource_list', 'resource_grid', 'master_detail', 'form', 'custom']).optional().describe('Optional intended UI pattern. resource_list/resource_grid enable deterministic layout policy checks.'),
       },
-      async ({ code, name, uiPattern }) => jsonText({
-        action: 'extension_code_validated',
-        validation: await validateExtensionCode(ENFYRA_API_URL, code, name, { uiPattern }),
-      }),
+      async ({ code, sourceFile, sourceResourceUri, name, uiPattern }) => {
+        const materialized = materializeSourceInput({
+          source: code,
+          sourceFile,
+          sourceResourceUri,
+          fieldName: 'code',
+          tableName: 'enfyra_extension',
+          id: name || 'validation',
+        });
+        return jsonText({
+          action: 'extension_code_validated',
+          sourceArtifact: materialized.sourceArtifact,
+          validation: await validateExtensionCode(ENFYRA_API_URL, materialized.source, name, { uiPattern }),
+        });
+      },
     );
 
   server.tool(
@@ -162,6 +189,8 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
           searchMode: z.enum(['exact', 'whitespace']).optional().default('exact').describe('Patch matching mode. Use whitespace only for indentation/newline variation.'),
           replaceAll: z.boolean().optional().default(false).describe('Patch replace-all mode. false requires exactly one match for this patch.'),
         })).optional().describe('Atomic multi-patch list. Patches apply sequentially in memory and only the final SFC is validated/saved when apply=true. Use this for slot/tag pairs that would be invalid as intermediate states.'),
+        sourceFile: z.string().optional().describe('Previously returned final patched extension source artifact tmpFile. Use this on apply=true to validate/apply the exact reviewed SFC without recomputing the patch.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned final patched extension source artifact URI.'),
         expectedSha256: z.string().optional().describe('SHA-256 of current extension code from preview/inspect. Required when apply=true and rejects stale patches.'),
         apply: z.boolean().optional().default(false).describe('Preview by default. Set true to validate and save.'),
         description: z.string().optional().describe('Optional replacement extension description. Omit to preserve.'),
@@ -222,12 +251,26 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
           'theme_review',
           'review',
         ]).describe('Which extension UI contract builder/reviewer to run.'),
-        input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=api_usage, pass { path, resource, method? }; for kind=confirm, pass { resource, executeName?, refreshName?, recordName?, idExpression? }; for kind=notify, pass { kind, title, description? }. For kind=theme_classes, pass { intent }. For kind=runtime_review/theme_review/review, pass { code, pattern? }, where pattern may be resource_list or resource_grid for deterministic layout policy.'),
+        input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=api_usage, pass { path, resource, method? }; for kind=confirm, pass { resource, executeName?, refreshName?, recordName?, idExpression? }; for kind=notify, pass { kind, title, description? }. For kind=theme_classes, pass { intent }. For kind=runtime_review/theme_review/review, pass { code?, sourceFile?, sourceResourceUri?, pattern? }, where pattern may be resource_list or resource_grid for deterministic layout policy.'),
         extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
       },
       async ({ kind, input, extensionKnowledgeAckKey }) => {
         assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
-        return jsonText(buildExtensionUiSnippet(kind, input));
+        if (!['runtime_review', 'theme_review', 'review'].includes(kind)) {
+          return jsonText(buildExtensionUiSnippet(kind, input));
+        }
+        const materialized = materializeSourceInput({
+          source: input.code,
+          sourceFile: input.sourceFile,
+          sourceResourceUri: input.sourceResourceUri,
+          fieldName: 'code',
+          tableName: 'enfyra_extension',
+          id: `ui-${kind}`,
+        });
+        return jsonText({
+          ...buildExtensionUiSnippet(kind, { ...input, code: materialized.source }),
+          sourceArtifact: materialized.sourceArtifact,
+        });
       },
     );
 
@@ -324,9 +367,24 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         'This is a static contract review, not a compiler validation; still validate the final SFC before saving.',
       ].join(' '),
       {
-        code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC or template snippet to review.'),
+        code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC or template snippet to review. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned extension source artifact tmpFile.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the extension source.'),
       },
-      async ({ code }) => jsonText(reviewExtensionUiContract(code)),
+      async ({ code, sourceFile, sourceResourceUri }) => {
+        const materialized = materializeSourceInput({
+          source: code,
+          sourceFile,
+          sourceResourceUri,
+          fieldName: 'code',
+          tableName: 'enfyra_extension',
+          id: 'ui-review',
+        });
+        return jsonText({
+          ...reviewExtensionUiContract(materialized.source),
+          sourceArtifact: materialized.sourceArtifact,
+        });
+      },
     );
 
   server.tool(

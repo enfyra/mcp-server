@@ -35,6 +35,12 @@ npx @enfyra/mcp-server@latest config --yes \
   --api-token efy_pat_your-token
 ```
 
+Remove temporary source artifacts and local telemetry files created by MCP:
+
+```bash
+npx @enfyra/mcp-server@latest cleanup
+```
+
 Configure more than one selected client:
 
 ```bash

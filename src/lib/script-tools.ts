@@ -21,7 +21,7 @@ import {
   dynamicCodeKnowledgeAckParam,
   globalRulesAckParam
 } from './required-knowledge.js';
-import { resolveSourceInput, writeSourceArtifact } from './source-artifacts.js';
+import { materializeSourceInput, resolveSourceInput, writeSourceArtifact } from './source-artifacts.js';
 
 async function verifySavedScriptSource(tableName, id, expectedSourceCode) {
   const saved = await fetchScriptRecord(tableName, id);
@@ -83,8 +83,10 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
     {
       tableName: z.enum(SCRIPT_BACKED_TABLES).describe('Script-backed table to patch'),
       id: z.string().describe('Record ID to patch'),
-      oldText: z.string().describe('Exact text to replace'),
-      newText: z.string().describe('Replacement text'),
+      oldText: z.string().optional().describe('Exact text to replace. Omit when applying a previously returned sourceFile/sourceResourceUri artifact.'),
+      newText: z.string().optional().describe('Replacement text. Omit when applying a previously returned sourceFile/sourceResourceUri artifact.'),
+      sourceFile: z.string().optional().describe('Previously returned final patched source artifact tmpFile. Use this on apply=true to validate/apply the exact reviewed file without recomputing the patch.'),
+      sourceResourceUri: z.string().optional().describe('Previously returned final patched source artifact URI.'),
       occurrence: z.enum(['first', 'all']).optional().default('all').describe('Replace first occurrence or all occurrences.'),
       expectedSourceSha256: z.string().optional().describe('Optional SHA-256 from get_script_source; fails if source changed.'),
       scriptLanguage: z.string().optional().describe('Script language to save. Defaults to existing scriptLanguage or javascript.'),
@@ -92,7 +94,7 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when apply=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
       knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required when apply=true. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
     },
-    async ({ tableName, id, oldText, newText, occurrence, expectedSourceSha256, scriptLanguage, apply, globalRulesAckKey, knowledgeAckKey }) => {
+    async ({ tableName, id, oldText, newText, sourceFile, sourceResourceUri, occurrence, expectedSourceSha256, scriptLanguage, apply, globalRulesAckKey, knowledgeAckKey }) => {
       const { record, sourceField, sourceCode } = await fetchScriptRecord(tableName, id);
       if (sourceField !== 'sourceCode') {
         throw new Error(`patch_script_source only saves sourceCode records. Record uses "${sourceField}"; use update_records intentionally for this legacy field.`);
@@ -101,24 +103,41 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       if (expectedSourceSha256 && expectedSourceSha256 !== beforeHash) {
         throw new Error(`Source hash mismatch. Current sha256 is ${beforeHash}; re-read with get_script_source before patching.`);
       }
-      const { occurrences, patched, replaced } = replaceOccurrence(sourceCode, oldText, newText, occurrence || 'all');
-      const afterHash = sha256(patched);
+      if ((sourceFile || sourceResourceUri) && (oldText !== undefined || newText !== undefined)) {
+        throw new Error('When sourceFile/sourceResourceUri is provided, omit oldText and newText so the exact artifact is applied.');
+      }
+      if (!sourceFile && !sourceResourceUri && (oldText === undefined || newText === undefined)) {
+        throw new Error('Provide oldText and newText, or provide sourceFile/sourceResourceUri from a reviewed patch artifact.');
+      }
+      const patchResult = sourceFile || sourceResourceUri
+        ? { occurrences: 0, patched: resolveSourceInput({ sourceFile, sourceResourceUri, fieldName: 'sourceCode' }), replaced: false }
+        : replaceOccurrence(sourceCode, oldText!, newText!, occurrence || 'all');
+      const { occurrences, patched, replaced } = patchResult;
+      const patchedArtifact = materializeSourceInput({
+        source: patched,
+        fieldName: 'sourceCode',
+        tableName,
+        id,
+      });
+      const exactPatched = patchedArtifact.source;
+      const afterHash = sha256(exactPatched);
       const payload = {
         action: apply ? 'patch_script_source_applied' : 'patch_script_source_preview',
         tableName,
         id,
         sourceField,
         sourceLengthBefore: sourceCode.length,
-        sourceLengthAfter: patched.length,
+        sourceLengthAfter: exactPatched.length,
         sourceSha256Before: beforeHash,
         sourceSha256After: afterHash,
         occurrences,
         replaced,
         preview: {
           before: sourcePreview(sourceCode, oldText),
-          after: sourcePreview(patched, newText),
+          after: sourcePreview(exactPatched, newText || ''),
         },
-        next: apply ? undefined : 'Call patch_script_source again with apply=true and expectedSourceSha256 set to sourceSha256Before to validate and save.',
+        sourceArtifact: patchedArtifact.sourceArtifact,
+        next: apply ? undefined : 'Call patch_script_source again with apply=true, sourceFile/sourceResourceUri from this artifact, and expectedSourceSha256 set to sourceSha256Before to validate and save.',
       };
       if (!apply) {
         return { content: [{ type: 'text', text: JSON.stringify(payload, null, 2) }] };
@@ -128,7 +147,7 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       const language = scriptLanguage || record.scriptLanguage || 'javascript';
       const prepared = await prepareGenericMutation(
         tableName,
-        JSON.stringify({ sourceCode: patched, scriptLanguage: language }),
+        JSON.stringify({ sourceCode: exactPatched, scriptLanguage: language }),
       );
       const result = await fetchAPI(
         ENFYRA_API_URL,
@@ -141,7 +160,7 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
         id,
         scriptLanguage: language,
         scriptValidation: prepared.scriptValidation,
-        savedSource: await verifySavedScriptSource(tableName, id, patched),
+        savedSource: await verifySavedScriptSource(tableName, id, exactPatched),
       }, null, 2) }] };
     },
   );

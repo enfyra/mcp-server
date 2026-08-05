@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   compactSourceFields,
+  materializeSourceInput,
   readSourceArtifactFile,
   readSourceArtifactResource,
   resolveSourceInput,
@@ -43,6 +44,19 @@ test('source input rejects arbitrary files and ambiguous inline/artifact inputs'
     () => resolveSourceInput({ source: 'inline', sourceFile: '/tmp/not-an-enfyra-artifact.js', fieldName: 'sourceCode' }),
     /exactly one/,
   );
+});
+
+test('materializeSourceInput makes inline and artifact inputs follow one tmp-file path', () => {
+  const original = writeSourceArtifact({ tableName: 'enfyra_flow_step', id: 9, fieldName: 'sourceCode', source: 'return 9;' });
+  const materialized = materializeSourceInput({
+    sourceFile: original.tmpFile,
+    fieldName: 'sourceCode',
+    tableName: 'enfyra_flow_step',
+    id: 9,
+  });
+  assert.match(materialized.sourceArtifact.tmpFile, /enfyra-mcp-sources/);
+  assert.equal(readSourceArtifactFile(materialized.sourceArtifact.tmpFile), 'return 9;');
+  assert.equal(materialized.source, 'return 9;');
 });
 
 test('compactSourceFields replaces long source fields with tmp artifact references', () => {

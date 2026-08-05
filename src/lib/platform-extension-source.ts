@@ -27,7 +27,7 @@ import {
   assertExtensionKnowledgeAck,
   assertGlobalRulesAck
 } from './required-knowledge.js';
-import { resolveSourceInput, writeSourceArtifact } from './source-artifacts.js';
+import { materializeSourceInput, resolveSourceInput, writeSourceArtifact } from './source-artifacts.js';
 
 export function parseJsonObjectArg(name, value, fallback = {}) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -262,15 +262,23 @@ export async function verifyExtensionRuntime(apiUrl, { id, name, uiPattern, expe
     ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,isEnabled,version,updatedAt,menu.id,menu.label,menu.path,code')
     : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,isEnabled,version,updatedAt,menu.id,menu.label,menu.path,code');
   if (!existing) throw new Error(`Extension not found: ${id || name}`);
-  const code = String(existing.code || '');
-  const validation = await validateExtensionCode(apiUrl, code, existing.name || String(id || name), { uiPattern });
-  return buildExtensionRuntimeVerification({ extension: existing, code, validation, uiPattern, expectedSha256 });
+  const materialized = materializeSourceInput({
+    source: String(existing.code || ''),
+    fieldName: 'code',
+    tableName: 'enfyra_extension',
+    id: getId(existing) ?? id ?? name ?? 'extension',
+  });
+  const validation = await validateExtensionCode(apiUrl, materialized.source, existing.name || String(id || name), { uiPattern });
+  return {
+    ...buildExtensionRuntimeVerification({ extension: existing, code: materialized.source, validation, uiPattern, expectedSha256 }),
+    sourceArtifact: materialized.sourceArtifact,
+  };
 }
 
 export async function updateExtensionCode(apiUrl, {
   id,
   name,
-  code,
+  code = undefined,
   sourceFile = undefined,
   sourceResourceUri = undefined,
   description,
@@ -283,12 +291,20 @@ export async function updateExtensionCode(apiUrl, {
 }) {
   assertGlobalRulesAck(globalRulesAckKey);
   assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
-  const resolvedCode = resolveExtensionSource({ code, sourceFile, sourceResourceUri });
   if (!id && !name) throw new Error('Provide id or name to update an existing extension.');
   const existing = id
     ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,isEnabled,version,menu.id,code')
     : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,isEnabled,version,menu.id,code');
   if (!existing) throw new Error(`Extension not found: ${id || name}`);
+  const materialized = materializeSourceInput({
+    source: code,
+    sourceFile,
+    sourceResourceUri,
+    fieldName: 'code',
+    tableName: 'enfyra_extension',
+    id: getId(existing) ?? id ?? name ?? 'extension',
+  });
+  const resolvedCode = materialized.source;
   const extensionId = getId(existing);
   const currentSha256 = sha256Text(existing.code || '');
   if (expectedSha256 && expectedSha256 !== currentSha256) {
@@ -489,6 +505,8 @@ export async function patchExtensionCode(apiUrl, {
   searchMode,
   replaceAll,
   patches,
+  sourceFile,
+  sourceResourceUri,
   expectedSha256,
   apply,
   description,
@@ -514,8 +532,22 @@ export async function patchExtensionCode(apiUrl, {
   if (expectedSha256 && expectedSha256 !== currentSha256) {
     throw new Error(`Extension code hash mismatch. Expected ${expectedSha256}, got ${currentSha256}. Re-read the extension before patching.`);
   }
-  const patchResult = applyExtensionCodePatches(currentCode, { search, replace, searchMode, replaceAll, patches });
-  const nextCode = patchResult.code;
+  if ((sourceFile || sourceResourceUri) && (search !== undefined || replace !== undefined || patches !== undefined)) {
+    throw new Error('When sourceFile/sourceResourceUri is provided, omit search, replace, and patches so the exact reviewed artifact is applied.');
+  }
+  if (!sourceFile && !sourceResourceUri && search === undefined && patches === undefined) {
+    throw new Error('Provide search/replace patches, or provide sourceFile/sourceResourceUri from a reviewed patch artifact.');
+  }
+  const patchResult = sourceFile || sourceResourceUri
+    ? { code: resolveSourceInput({ sourceFile, sourceResourceUri, fieldName: 'code' }), patches: [], results: [] }
+    : applyExtensionCodePatches(currentCode, { search, replace, searchMode, replaceAll, patches });
+  const nextArtifact = materializeSourceInput({
+    source: patchResult.code,
+    fieldName: 'code',
+    tableName: 'enfyra_extension',
+    id: extensionId,
+  });
+  const nextCode = nextArtifact.source;
   const nextSha256 = sha256Text(nextCode);
   const occurrences = patchResult.results.reduce((total, item) => total + item.occurrences, 0);
   const diff = buildExtensionPatchDiffArtifact({
@@ -525,14 +557,6 @@ export async function patchExtensionCode(apiUrl, {
     nextSha256,
     patches: patchResult.patches,
   });
-  const nextStepPatchInput = patchResult.patches.length === 1
-    ? {
-      search: patchResult.patches[0].search,
-      replace: patchResult.patches[0].replace,
-      searchMode: patchResult.patches[0].searchMode,
-      replaceAll: patchResult.patches[0].replaceAll,
-    }
-    : { patches: patchResult.patches };
   const preview = {
     action: apply ? 'extension_code_patch_applied' : 'extension_code_patch_previewed',
     id: extensionId,
@@ -545,6 +569,7 @@ export async function patchExtensionCode(apiUrl, {
     occurrences,
     patchResults: patchResult.results,
     diff,
+    sourceArtifact: nextArtifact.sourceArtifact,
     atomic: patchResult.patches.length > 1,
     apply: Boolean(apply),
   };
@@ -553,14 +578,20 @@ export async function patchExtensionCode(apiUrl, {
       ...preview,
       nextStep: {
         tool: 'patch_extension_code',
-        input: { id: extensionId, expectedSha256: currentSha256, ...nextStepPatchInput, apply: true },
+        input: {
+          id: extensionId,
+          expectedSha256: currentSha256,
+          sourceFile: nextArtifact.sourceArtifact.tmpFile,
+          sourceResourceUri: nextArtifact.sourceArtifact.resourceUri,
+          apply: true,
+        },
       },
     };
   }
   const result = await updateExtensionCode(apiUrl, {
     id: extensionId,
     name: undefined,
-    code: nextCode,
+    sourceFile: nextArtifact.sourceArtifact.tmpFile,
     description,
     isEnabled,
     version,

@@ -42,6 +42,7 @@ import {
 import {
   normalizeStrictBoolean
 } from './tool-input-normalization.js';
+import { materializeSourceInput } from './source-artifacts.js';
 
 export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
   server.tool(
@@ -234,7 +235,9 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
       {
         path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
         method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-        sourceCode: z.string().describe('Handler body sourceCode for a custom route, which has no main table. Do not wrap it in export default/module.exports. Use #secure.table_name or @REPOS.secure.table_name for user-facing explicit-table access. Repository calls are async and reads return result.data. Passing @BODY as create/update data is valid TypeORM-style usage; enforce endpoint-specific owner/tenant/business rules in code. Reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
+        sourceCode: z.string().optional().describe('Handler body sourceCode for a custom route. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned route handler source artifact tmpFile.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the route handler.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
         anonymousAccess: z.enum(['public', 'private']).optional().default('private').describe('public adds the method to publicMethods; private removes this method from publicMethods.'),
         public: z.preprocess(normalizeStrictBoolean, z.boolean()).optional().describe('Compatibility alias for anonymousAccess. Accepts boolean true/false and exact string "true"/"false"; false means private.'),
@@ -269,7 +272,9 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
       {
         path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
         method: z.string().describe('HTTP method for the handler, e.g. GET or POST.'),
-        sourceCode: z.string().describe('Handler body sourceCode for a custom route, which has no main table. Do not wrap it in export default/module.exports. Use #secure.table_name or @REPOS.secure.table_name for user-facing explicit-table access. Repository calls are async and reads return result.data. Passing @BODY as create/update data is valid TypeORM-style usage; enforce endpoint-specific owner/tenant/business rules in code. Reserve trusted repos for intentional field-permission bypass. Do not send compiledCode.'),
+        sourceCode: z.string().optional().describe('Handler body sourceCode for a custom route. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned route handler source artifact tmpFile.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the route handler.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
         public: z.preprocess(normalizeStrictBoolean, z.boolean()).optional().default(false).describe('When true, the method is added to publicMethods for anonymous access. Exact string "true"/"false" is normalized for weak clients.'),
         description: z.string().optional().describe('Route description.'),
@@ -280,9 +285,11 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z),
         knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
       },
-      async ({ path, method, sourceCode, scriptLanguage, public: makePublic, description, timeout, overwrite, smokeTestQuery, smokeTestBody, globalRulesAckKey, knowledgeAckKey }) => {
+      async ({ path, method, sourceCode, sourceFile, sourceResourceUri, scriptLanguage, public: makePublic, description, timeout, overwrite, smokeTestQuery, smokeTestBody, globalRulesAckKey, knowledgeAckKey }) => {
         assertGlobalRulesAck(globalRulesAckKey);
         assertDynamicCodeKnowledgeAck(knowledgeAckKey);
+        const materialized = materializeSourceInput({ source: sourceCode, sourceFile, sourceResourceUri, fieldName: 'sourceCode', tableName: 'enfyra_route_handler', id: path });
+        sourceCode = materialized.source;
         const normalizedPath = normalizeRestPath(path);
         const methodName = normalizeMethodName(method);
         assertDynamicEndpointContract(reviewDynamicEndpointContract({

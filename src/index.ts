@@ -12,6 +12,7 @@ if (args[0] === '--help' || args[0] === '-h' || args[0] === 'help') {
 Usage:
   npx @enfyra/mcp-server@latest                 Start the MCP stdio server
   npx @enfyra/mcp-server@latest config [flags]  Write project-local MCP host config
+  npx @enfyra/mcp-server@latest cleanup         Remove MCP temporary artifacts
 
 Common config flags:
   --codex             Write ./.codex/config.toml
@@ -36,6 +37,14 @@ if (args[0] === 'config') {
   loadEnv({ quiet: true });
   const { runLocalConfig } = await import('./lib/config-local.js');
   await runLocalConfig(args.slice(1));
+  process.exit(0);
+}
+if (args[0] === 'cleanup') {
+  loadEnv({ quiet: true });
+  const { cleanupMcpTempFiles } = await import('./lib/cleanup.js');
+  const result = cleanupMcpTempFiles();
+  const sourceStatus = result.sourceArtifacts.removed ? 'removed' : 'already clean';
+  console.log(`Enfyra MCP cleanup complete (source artifacts: ${sourceStatus}; usage files removed: ${result.usageFiles.removedFiles}).`);
   process.exit(0);
 }
 

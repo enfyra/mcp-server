@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -13,6 +13,7 @@ const SOURCE_FIELD_NAMES = new Set([
   'connectionHandlerScript',
 ]);
 const SOURCE_ARTIFACTS = new Map<string, { path: string; mimeType: string }>();
+export const SOURCE_ARTIFACT_DIR = join(tmpdir(), 'enfyra-mcp-sources');
 
 type SourceArtifactInput = {
   tableName?: string;
@@ -55,15 +56,14 @@ function artifactId(tableName: string | undefined, id: string | number, fieldNam
 export function writeSourceArtifact({ tableName, id, fieldName, source }: SourceArtifactInput) {
   const hash = sha256(source);
   const extension = extensionForField(fieldName);
-  const dir = join(tmpdir(), 'enfyra-mcp-sources');
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  mkdirSync(SOURCE_ARTIFACT_DIR, { recursive: true, mode: 0o700 });
   const fileName = [
     safePart(tableName),
     safePart(id),
     safePart(fieldName),
     hash.slice(0, 12),
   ].join('-') + extension;
-  const path = join(dir, fileName);
+  const path = join(SOURCE_ARTIFACT_DIR, fileName);
   writeFileSync(path, source, { mode: 0o600 });
   const resourceId = artifactId(tableName, id, fieldName, hash);
   const resourceUri = `enfyra-source://artifact/${encodeURIComponent(resourceId)}`;
@@ -77,6 +77,13 @@ export function writeSourceArtifact({ tableName, id, fieldName, source }: Source
       ? `${source.slice(0, DEFAULT_PREVIEW_CHARS)}...`
       : source,
   };
+}
+
+export function cleanupSourceArtifacts() {
+  const existed = existsSync(SOURCE_ARTIFACT_DIR);
+  if (existed) rmSync(SOURCE_ARTIFACT_DIR, { recursive: true, force: true });
+  SOURCE_ARTIFACTS.clear();
+  return { directory: SOURCE_ARTIFACT_DIR, removed: existed };
 }
 
 export function readSourceArtifactResource(resourceUri: string) {
@@ -118,6 +125,22 @@ export function resolveSourceInput({ source, sourceFile, sourceResourceUri, fiel
   if (source !== undefined) return source;
   if (sourceFile !== undefined) return readSourceArtifactFile(sourceFile);
   return readSourceArtifactResource(sourceResourceUri!).text;
+}
+
+export function materializeSourceInput({ source, sourceFile, sourceResourceUri, fieldName, tableName = 'mcp', id = 'input' }: {
+  source?: string;
+  sourceFile?: string;
+  sourceResourceUri?: string;
+  fieldName: string;
+  tableName?: string;
+  id?: string | number;
+}) {
+  const resolved = resolveSourceInput({ source, sourceFile, sourceResourceUri, fieldName });
+  const artifact = writeSourceArtifact({ tableName, id, fieldName, source: resolved });
+  return {
+    source: readSourceArtifactFile(artifact.tmpFile),
+    sourceArtifact: artifact,
+  };
 }
 
 export function compactSourceField({ tableName, id, fieldName, source, alwaysWrite = false }: SourceArtifactInput & { alwaysWrite?: boolean }) {

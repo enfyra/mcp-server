@@ -160,6 +160,17 @@ function isUsageSpoolFile(file: string) {
   return /^(usage|upload)-\d{4}-\d{2}-\d{2}(?:-\d+)?\.jsonl$/.test(file);
 }
 
+export function cleanupMcpUsageFiles(directory = USAGE_DIR) {
+  let removedFiles = 0;
+  if (!existsSync(directory)) return { directory, removedFiles };
+  for (const file of readdirSync(directory)) {
+    if (!isUsageSpoolFile(file) && file !== 'state.json') continue;
+    rmSync(join(directory, file), { force: true });
+    removedFiles += 1;
+  }
+  return { directory, removedFiles };
+}
+
 function readState() {
   try {
     if (!existsSync(stateFile())) return {};

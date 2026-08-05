@@ -360,6 +360,17 @@ test('test_flow_step uses unified admin test runner', () => {
   assert.doesNotMatch(entry, /fetchAPI\(ENFYRA_API_URL,\s*'\/admin\/flow\/test-step'/);
 });
 
+test('validation and admin-test paths accept the exact tmp source artifact', () => {
+  const source = readSourceTree();
+  assert.match(source, /'validate_dynamic_script'[\s\S]*sourceFile[\s\S]*sourceResourceUri[\s\S]*materializeSourceInput/);
+  assert.match(source, /'validate_extension_code'[\s\S]*sourceFile[\s\S]*sourceResourceUri[\s\S]*materializeSourceInput/);
+  assert.match(source, /'run_admin_test'[\s\S]*sourceFile[\s\S]*sourceResourceUri[\s\S]*materializeSourceInput/);
+  assert.match(source, /'test_flow_step'[\s\S]*sourceFile[\s\S]*sourceResourceUri[\s\S]*materializeSourceInput/);
+  assert.match(source, /'flow_workflow'[\s\S]*sourceFile[\s\S]*sourceResourceUri/);
+  assert.match(source, /'patch_extension_code'[\s\S]*sourceFile[\s\S]*sourceResourceUri[\s\S]*exact reviewed artifact/);
+  assert.match(source, /'patch_script_source'[\s\S]*sourceFile[\s\S]*sourceResourceUri[\s\S]*exact reviewed file/);
+});
+
 test('GraphQL uses generated resolvers instead of script-backed source records', () => {
   const entry = readEntrySource();
   const runtimeZones = readRuntimeZoneSource();

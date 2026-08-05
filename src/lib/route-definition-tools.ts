@@ -27,6 +27,7 @@ import {
   globalRulesAckParam
 } from './required-knowledge.js';
 import { validateMainTableRoutePath } from './route-guards.js';
+import { materializeSourceInput } from './source-artifacts.js';
 
 export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
   server.tool('get_all_routes', 'List route definitions with minimal fields. Complete route lists must pass either limit or all=true. If search is provided without limit, the tool returns a bounded lookup window of 10 matches. Call inspect_route for handlers/hooks/permissions detail.', {
@@ -160,16 +161,20 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
           .describe('Single enfyra_method.name to create. Prefer this for one handler.'),
         methods: z.array(z.string()).optional()
           .describe('Batch create multiple handlers. Use only when the same sourceCode applies to every method.'),
-        sourceCode: z.string().describe('Handler JavaScript sourceCode. Do not use logic; backend CRUD rejects logic. Use @REPOS.main for the route main table or #secure.table_name/@REPOS.secure.table_name for explicit user-facing access; trusted repos require intentional bypass and explicit authorization.'),
+        sourceCode: z.string().optional().describe('Handler JavaScript sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned route handler source artifact tmpFile.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the route handler.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
         timeout: z.number().optional().describe('Timeout in ms for each route+method handler row (not a route-level setting; default system timeout is usually 30000).'),
         globalRulesAckKey: globalRulesAckParam(z),
         knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
         allowCanonicalRoute: z.boolean().optional().default(false).describe('Explicit acknowledgement for adding a new handler to a canonical main-table route. Use only when the new method intentionally belongs to the shared eApp/admin CRUD surface; third-party endpoint-specific behavior must use a separate custom route.'),
       },
-      async ({ routeId, method, methods, sourceCode, scriptLanguage, timeout, globalRulesAckKey, knowledgeAckKey, allowCanonicalRoute }) => {
+      async ({ routeId, method, methods, sourceCode, sourceFile, sourceResourceUri, scriptLanguage, timeout, globalRulesAckKey, knowledgeAckKey, allowCanonicalRoute }) => {
         assertGlobalRulesAck(globalRulesAckKey);
         assertDynamicCodeKnowledgeAck(knowledgeAckKey);
+        const materialized = materializeSourceInput({ source: sourceCode, sourceFile, sourceResourceUri, fieldName: 'sourceCode', tableName: 'enfyra_route_handler', id: routeId });
+        sourceCode = materialized.source;
         const routeQuery = new URLSearchParams({
           filter: JSON.stringify({ id: { _eq: routeId } }),
           fields: 'id,path,mainTable.id,mainTable.name',
@@ -216,6 +221,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
           handlers: results,
           canonicalRouteAcknowledged: Boolean(targetRoute?.mainTable && allowCanonicalRoute),
           scriptValidation,
+          sourceArtifact: materialized.sourceArtifact,
           routeReload,
           detailHint: 'Use inspect_route with the same routeId/path to inspect saved handlers.',
         }, null, 2) }] };
@@ -234,7 +240,9 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
       {
         routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
         name: z.string().describe('Hook name (unique per route)'),
-        code: z.string().describe('Hook JavaScript sourceCode. MCP stores it as sourceCode and lets Enfyra compile compiledCode.'),
+        code: z.string().optional().describe('Hook JavaScript sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned hook source artifact tmpFile.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the hook.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
         methods: z.array(z.string()).optional()
           .describe('Method names this hook applies to. Default: built-in REST methods GET, POST, PATCH, DELETE.'),
@@ -243,9 +251,11 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z),
         knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
       },
-      async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
+      async ({ routeId, name, code, sourceFile, sourceResourceUri, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
         assertGlobalRulesAck(globalRulesAckKey);
         assertDynamicCodeKnowledgeAck(knowledgeAckKey);
+        const materialized = materializeSourceInput({ source: code, sourceFile, sourceResourceUri, fieldName: 'sourceCode', tableName: 'enfyra_pre_hook', id: routeId });
+        code = materialized.source;
         const methodMap = await getMethodMap();
         const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
         const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_pre_hook', {
@@ -276,6 +286,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
           name,
           routeId,
           scriptValidation,
+          sourceArtifact: materialized.sourceArtifact,
           routeReload,
         }, null, 2) }] };
       },
@@ -292,7 +303,9 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
       {
         routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
         name: z.string().describe('Hook name (unique per route)'),
-        code: z.string().describe('Hook JavaScript sourceCode. MCP stores it as sourceCode and lets Enfyra compile compiledCode.'),
+        code: z.string().optional().describe('Hook JavaScript sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned hook source artifact tmpFile.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the hook.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
         methods: z.array(z.string()).optional()
           .describe('Method names this hook applies to. Default: built-in REST methods GET, POST, PATCH, DELETE.'),
@@ -301,9 +314,11 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z),
         knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
       },
-      async ({ routeId, name, code, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
+      async ({ routeId, name, code, sourceFile, sourceResourceUri, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
         assertGlobalRulesAck(globalRulesAckKey);
         assertDynamicCodeKnowledgeAck(knowledgeAckKey);
+        const materialized = materializeSourceInput({ source: code, sourceFile, sourceResourceUri, fieldName: 'sourceCode', tableName: 'enfyra_post_hook', id: routeId });
+        code = materialized.source;
         const methodMap = await getMethodMap();
         const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
         const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_post_hook', {
@@ -334,6 +349,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
           name,
           routeId,
           scriptValidation,
+          sourceArtifact: materialized.sourceArtifact,
           routeReload,
         }, null, 2) }] };
       },
