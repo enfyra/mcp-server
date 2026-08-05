@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { compactSourceFields, readSourceArtifactResource, writeSourceArtifact } from '../dist/lib/source-artifacts.js';
+import {
+  compactSourceFields,
+  readSourceArtifactFile,
+  readSourceArtifactResource,
+  resolveSourceInput,
+  writeSourceArtifact,
+} from '../dist/lib/source-artifacts.js';
 
 test('writeSourceArtifact stores full source in tmp and returns compact metadata', () => {
   const source = 'export default ' + 'x'.repeat(1600);
@@ -18,11 +24,25 @@ test('writeSourceArtifact stores full source in tmp and returns compact metadata
   assert.match(artifact.resourceUri, /^enfyra-source:\/\/artifact\//);
   assert.equal(artifact.length, source.length);
   assert.equal(readFileSync(artifact.tmpFile, 'utf8'), source);
+  assert.equal(readSourceArtifactFile(artifact.tmpFile), source);
+  assert.equal(resolveSourceInput({ sourceFile: artifact.tmpFile, fieldName: 'sourceCode' }), source);
+  assert.equal(resolveSourceInput({ sourceResourceUri: artifact.resourceUri, fieldName: 'sourceCode' }), source);
   const resource = readSourceArtifactResource(artifact.resourceUri);
   assert.equal(resource.text, source);
   assert.equal(resource.mimeType, 'text/x-vue');
   assert.notEqual(artifact.preview, source);
   assert.ok(artifact.preview.length <= 600);
+});
+
+test('source input rejects arbitrary files and ambiguous inline/artifact inputs', () => {
+  assert.throws(
+    () => readSourceArtifactFile('/tmp/not-an-enfyra-artifact.js'),
+    /Source artifact file is unavailable/,
+  );
+  assert.throws(
+    () => resolveSourceInput({ source: 'inline', sourceFile: '/tmp/not-an-enfyra-artifact.js', fieldName: 'sourceCode' }),
+    /exactly one/,
+  );
 });
 
 test('compactSourceFields replaces long source fields with tmp artifact references', () => {

@@ -21,7 +21,26 @@ import {
   dynamicCodeKnowledgeAckParam,
   globalRulesAckParam
 } from './required-knowledge.js';
-import { writeSourceArtifact } from './source-artifacts.js';
+import { resolveSourceInput, writeSourceArtifact } from './source-artifacts.js';
+
+async function verifySavedScriptSource(tableName, id, expectedSourceCode) {
+  const saved = await fetchScriptRecord(tableName, id);
+  const savedSha256 = sha256(saved.sourceCode);
+  const sourceArtifact = writeSourceArtifact({
+    tableName,
+    id,
+    fieldName: saved.sourceField,
+    source: saved.sourceCode,
+  });
+  return {
+    valid: saved.sourceCode === expectedSourceCode,
+    sourceField: saved.sourceField,
+    sourceLength: saved.sourceCode.length,
+    sourceSha256: savedSha256,
+    sourceFile: sourceArtifact.tmpFile,
+    sourceResourceUri: sourceArtifact.resourceUri,
+  };
+}
 
 export function registerScriptTools(server, ENFYRA_API_URL) {
   server.tool(
@@ -44,6 +63,7 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
         primaryKey,
         sourceField,
         sourceFile: sourceArtifact.tmpFile,
+        sourceResourceUri: sourceArtifact.resourceUri,
         sourcePreview: sourceArtifact.preview,
         sourceLength: sourceCode.length,
         sourceSha256: sha256(sourceCode),
@@ -121,6 +141,7 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
         id,
         scriptLanguage: language,
         scriptValidation: prepared.scriptValidation,
+        savedSource: await verifySavedScriptSource(tableName, id, patched),
       }, null, 2) }] };
     },
   );
@@ -129,8 +150,9 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
     'update_script_source',
     [
       'Update sourceCode on a script-backed record without forcing the caller to JSON-escape long code.',
+      'Pass sourceFile or sourceResourceUri from a prior inspect when the reviewed artifact is the intended full replacement; the MCP process reads it without echoing the source through the model call.',
       'Use this for enfyra_flow_step, enfyra_route_handler, enfyra_pre_hook, enfyra_post_hook, enfyra_websocket_event, enfyra_websocket, enfyra_oauth_config, and enfyra_bootstrap_script.',
-      'The tool validates sourceCode through /admin/script/validate before saving and never accepts compiledCode.',
+      'The tool validates sourceCode through /admin/script/validate before saving, re-reads the saved source, returns a fresh artifact/hash verification, and never accepts compiledCode.',
     ].join(' '),
     {
       tableName: z.enum([
@@ -144,18 +166,34 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
         'enfyra_bootstrap_script',
       ]).describe('Script-backed table to update'),
       id: z.string().describe('Record ID to update'),
-      sourceCode: z.string().describe('Editable script sourceCode. Pass the raw code string; do not JSON-escape it yourself.'),
+      sourceCode: z.string().optional().describe('Editable script sourceCode. Pass the raw code string; do not JSON-escape it yourself. Use sourceFile or sourceResourceUri instead for a previously inspected artifact.'),
+      sourceFile: z.string().optional().describe('Previously returned source artifact tmpFile. The MCP server reads only artifacts created in this process; it rejects arbitrary paths.'),
+      sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI. The MCP server reads only artifacts created in this process.'),
+      expectedSourceSha256: z.string().optional().describe('Optional SHA-256 of the current saved source from inspect/get_script_source. Rejects a stale full replacement.'),
       scriptLanguage: z.string().optional().default('javascript').describe('Script language, usually javascript or typescript'),
       globalRulesAckKey: globalRulesAckParam(z),
       knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
     },
-    async ({ tableName, id, sourceCode, scriptLanguage, globalRulesAckKey, knowledgeAckKey }) => {
+    async ({ tableName, id, sourceCode, sourceFile, sourceResourceUri, expectedSourceSha256, scriptLanguage, globalRulesAckKey, knowledgeAckKey }) => {
       assertGlobalRulesAck(globalRulesAckKey);
       assertDynamicCodeKnowledgeAck(knowledgeAckKey);
       validateTableName(tableName);
+      const resolvedSourceCode = resolveSourceInput({
+        source: sourceCode,
+        sourceFile,
+        sourceResourceUri,
+        fieldName: 'sourceCode',
+      });
+      if (expectedSourceSha256) {
+        const current = await fetchScriptRecord(tableName, id);
+        const currentSha256 = sha256(current.sourceCode);
+        if (expectedSourceSha256 !== currentSha256) {
+          throw new Error(`Source hash mismatch. Current sha256 is ${currentSha256}; re-read the script artifact before replacing it.`);
+        }
+      }
       const prepared = await prepareGenericMutation(
         tableName,
-        JSON.stringify({ sourceCode, scriptLanguage }),
+        JSON.stringify({ sourceCode: resolvedSourceCode, scriptLanguage }),
       );
       const result = await fetchAPI(
         ENFYRA_API_URL,
@@ -165,9 +203,11 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       return { content: [{ type: 'text', text: JSON.stringify({
         ...summarizeMutationResult(result, 'updated_script_source', tableName),
         id,
-        sourceLength: sourceCode.length,
+        sourceLength: resolvedSourceCode.length,
+        sourceSha256: sha256(resolvedSourceCode),
         scriptLanguage,
         scriptValidation: prepared.scriptValidation,
+        savedSource: await verifySavedScriptSource(tableName, id, resolvedSourceCode),
       }, null, 2) }] };
     },
   );

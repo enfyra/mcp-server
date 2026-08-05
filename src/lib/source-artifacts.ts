@@ -97,6 +97,29 @@ export function readSourceArtifactResource(resourceUri: string) {
   };
 }
 
+export function readSourceArtifactFile(tmpFile: string) {
+  const artifact = [...SOURCE_ARTIFACTS.values()].find((item) => item.path === tmpFile);
+  if (!artifact) {
+    throw new Error('Source artifact file is unavailable in this MCP process. Inspect the live artifact again to create a fresh file.');
+  }
+  return readFileSync(artifact.path, 'utf8');
+}
+
+export function resolveSourceInput({ source, sourceFile, sourceResourceUri, fieldName }: {
+  source?: string;
+  sourceFile?: string;
+  sourceResourceUri?: string;
+  fieldName: string;
+}) {
+  const provided = [source !== undefined, sourceFile !== undefined, sourceResourceUri !== undefined].filter(Boolean).length;
+  if (provided !== 1) {
+    throw new Error(`Provide exactly one of ${fieldName}, sourceFile, or sourceResourceUri.`);
+  }
+  if (source !== undefined) return source;
+  if (sourceFile !== undefined) return readSourceArtifactFile(sourceFile);
+  return readSourceArtifactResource(sourceResourceUri!).text;
+}
+
 export function compactSourceField({ tableName, id, fieldName, source, alwaysWrite = false }: SourceArtifactInput & { alwaysWrite?: boolean }) {
   if (typeof source !== 'string') return source;
   if (!alwaysWrite && source.length <= DEFAULT_INLINE_LIMIT) return source;

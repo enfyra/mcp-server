@@ -59,7 +59,7 @@ ensure_page_extension({
           'Use enfyra_menu.label, not title.',
           'Sensitive admin menus should include a permission condition at creation time.',
           'For page extensions, create the menu first with ensure_menu and pass its id to ensure_page_extension.',
-          'When editing an existing extension by id or name, use update_extension_code so local guards plus /enfyra_extension/preview and the save happen in one atomic call. Do not spend a second LLM step on validate_extension_code followed by update_records unless the user requested validation-only output.',
+          'When editing an existing extension by id or name, use update_extension_code so local guards plus /enfyra_extension/preview and the save happen in one atomic call. If inspect returned sourceFile/sourceResourceUri and that reviewed artifact is the intended full replacement, pass it instead of echoing the full SFC. Do not spend a second LLM step on validate_extension_code followed by update_records unless the user requested validation-only output.',
           'Call get_extension_theme_contract before writing or reviewing page/widget/global extension UI; that tool is the authority for theme, color, layout, modal, drawer, and shell registry details.',
           'Call get_enfyra_required_knowledge before saving extension code, pass globalRulesAckKey as globalRulesAckKey, and pass extensionAckKey as extensionKnowledgeAckKey.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',

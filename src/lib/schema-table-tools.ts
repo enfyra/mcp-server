@@ -136,6 +136,12 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
               ? 'create_tables auto-includes _id/ObjectId; do not include your own primary key.'
               : 'create_tables auto-includes id/int; do not include your own primary key.',
             reservedColumnRule: 'Do not declare id, _id, createdAt, or updatedAt in create_tables/create_columns. create_tables strips them before save and reports skippedAutoColumns; create_columns rejects them.',
+            timestampSemantics: {
+              createdAt: 'System-managed insert timestamp. It is assigned when the record is created and is not a domain-specific creation event.',
+              updatedAt: 'System-managed last persisted-write timestamp. Enfyra refreshes it on record updates; use it for generic last-mutation or changed-since logic.',
+              domainTimestampRule: 'Only add a separate timestamp when it represents a distinct business event, such as lastProcessedAt, lastSyncedAt, lastSuccessfulRunAt, publishedAt, or completedAt. Do not add lastUpdated/lastModified as aliases for updatedAt.',
+              scheduledFlowRule: 'A flow that runs every few minutes uses a schedule trigger config.cron. A timestamp column is not the scheduler.',
+            },
           },
           columnDefinitionInput: {
             allowedFields: ['name', 'type', 'isNullable', 'isUnique', 'isPublished', 'isUpdatable', 'isEncrypted', 'defaultValue', 'description', 'options', 'placeholder', 'metadata'],

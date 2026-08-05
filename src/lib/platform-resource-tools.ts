@@ -57,10 +57,12 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_page_extension',
-      'Business operation: create or update one page extension attached to an existing menu. Validates before save, then re-reads and verifies the exact saved source and menu wiring. Call get_extension_theme_contract first for UI work.',
+      'Business operation: create or update one page extension attached to an existing menu. Validates before save, then re-reads and verifies the exact saved source and menu wiring. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work.',
       {
         name: z.string().describe('Extension unique name.'),
-        code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
+        code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC extension code. Raw source is preferred; use sourceFile/sourceResourceUri for a previously inspected artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned extension source artifact tmpFile. Arbitrary paths are rejected.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the extension source.'),
         menuId: z.union([z.string(), z.number()]).describe('Existing menu id for this page extension.'),
         description: z.string().optional().describe('Extension description.'),
         isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
@@ -76,10 +78,12 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_global_extension',
-      'Business operation: create or update one global shell extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Call get_extension_theme_contract first for UI work.',
+      'Business operation: create or update one global shell extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work.',
       {
         name: z.string().describe('Extension unique name.'),
-        code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
+        code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC extension code. Raw source is preferred; use sourceFile/sourceResourceUri for a previously inspected artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned extension source artifact tmpFile. Arbitrary paths are rejected.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the extension source.'),
         description: z.string().optional().describe('Extension description.'),
         isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
         version: z.string().optional().default('1.0.0').describe('Extension version.'),
@@ -94,10 +98,12 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_widget_extension',
-      'Business operation: create or update one widget extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Call get_extension_theme_contract first for UI work.',
+      'Business operation: create or update one widget extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work.',
       {
         name: z.string().describe('Extension unique name.'),
-        code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
+        code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC extension code. Raw source is preferred; use sourceFile/sourceResourceUri for a previously inspected artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned extension source artifact tmpFile. Arbitrary paths are rejected.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the extension source.'),
         description: z.string().optional().describe('Extension description.'),
         isEnabled: z.boolean().optional().default(true).describe('Enable extension.'),
         version: z.string().optional().default('1.0.0').describe('Extension version.'),

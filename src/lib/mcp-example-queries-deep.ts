@@ -144,6 +144,29 @@ query_table({
         ],
       },
       {
+        name: 'Aggregate metrics over a filtered set',
+        code: `query_table({
+  tableName: "order",
+  fields: ["id"],
+  filter: { createdAt: { _gte: "<isoStart>" } },
+  limit: 1,
+  aggregate: {
+    id: { count: true },
+    amount: { sum: true, avg: true },
+    status: { count: { _eq: "failed" } },
+    customer: { countRecords: { isActive: { _eq: true } } }
+  }
+})`,
+        notes: [
+          'Call discover_query_capabilities first and replace order, id, amount, status, customer, and isActive with live fields/relations from metadata; use the live primary key when it is not id.',
+          'Scalar fields support count, sum, avg, min, and max; sum/avg require numeric fields. Relations support countRecords only.',
+          'An operation value is true or a filter object. The operation condition is combined with the root filter for that metric.',
+          'Read values from response.meta.aggregate. This is aggregate-over-filtered-set, not a grouped rows/GROUP BY result.',
+          'For simple row counts, prefer count_records or meta=filterCount/totalCount instead of an aggregate object.',
+          'Do not aggregate unpublished fields or private relations in user-facing APIs.',
+        ],
+      },
+      {
         name: 'Inspect authenticated and anonymous field projection',
         code: `inspect_rest_projection({
   tableName: "account",

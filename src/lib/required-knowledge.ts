@@ -2,7 +2,7 @@ export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-08-05.gateway-stream-observer-abort-timeout-contract';
+const REQUIRED_KNOWLEDGE_VERSION = '2026-08-05.gateway-stream-observer-abort-timeout-timestamp-aggregate-contract';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -175,7 +175,9 @@ const GLOBAL_RULES_SECTIONS = [
       'Use plural mutation tools for writes: create_tables/update_tables/delete_tables, create_columns/update_columns/delete_columns, create_relations/delete_relations, and create_records/update_records/delete_records. Pass native JSON arrays; use one item in the array for a single mutation.',
       'Create entity tables with scalar columns first, then add relations once target tables exist. create_tables defers relation creation until all tables in the same batch exist.',
       'Enfyra table names are lowercase. create_tables lowercases names and matching same-batch relation targets before writing and reports the normalization; use aliases for human-facing labels.',
-      'Do not declare id, _id, createdAt, or updatedAt columns; Enfyra manages them automatically.',
+      'Do not declare id, _id, createdAt, or updatedAt columns; Enfyra manages them automatically. createdAt is assigned at insert and is not a replacement for a domain creation timestamp.',
+      'updatedAt is assigned at insert and refreshed by Enfyra on every persisted record update; use it for generic last-mutation or changed-since logic instead of creating lastUpdated/lastModified with the same meaning.',
+      'Create a separate domain timestamp only when its event differs from a record write, such as lastProcessedAt, lastSyncedAt, lastSuccessfulRunAt, publishedAt, or completedAt. For a flow that runs every few minutes, configure a schedule trigger with config.cron; do not add a timestamp column to represent the cadence.',
       'For one-pass relation-based unique/index constraints, declare the owning relations in the same create_tables item as the constraints. If relations already exist or will be created separately, add those constraints afterward with update_tables.',
       'Use live Enfyra column types, not SQL dialect names. Common safe choices: varchar for short text, text/richtext for long prose, float for price/amount/rating/decimal-like values, int/bigint for counts, boolean, date/datetime/timestamp, enum, simple-json for structured objects/arrays when listed by live metadata, and code for source fields.',
       'For a richtext column, store the eApp editor configuration under column.metadata.richText. The JSON-safe contract includes toolbar, customButtons, and formats with static CSS/classes/attributes; function callbacks and function-valued theme resolvers belong in the eApp source config and cannot be serialized through MCP.',
@@ -195,6 +197,8 @@ const GLOBAL_RULES_SECTIONS = [
       'create_tables preflights all items before posting tables and rejects unique/index overlap for the whole batch; update_tables applies the same guard before patching constraints.',
       'Before update_tables with indexes/uniques, inspect the current table and remove indexes that reference unique fields.',
       'query_table always requires limit or all=true. Use meta=filterCount/totalCount or count_records for counts. Do not guess aggregate operators such as _sum/_count; call discover_query_capabilities first when an aggregate object is needed.',
+      'Aggregate objects use real scalar column or relation propertyName keys. Scalar fields support count, sum, avg, min, and max; sum/avg require a numeric live column. Relations support countRecords only. Each operation value is true or a filter object; its condition is combined with the root filter and the result is returned under response.meta.aggregate. This is aggregation over the filtered set, not a grouped rows/GROUP BY response.',
+      'For flow polling, filter existing updatedAt when the intent is “records changed since time T”. If the intent is “records successfully handled by this flow”, use a distinct checkpoint such as lastProcessedAt or durable flow state; updatedAt also changes for unrelated writes and is not a flow-run marker.',
       'When a field is missing, permission-dependent, or unexpectedly public, use inspect_rest_projection with explicit fields. It validates the recursive metadata contract first and can compare authenticated and anonymous response shape without returning record values.',
       'Run schema mutation calls through the plural tools; they serialize work internally. Do not parallelize schema mutation tool calls.',
     ],
@@ -289,7 +293,7 @@ const DYNAMIC_CODE_SECTIONS = [
     id: 'dynamic-script-shape',
     rules: [
       'Use sourceCode and scriptLanguage; never send compiledCode.',
-      'Locate script-backed records with search_runtime_zone and inspect the returned nextInspect.input before source reads. Inspection already returns exact source artifacts with process-scoped enfyra-source resource URIs; never guess or probe ids with get_script_source.',
+      'Locate script-backed records with search_runtime_zone and inspect the returned nextInspect.input before source reads. Inspection already returns exact source artifacts with process-scoped enfyra-source resource URIs and tmpFile paths; pass sourceFile or sourceResourceUri to update_script_source when the reviewed file is the intended full replacement, and pass expectedSourceSha256 to reject stale replacements. Arbitrary local paths are rejected; never guess or probe ids with get_script_source.',
       'Prefer macros such as @BODY, @QUERY, @PARAMS, @USER, @REQ, @RES, @REPOS, @HELPERS, @STORAGE, @SOCKET, and @THROW* when available.',
       'Call discover_script_contexts and treat its runtimeTypes section as the authoritative script-visible ESV contract. Do not add typeof, Array.isArray, existence, or callable guards around documented containers, services, methods, or repository result envelopes; validate user-controlled business fields and documented nullable values instead.',
       'Call build_dynamic_repository_usage for list, find-one, create, update, or delete code instead of composing secure/trusted repository syntax and result shapes from memory.',
@@ -372,7 +376,7 @@ const EXTENSION_SECTIONS = [
       'Dynamic extension templates expose the app empty-state component as <EmptyState>, not <CommonEmptyState>. Prefer the empty_state, resource_list, or resource_grid builder instead of writing either tag from memory.',
       'For theme choices, call build_extension_ui kind=theme_classes with an intent such as neutral_surface, primary_identity, primary_soft_icon_tile, status_success, primary_action, secondary_action, divider, or text instead of inventing classes from memory.',
       'Use build_extension_ui kind=runtime_review, theme_review, or review before saving generated snippets that include useApi, useNotify, theme classes, drawers, modals, fields, lists, tabs, upload modals, shell registry code, or native buttons.',
-      'For same-version edits to an existing extension, inspect the extension first and read its process-scoped enfyra-source resource URI when snippets are not enough. Local clients also receive a permission-restricted tmpFile fallback. Apply the edited source with update_extension_code, or use patch_extension_code for a focused exact patch. Do not regenerate the full Vue SFC for a small bug fix, styling adjustment, or contract correction unless the user explicitly asks for a rewrite or version-changing redesign.',
+      'For same-version edits to an existing extension, inspect the extension first and read its process-scoped enfyra-source resource URI when snippets are not enough. Local clients also receive a permission-restricted tmpFile fallback. Pass sourceFile or sourceResourceUri to update_extension_code when the reviewed file is the intended full replacement; use patch_extension_code for a focused exact patch. Do not regenerate the full Vue SFC for a small bug fix, styling adjustment, or contract correction unless the user explicitly asks for a rewrite or version-changing redesign.',
       'patch_extension_code apply=true requires expectedSha256 and writes a bounded .diff artifact. update_extension_code accepts expectedSha256 for stale full-replacement protection.',
       'ensure_*_extension, update_extension_code, and patch_extension_code apply=true automatically re-read and verify the exact saved source, expected hash, server compilation, static UI/theme/runtime contracts, and page menu wiring. Use verify_extension_runtime for an additional independent recheck. browserRender=not_run means signed-in browser QA is still required for component execution, live data shape, console errors, and responsive layout.',
       'Extension validation rejects UInput/UTextarea/USelect/USelectMenu/UInputMenu/UInputNumber/UInputTags/UInputTime/UInputDate without class="w-full" unless the field is explicitly marked data-compact or data-inline.',

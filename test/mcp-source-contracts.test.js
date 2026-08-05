@@ -52,8 +52,12 @@ import {
 test('mcp server exposes update_script_source for raw source updates', () => {
   const entry = readEntrySource();
   assert.match(entry, /server\.tool\(\s*['"]update_script_source['"]/);
-  assert.match(entry, /JSON\.stringify\(\{ sourceCode, scriptLanguage \}\)/);
+  assert.match(entry, /JSON\.stringify\(\{ sourceCode: resolvedSourceCode, scriptLanguage \}\)/);
   assert.match(entry, /updated_script_source/);
+  assert.match(entry, /sourceFile/);
+  assert.match(entry, /sourceResourceUri/);
+  assert.match(entry, /expectedSourceSha256/);
+  assert.match(entry, /savedSource/);
 });
 
 test('mcp server exposes script source inspection and patch tools', () => {
@@ -450,10 +454,13 @@ test('discovery tools report target instance and avoid unbounded broad searches'
 test('query_table supports deep meta and aggregate query options', () => {
   const entry = readEntrySource();
   const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
+  const discovery = readSourceFiles('lib/discovery-tools.ts');
+  const examples = readExamplesSource();
   assert.match(entry, /meta: z\.string\(\)\.optional\(\)/);
   assert.match(entry, /deep: jsonObjectParam\(z, 'Deep relation fetch object'\)\.optional\(\)/);
   assert.match(entry, /aggregate: jsonObjectParam\(z, 'Aggregate object'\)\.optional\(\)/);
-  assert.match(entry, /call discover_query_capabilities before using aggregate objects instead of guessing _sum\/_count operators/);
+  assert.match(entry, /call discover_query_capabilities before using aggregate objects/);
+  assert.match(entry, /Aggregate operations use field configs such as \{ amount: \{ sum: true \} \}, not _sum\/_count operators/);
   assert.match(entry, /queryParams\.set\('deep', deepParam\)/);
   assert.match(entry, /queryParams\.set\('aggregate', aggregateParam\)/);
   assert.match(entry, /function applyDeepFieldSelections/);
@@ -463,6 +470,13 @@ test('query_table supports deep meta and aggregate query options', () => {
   assert.match(entry, /server\.tool\(\s*['"]inspect_rest_projection['"]/);
   assert.match(requiredKnowledge, /Explicit dotted fields and fields inside deep are recursively checked/);
   assert.match(requiredKnowledge, /compare authenticated and anonymous response shape without returning record values/);
+  assert.match(discovery, /Scalar fields use count\/sum\/avg\/min\/max/);
+  assert.match(discovery, /relations use countRecords/);
+  assert.match(discovery, /sum and avg.*numeric live column/);
+  assert.match(discovery, /response\.meta\.aggregate/);
+  assert.match(discovery, /not a grouped rows\/GROUP BY response/);
+  assert.match(examples, /Aggregate metrics over a filtered set/);
+  assert.match(examples, /The operation condition is combined with the root filter/);
 });
 
 test('generic read tools reject enfyra_extension sourceCode confusion', () => {
@@ -593,6 +607,21 @@ test('schema design context warns about column relation namespace clashes', () =
   assert.match(requiredKnowledge, /deep-read a parent with child collections/);
 });
 
+test('timestamp guidance reuses updatedAt and distinguishes flow checkpoints', () => {
+  const tableTools = readSchemaSource();
+  const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
+  const examples = readExamplesSource();
+
+  assert.match(tableTools, /updatedAt.*last persisted-write timestamp/);
+  assert.match(tableTools, /Do not add lastUpdated\/lastModified as aliases for updatedAt/);
+  assert.match(tableTools, /schedule trigger config\.cron/);
+  assert.match(requiredKnowledge, /updatedAt is assigned at insert and refreshed by Enfyra/);
+  assert.match(requiredKnowledge, /For flow polling, filter existing updatedAt/);
+  assert.match(requiredKnowledge, /lastProcessedAt or durable flow state/);
+  assert.match(examples, /Scheduled flow polls records without inventing a timestamp alias/);
+  assert.match(examples, /updatedAt is the existing system-managed last persisted-write timestamp/);
+});
+
 test('dynamic script guidance rejects physical relation filter names', () => {
   const entry = readEntrySource();
   const instructions = readSourceFiles('lib/mcp-instructions.ts');
@@ -684,7 +713,7 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260717M$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-08-05.gateway-stream-observer-abort-timeout-contract');
+  assert.equal(payload.version, '2026-08-05.gateway-stream-observer-abort-timeout-timestamp-aggregate-contract');
   assert.match(payloadText, /internal navigation triggered by an extension action.*navigateTo/);
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {

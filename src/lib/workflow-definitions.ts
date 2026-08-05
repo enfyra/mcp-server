@@ -268,7 +268,7 @@ export const TOOL_WORKFLOWS = [
       'Discover script context macros for the surface.',
       'Inspect the route and linked pre-hooks, handlers, and post-hooks. Assign each invariant to the smallest layer: Guard Engine for request gating, pre-hook for canonical shared policy, handler for endpoint business logic, post-hook for response/best-effort work, column rule for deterministic validation, field permission for visibility, and flow for durable async work.',
       'Generate repository access with build_dynamic_repository_usage instead of composing secure/trusted syntax from memory.',
-      'Use the source artifact returned by search_runtime_zone(mode=inspect) or trace_metadata_usage when patching.',
+      'Use the source artifact returned by search_runtime_zone(mode=inspect) or trace_metadata_usage when patching. For a full replacement, pass its sourceFile/sourceResourceUri to update_script_source so the MCP process reads the reviewed file without echoing the source through the model call.',
       'Validate source before save unless the chosen write tool already validates.',
       'Verify each layer with the route/test runner that matches the script surface, including a short-circuit/error-path case when pre-hooks, post-hooks, or guards are involved.',
     ],

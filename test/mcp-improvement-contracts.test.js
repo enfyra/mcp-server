@@ -22,6 +22,8 @@ import {
   validateExtensionCodeLocally,
   verifyExtensionRuntime,
 } from '../dist/lib/platform-operation-tools.js';
+import { updateExtensionCode } from '../dist/lib/platform-operation-logic.js';
+import { writeSourceArtifact } from '../dist/lib/source-artifacts.js';
 import { normalizeCreateTableDefinitions } from '../dist/lib/table-tools.js';
 import { assertGenericRecordMutationAllowed } from '../dist/lib/mutation-guards.js';
 import {
@@ -223,6 +225,8 @@ test('successful extension writes verify the exact saved source without relying 
   const source = readSourceTree();
   assert.match(source, /async function updateExtensionCode[\s\S]*?const verification = await verifyExtensionRuntime[\s\S]*?verification,/);
   assert.match(source, /async function ensureExtension[\s\S]*?const verification = await verifyExtensionRuntime[\s\S]*?verification,/);
+  assert.match(source, /resolveExtensionSource[\s\S]*?sourceFile[\s\S]*?sourceResourceUri/);
+  assert.match(source, /sourceArtifact:[\s\S]*?tmpFile/);
 });
 
 test('guided workflow operation summaries exclude raw dynamic source and compiled output', () => {
@@ -351,6 +355,47 @@ test('verifyExtensionRuntime reads the saved extension and compiles that exact s
     assert.equal(verification.valid, true);
     assert.equal(verification.checks.serverCompile.compiledLength, 900);
     assert.equal(calls.filter((call) => call.url.endsWith('/enfyra_extension/preview')).length, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    resetTokens();
+  }
+});
+
+test('extension full saves can read a reviewed source artifact without echoing the SFC', async () => {
+  const originalFetch = globalThis.fetch;
+  const apiUrl = 'http://mcp-extension-source-file.test/api';
+  const calls = [];
+  const oldCode = '<template><section>Old</section></template>';
+  const newCode = '<template><section>Reviewed artifact</section></template>';
+  let savedCode = oldCode;
+  const artifact = writeSourceArtifact({ tableName: 'enfyra_extension', id: 7, fieldName: 'code', source: newCode });
+  initAuth(apiUrl, 'pat_test');
+  resetTokens();
+  acknowledgeRequiredKnowledge('extension');
+  globalThis.fetch = async (url, options = {}) => {
+    const textUrl = String(url);
+    calls.push({ url: textUrl, method: options.method || 'GET', body: options.body });
+    if (textUrl.endsWith('/auth/token/exchange')) return jsonResponse({ accessToken: 'jwt_test', expiresIn: 3600 });
+    if (textUrl.includes('/enfyra_extension?')) {
+      return jsonResponse({ data: [{ id: 7, name: 'ArtifactExtension', type: 'widget', isEnabled: true, version: '1.0.0', code: savedCode }] });
+    }
+    if (textUrl.endsWith('/enfyra_extension/preview')) return jsonResponse({ success: true, extensionId: 'ArtifactExtension', compiledCode: 'compiled' });
+    if (textUrl.endsWith('/enfyra_extension/7')) {
+      savedCode = JSON.parse(String(options.body)).code;
+      return jsonResponse({ data: [{ id: 7, name: 'ArtifactExtension', type: 'widget', isEnabled: true, version: '1.0.0' }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    const result = await updateExtensionCode(apiUrl, {
+      id: 7,
+      sourceFile: artifact.tmpFile,
+    });
+    assert.equal(savedCode, newCode);
+    assert.equal(result.verification.sourceArtifact.sha256, artifact.sha256);
+    assert.equal(readFileSync(result.verification.sourceArtifact.tmpFile, 'utf8'), newCode);
+    assert.equal(calls.some((call) => String(call.body || '').includes(newCode)), true);
   } finally {
     globalThis.fetch = originalFetch;
     resetTokens();

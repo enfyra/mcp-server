@@ -6,6 +6,7 @@ import {
   step,
 } from './platform-endpoint-workflow.js';
 import {
+  resolveExtensionSource,
   validateExtensionCode,
 } from './platform-extension-source.js';
 import {
@@ -24,13 +25,14 @@ import {
 
 async function resolveExtensionWorkflowState(apiUrl, opts) {
   const type = opts.type || 'page';
+  const code = resolveExtensionSource(opts);
   if (type === 'page' && opts.menuId && (opts.menuLabel || opts.menuPath)) {
     throw new Error('Provide menuId or menuLabel/menuPath for page extension workflow, not both.');
   }
   if (type !== 'page' && (opts.menuId || opts.menuLabel || opts.menuPath)) {
     throw new Error('Menu fields are only valid for page extensions.');
   }
-  const validation = await validateExtensionCode(apiUrl, opts.code, opts.name);
+  const validation = await validateExtensionCode(apiUrl, code, opts.name);
   const existingExtension = await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: opts.name } }, 'id,_id,name,type,menu.id,description,isEnabled,version,code');
   let menu = null;
   if (type === 'page' && opts.menuId) {
@@ -73,7 +75,7 @@ async function resolveExtensionWorkflowState(apiUrl, opts) {
   const effectiveMenuId = type === 'page' ? menuId : undefined;
   const saveStatus = steps.some((item) => ['blocked', 'waiting'].includes(item.status))
     ? 'waiting'
-    : extensionMatches(existingExtension, { ...opts, type }, effectiveMenuId)
+      : extensionMatches(existingExtension, { ...opts, type, code }, effectiveMenuId)
       ? 'completed'
       : 'pending';
   steps.push(step(saveStatus, 'save_extension', `Ensure ${type} extension`, {
@@ -159,6 +161,8 @@ async function applyExtensionWorkflowStep(apiUrl, state, opts, stepId) {
         name: opts.name,
         type,
         code: opts.code,
+        sourceFile: opts.sourceFile,
+        sourceResourceUri: opts.sourceResourceUri,
         menuId,
         description: opts.description,
         isEnabled: opts.isEnabled,

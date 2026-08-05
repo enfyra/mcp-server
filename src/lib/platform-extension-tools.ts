@@ -116,6 +116,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
       'update_extension_code',
       [
         'Business operation: update an existing Enfyra admin extension code by id or name.',
+        'Pass sourceFile or sourceResourceUri from a prior extension inspect when the full source already exists as an MCP artifact; the server reads that file and avoids sending the whole SFC through the model call.',
         'It runs local extension guards and /enfyra_extension/preview first, saves only when validation succeeds, then re-reads and verifies the exact saved source in the same call.',
         'Use this instead of validate_extension_code followed by update_record when editing an existing page/widget/global extension.',
         'Call get_extension_theme_contract first when generating or reviewing UI.',
@@ -123,7 +124,9 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
       {
         id: z.union([z.string(), z.number()]).optional().describe('Existing extension id. Provide id or name.'),
         name: z.string().optional().describe('Existing extension unique name. Provide id or name.'),
-        code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
+        code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC extension code. Raw source is preferred; use sourceFile/sourceResourceUri for a previously inspected artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned extension source artifact tmpFile. Arbitrary paths are rejected.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the extension source.'),
         description: z.string().optional().describe('Optional replacement extension description. Omit to preserve.'),
         isEnabled: z.boolean().optional().describe('Optional enabled state. Omit to preserve.'),
         version: z.string().optional().describe('Optional extension version. Omit to preserve.'),
@@ -559,6 +562,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
       'extension_workflow',
       [
         'Step-by-step workflow for creating or updating Enfyra admin page, global, or widget extensions.',
+        'Pass sourceFile or sourceResourceUri from a prior extension inspect when the full SFC already exists as an MCP artifact.',
         'Use this when an LLM is building extension UI, menu shell notifications, account panel entries, or page/menu wiring and should follow live nextSteps instead of guessing raw enfyra_extension mutations.',
         'With apply=false it validates code, reads live menu/extension state, and returns pending steps.',
         'With apply=true it applies exactly the next pending step. With applyAll=true it advances all currently safe pending steps.',
@@ -567,7 +571,9 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
       {
         name: z.string().describe('Extension unique name.'),
         type: z.enum(['page', 'global', 'widget']).optional().default('page').describe('Extension type. Page extensions need a menu. Global extensions are for shell-wide registration.'),
-        code: z.preprocess(normalizeEscapedVueSource, z.string()).describe('Vue SFC extension code. Raw source is preferred; a fully JSON-escaped one-line SFC is normalized for weak clients.'),
+        code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC extension code. Raw source is preferred; use sourceFile/sourceResourceUri for a previously inspected artifact.'),
+        sourceFile: z.string().optional().describe('Previously returned extension source artifact tmpFile. Arbitrary paths are rejected.'),
+        sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the extension source.'),
         menuId: z.union([z.string(), z.number()]).optional().describe('Existing menu id for a page extension. Provide this or menuLabel/menuPath.'),
         menuLabel: z.string().optional().describe('Menu label to create or update for a page extension when menuId is not provided.'),
         menuPath: z.string().optional().describe('Admin app route path for the page menu, e.g. /cloud/support.'),

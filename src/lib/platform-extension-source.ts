@@ -27,7 +27,7 @@ import {
   assertExtensionKnowledgeAck,
   assertGlobalRulesAck
 } from './required-knowledge.js';
-import { writeSourceArtifact } from './source-artifacts.js';
+import { resolveSourceInput, writeSourceArtifact } from './source-artifacts.js';
 
 export function parseJsonObjectArg(name, value, fallback = {}) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -85,6 +85,15 @@ export async function validateDynamicScript(apiUrl, sourceCode, scriptLanguage =
     scriptLanguage,
     compiledLength: typeof result?.data?.compiledCode === 'string' ? result.data.compiledCode.length : undefined,
   };
+}
+
+export function resolveExtensionSource({ code, sourceFile, sourceResourceUri }) {
+  return resolveSourceInput({
+    source: code,
+    sourceFile,
+    sourceResourceUri,
+    fieldName: 'code',
+  });
 }
 
 function findInvalidExtensionSortSyntax(code) {
@@ -187,6 +196,12 @@ function summarizeExtensionSaveResult(result, fallback: AnyRecord = {}) {
 export function buildExtensionRuntimeVerification({ extension, code, validation, uiPattern, expectedSha256 }) {
   const source = String(code || '');
   const currentSha256 = sha256Text(source);
+  const sourceArtifact = writeSourceArtifact({
+    tableName: 'enfyra_extension',
+    id: getId(extension) ?? extension?.name ?? 'extension',
+    fieldName: 'code',
+    source,
+  });
   const review = buildExtensionUiSnippet('review', { code: source, pattern: uiPattern });
   const rawMenu = Array.isArray(extension?.menu) ? extension.menu[0] : extension?.menu;
   const isPage = String(extension?.type || '').toLowerCase() === 'page';
@@ -207,6 +222,12 @@ export function buildExtensionRuntimeVerification({ extension, code, validation,
       version: extension?.version ?? null,
       sha256: currentSha256,
       length: source.length,
+    },
+    sourceArtifact: {
+      resourceUri: sourceArtifact.resourceUri,
+      tmpFile: sourceArtifact.tmpFile,
+      length: sourceArtifact.length,
+      sha256: sourceArtifact.sha256,
     },
     checks: {
       savedRecord: { status: savedRecordPassed ? 'passed' : 'failed' },
@@ -250,6 +271,8 @@ export async function updateExtensionCode(apiUrl, {
   id,
   name,
   code,
+  sourceFile = undefined,
+  sourceResourceUri = undefined,
   description,
   isEnabled,
   version,
@@ -260,6 +283,7 @@ export async function updateExtensionCode(apiUrl, {
 }) {
   assertGlobalRulesAck(globalRulesAckKey);
   assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
+  const resolvedCode = resolveExtensionSource({ code, sourceFile, sourceResourceUri });
   if (!id && !name) throw new Error('Provide id or name to update an existing extension.');
   const existing = id
     ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,isEnabled,version,menu.id,code')
@@ -270,10 +294,10 @@ export async function updateExtensionCode(apiUrl, {
   if (expectedSha256 && expectedSha256 !== currentSha256) {
     throw new Error(`Extension code hash mismatch. Expected ${expectedSha256}, got ${currentSha256}. Re-read the extension before replacing it.`);
   }
-  const validation = await validateExtensionCode(apiUrl, code, name || existing.name || extensionId, { uiPattern });
-  const contractReview = buildExtensionUiSnippet('review', { code, pattern: uiPattern });
+  const validation = await validateExtensionCode(apiUrl, resolvedCode, name || existing.name || extensionId, { uiPattern });
+  const contractReview = buildExtensionUiSnippet('review', { code: resolvedCode, pattern: uiPattern });
   const body: AnyRecord = {
-    code,
+    code: resolvedCode,
     ...(description !== undefined ? { description } : {}),
     ...(isEnabled !== undefined ? { isEnabled } : {}),
     ...(version !== undefined ? { version } : {}),
@@ -282,7 +306,7 @@ export async function updateExtensionCode(apiUrl, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
-  const nextSha256 = sha256Text(code);
+  const nextSha256 = sha256Text(resolvedCode);
   const verification = await verifyExtensionRuntime(apiUrl, {
     id: extensionId,
     name: undefined,

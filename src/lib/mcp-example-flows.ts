@@ -16,6 +16,31 @@ export const flowsExamples = {
         ],
       },
       {
+        name: 'Scheduled flow polls records without inventing a timestamp alias',
+        code: `{
+  "type": "schedule",
+  "config": {
+    "cron": "*/5 * * * *",
+    "timezone": "Asia/Ho_Chi_Minh"
+  },
+  "isEnabled": true
+}
+
+// In a script step, select records changed since the checkpoint:
+const changed = await #orders.find({
+  fields: ["id", "updatedAt", "status"],
+  filter: { updatedAt: { _gte: @FLOW_PAYLOAD.since } },
+  limit: 100
+})`,
+        notes: [
+          'Schedule triggers use config.cron; the cron cadence is not represented by a table column.',
+          'updatedAt is the existing system-managed last persisted-write timestamp. Use it when the requirement is “changed since T”.',
+          'Do not create lastUpdated or lastModified as aliases for updatedAt.',
+          'If the requirement is “successfully processed by this flow”, use a distinct lastProcessedAt/lastSuccessfulRunAt field or durable flow checkpoint because unrelated writes also advance updatedAt.',
+          'This example uses placeholders; inspect the live table and use a real checkpoint source before writing the flow.',
+        ],
+      },
+      {
         name: 'Flow condition step',
         code: `const order = @FLOW_PAYLOAD.order
 return order && order.total > 1000`,

@@ -380,8 +380,17 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
           limit: 'Page size.',
           meta: 'Request metadata/counts where supported.',
           deep: 'Nested relation fetch object keyed by relation propertyName.',
+          aggregate: 'JSON object keyed by real scalar fields or relation propertyName values. Scalar fields use count/sum/avg/min/max; relations use countRecords. Each operation is true or a filter object, and values are returned in response.meta.aggregate.',
         },
         countPattern: `For counts, query only fields=${primaryKey || '<primary-key>'} with limit=1 and request meta. Use meta=totalCount without a filter, or meta=filterCount when a filter is supplied. MCP count_records resolves the live table primary key and wraps this pattern.`,
+        aggregate: {
+          shape: '{ [scalarField]: { count?, sum?, avg?, min?, max? }, [relationPropertyName]: { countRecords? } }',
+          scalarOperations: 'count, min, and max accept true or a field-filter object. sum and avg also accept true or a field-filter object but require a numeric live column.',
+          relationOperation: 'countRecords is the only relation aggregate. Its condition can filter target-table fields and nested relation propertyName values recursively.',
+          condition: 'Each operation value must be true or an object. When an operation has a condition, Enfyra combines it with the root filter for that metric; scalar conditions use field operators, while relation countRecords conditions use target-table fields/relations.',
+          result: 'Aggregate values are returned under response.meta.aggregate. This computes metrics over the filtered set and is not a grouped rows/GROUP BY response. Keep fields and limit/all valid for the underlying query.',
+          example: 'aggregate: { amount: { sum: true, avg: true }, status: { count: { _eq: "failed" } }, customer: { countRecords: { isActive: { _eq: true } } } }',
+        },
         security: 'Filters, sorts, counts, and aggregate values can leak information even when a field is not selected. In generated public/user-facing APIs, do not filter, sort, count, or aggregate unpublished fields or private relations unless the endpoint intentionally exposes that fact.',
         deep: {
           shape: '{ [relationName]: { fields?, filter?, sort?, limit?, page?, deep? } }',

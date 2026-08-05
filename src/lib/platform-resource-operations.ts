@@ -5,6 +5,7 @@ import {
 } from './platform-data-operations.js';
 import {
   normalizeMenuPermissionArg,
+  resolveExtensionSource,
   sha256Text,
   validateExtensionCode,
   verifyExtensionRuntime,
@@ -98,6 +99,8 @@ export async function ensureExtension(apiUrl, {
   name,
   type,
   code,
+  sourceFile,
+  sourceResourceUri,
   menuId,
   description,
   isEnabled = true,
@@ -107,18 +110,19 @@ export async function ensureExtension(apiUrl, {
 }) {
   assertGlobalRulesAck(globalRulesAckKey);
   assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
+  const resolvedCode = resolveExtensionSource({ code, sourceFile, sourceResourceUri });
   if (type === 'page' && !menuId) {
     throw new Error('menuId is required for page extensions. Use ensure_menu first, then ensure_page_extension.');
   }
   if (type !== 'page' && menuId) {
     throw new Error('menuId is only valid for page extensions.');
   }
-  const validation = await validateExtensionCode(apiUrl, code, name);
+  const validation = await validateExtensionCode(apiUrl, resolvedCode, name);
   const existing = await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,menu.id,type');
   const operation = await createOrPatch(apiUrl, 'enfyra_extension', existing, {
     name,
     type,
-    code,
+    code: resolvedCode,
     ...(menuId ? { menu: { id: menuId } } : {}),
     description,
     isEnabled,
@@ -129,7 +133,7 @@ export async function ensureExtension(apiUrl, {
     id: extensionId,
     name: extensionId ? undefined : name,
     uiPattern: undefined,
-    expectedSha256: sha256Text(code),
+    expectedSha256: sha256Text(resolvedCode),
   });
   return {
     id: extensionId,
