@@ -638,7 +638,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         menuIcon: z.string().optional().describe('Optional menu icon name.'),
         menuType: z.enum(['Menu', 'Dropdown Menu']).optional().describe('Menu type. Omit to preserve an existing menu value or use the platform default for a new menu.'),
         menuOrder: z.number().optional().describe('Menu display order. Omit to preserve an existing menu value or use the platform default for a new menu.'),
-        menuPermission: z.string().optional().describe('Optional menu permission JSON object. Omit for unrestricted menus; empty objects are normalized to null.'),
+        menuIsPublic: z.boolean().optional().describe('Whether the page menu is visible to every role. Set false before adding role visibility with ensure_menu_access.'),
         menuDescription: z.string().optional().describe('Optional menu admin note.'),
         menuIsEnabled: z.boolean().optional().describe('Enable the menu. Omit to preserve an existing menu value or use the platform default for a new menu.'),
         description: z.string().optional().describe('Extension description.'),

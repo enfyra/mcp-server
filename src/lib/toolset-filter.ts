@@ -42,6 +42,7 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     'update_extension_code',
     'patch_extension_code',
     'ensure_menu',
+    'ensure_menu_access',
     'reorder_menus',
     'ensure_page_extension',
     'ensure_global_extension',

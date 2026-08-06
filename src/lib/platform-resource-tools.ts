@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   ensureExtension,
+  ensureMenuAccess,
   ensureMenu,
   jsonText,
   reorderMenus,
@@ -23,10 +24,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
         icon: z.string().optional().describe('Menu icon name.'),
         type: z.enum(['Menu', 'Dropdown Menu']).optional().default('Menu').describe('Menu type.'),
         order: z.number().optional().default(0).describe('Display order.'),
-        permission: z.string().optional().describe([
-          'Menu permission JSON controlling sidebar visibility (not API authority). Use { or: [{ route: "/<path>", methods: ["GET"] }] } to show the menu only to operators who can use the page; { allowAll: true } for globally visible; { rootAdmin: true } for root-only; null for unrestricted public menus. An empty object is normalized to null (unrestricted).',
-          'For a page extension, set this to the same route+method set the page calls so the menu is hidden from operators who would 403. Backend route permission is a separate layer: grant it via ensure_route_access for the target role, not here.',
-        ].join(' ')),
+        isPublic: z.boolean().optional().describe('Show this menu item to every role. Set false before assigning role-specific visibility with ensure_menu_access.'),
         description: z.string().optional().describe('Admin note.'),
         isEnabled: z.boolean().optional().default(true).describe('Enable menu.'),
         globalRulesAckKey: globalRulesAckParam(z),
@@ -34,6 +32,23 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
       async (input) => jsonText({
         action: 'menu_ensured',
         menu: await ensureMenu(ENFYRA_API_URL, input),
+      }),
+    );
+
+  server.tool(
+      'ensure_menu_access',
+      'Business operation: create or update one role visibility rule for an admin menu item. This controls menu visibility only; it never grants route/API access.',
+      {
+        menuId: z.union([z.string(), z.number()]).optional().describe('Existing menu id. Use either menuId or menuPath.'),
+        menuPath: z.string().optional().describe('Exact admin menu path, e.g. /reports. Use either menuPath or menuId.'),
+        roleId: z.union([z.string(), z.number()]).optional().describe('Role id to allow.'),
+        roleName: z.string().optional().describe('Role name to resolve, e.g. editor.'),
+        isEnabled: z.boolean().optional().default(true).describe('Enable or disable this role visibility rule.'),
+        globalRulesAckKey: globalRulesAckParam(z),
+      },
+      async (input) => jsonText({
+        action: 'menu_access_ensured',
+        permission: await ensureMenuAccess(ENFYRA_API_URL, input),
       }),
     );
 

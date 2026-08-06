@@ -682,7 +682,7 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
   assert.match(JSON.stringify(extension.avoidTools), /destination-page fetch on click/);
   assert.ok(extension.advancedTools.includes('ensure_route_access'));
   assert.ok(extension.verifyPath.some((step) => step.tool === 'audit_route_access'));
-  assert.match(JSON.stringify(extension.avoidTools), /menu permission as the only access control/);
+  assert.match(JSON.stringify(extension.avoidTools), /menu visibility as the only access control/);
   assert.match(JSON.stringify(extension.legacyToolSets.writeTools), /ensure_route_access/);
 
   const endpoint = discoverWorkflowRoutes({

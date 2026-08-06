@@ -143,6 +143,11 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
     update: 'ensure_menu or reorder_menus',
     delete: 'physical removal requires full toolset after verifying child/extension dependencies',
   },
+  enfyra_menu_permission: {
+    create: 'ensure_menu_access',
+    update: 'ensure_menu_access',
+    delete: 'remove the exact menu visibility row after inspecting menu wiring',
+  },
   enfyra_package: {
     create: 'install_package',
     update: 'install_package (re-install with new version) — upgrade requires full toolset',

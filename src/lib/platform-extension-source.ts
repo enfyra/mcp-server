@@ -38,13 +38,6 @@ export function parseJsonObjectArg(name, value, fallback = {}) {
   return parsed;
 }
 
-export function normalizeMenuPermissionArg(permission) {
-  const parsed = parseJsonObjectArg('permission', permission, null);
-  if (!parsed) return null;
-  if (Object.keys(parsed).length === 0) return null;
-  return parsed;
-}
-
 export function parseJsonArrayArg(name, value, fallback = []) {
   if (value === undefined || value === null || value === '') return fallback;
   const parsed = typeof value === 'string' ? JSON.parse(value) : value;

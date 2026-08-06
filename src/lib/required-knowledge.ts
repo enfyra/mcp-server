@@ -2,7 +2,7 @@ export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-const REQUIRED_KNOWLEDGE_VERSION = '2026-08-05.gateway-stream-observer-abort-timeout-timestamp-aggregate-contract';
+export const REQUIRED_KNOWLEDGE_VERSION = '2026-08-06.menu-role-visibility-contract';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -365,12 +365,13 @@ const EXTENSION_SECTIONS = [
   {
     id: 'extension-menu-permission-sync',
     rules: [
-      'Menu permission and backend route permission are two separate layers. Menu permission controls whether the menu item is visible in the sidebar (app checkPermissionCondition); backend route permission (RoleGuard) controls whether the API call actually returns 200 or 403. Setting a menu permission alone does not grant API access, and omitting it does not remove the 403 when the page calls a protected route.',
-      'Before saving a page extension, infer which API routes its useApi/composable calls hit. For every protected route it calls, ensure the target role has that route+method permission (ensure_route_access) so the page does not 403 when the operator opens it. Use public_route_methods only when the route is intentionally anonymous; otherwise grant authenticated route access.',
-      'Set the menu permission to the same route+method set the page needs (or narrower) so the menu item is hidden from operators who cannot use the page. Use { or: [{ route: "/<path>", methods: ["GET"] }] } style conditions; use { allowAll: true } only for globally visible menus, { rootAdmin: true } only for root-admin-only menus, and null for unrestricted public menus.',
-      'When the extension calls a non-table route (for example a custom endpoint or /admin surface), the menu permission must reference that exact route path and the needed methods, not a guessed table name.',
-      'Treat "{ }" as an unrestricted menu, not an empty permission: ensure_menu normalizes an empty permission object to null (unrestricted). Do not pass an empty object intending to restrict.',
-      'After wiring menu + extension, verify the authority boundary: check the role has the route permission the page needs (audit_route_access/ensure_route_access) and confirm the menu permission matches that route set. Menu visibility without route permission still yields a 403 on API call.',
+      'Menu visibility and backend route permission are separate layers. `enfyra_menu.isPublic` controls whether every role sees a menu; when it is false, enabled `enfyra_menu_permission` rows link the menu to specific roles. This is a navigation contract only and never grants API access.',
+      'New menus default to `isPublic: false`; on a fresh install no non-root role sees a menu until an explicit public flag or enabled role visibility row is configured.',
+      'Use ensure_menu to create or update the menu and its isPublic flag. Use ensure_menu_access to add or disable one role visibility row. Do not encode route paths or HTTP methods in menu visibility.',
+      'Before saving a page extension, infer which API routes its useApi/composable calls hit. For every protected route it calls, ensure the target role has that route+method permission with ensure_route_access; menu visibility alone never prevents a 403.',
+      'A private menu with no enabled role rows is visible to no non-root role. A public menu is visible to every role regardless of route access. Root admins can always see enabled menus.',
+      'PermissionGate inside the page remains the UX gate for buttons, forms, and actions. Keep those route/method conditions separate from the menu-role visibility contract.',
+      'After wiring menu + extension, verify both layers independently: inspect the menu and role visibility rows, then audit route access for every API route the extension calls.',
     ],
   },
   {

@@ -34,13 +34,16 @@ update_method({
   icon: "lucide:bar-chart-3",
   order: 20,
   isEnabled: true,
+  isPublic: true,
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  permission: JSON.stringify({
-    or: [
-      { route: "/reports", methods: ["GET"] },
-      { route: "/report", methods: ["GET"] }
-    ]
-  })
+})
+
+// For a role-restricted menu, set isPublic: false and add a role visibility row:
+ensure_menu_access({
+  menuPath: "/reports",
+  roleName: "editor",
+  isEnabled: true,
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>"
 })
 
 // Read the created menu id from the tool response, then:
@@ -57,7 +60,7 @@ ensure_page_extension({
           'Reports is an illustrative page. Keep the shell/page contracts, but choose the real route, menu label, icon, permissions, and body layout from the operator workflow.',
           'Menu provides navigation; extension provides content.',
           'Use enfyra_menu.label, not title.',
-          'Sensitive admin menus should include a permission condition at creation time.',
+          'Sensitive admin menus should set isPublic: false and add explicit role rows with ensure_menu_access.',
           'For page extensions, create the menu first with ensure_menu and pass its id to ensure_page_extension.',
           'When editing an existing extension by id or name, use update_extension_code so local guards plus /enfyra_extension/preview and the save happen in one atomic call. If inspect returned sourceFile/sourceResourceUri and that reviewed artifact is the intended full replacement, pass it instead of echoing the full SFC. Do not spend a second LLM step on validate_extension_code followed by update_records unless the user requested validation-only output.',
           'Call get_extension_theme_contract before writing or reviewing page/widget/global extension UI; that tool is the authority for theme, color, layout, modal, drawer, and shell registry details.',
@@ -528,13 +531,14 @@ ensure_menu({
   icon: "lucide:layout-dashboard",
   order: 2,
   isEnabled: true,
+  isPublic: false,
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
-  permission: JSON.stringify({
-    or: [
-      { route: "/operations/jobs", methods: ["GET"] },
-      { route: "/enfyra_flow_execution", methods: ["GET"] }
-    ]
-  })
+})
+
+ensure_menu_access({
+  menuPath: "/operations",
+  roleName: "operator",
+  globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>"
 })
 
 // Child page extensions should be focused:
@@ -548,7 +552,7 @@ ensure_menu({
         notes: [
           'Design the menu/page split before generating dashboard code.',
           'Operations/jobs/orders/reports/settings are examples of separating mental models. Replace them with the real domains users navigate between.',
-          'Permission-gate sensitive parent dropdown menus too, using any child page route or backing route that represents read access.',
+          'Set private parent dropdown menus with isPublic: false and add role visibility rows explicitly.',
           'Keep /dashboard as a summary and distribution page, not a detailed operations table.',
           'Use focused pages for operational domains.',
           'Each page extension must use usePageHeaderRegistry for the app-shell title strip and should not render a duplicate top header in the body.',

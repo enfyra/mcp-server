@@ -2,9 +2,9 @@ import { fetchAPI } from './fetch.js';
 import {
   createOrPatch,
   findRecord,
+  resolveRole,
 } from './platform-data-operations.js';
 import {
-  normalizeMenuPermissionArg,
   sha256Text,
   validateExtensionCode,
   verifyExtensionRuntime,
@@ -25,7 +25,7 @@ export async function ensureMenu(apiUrl, {
   icon,
   type = 'Menu',
   order = 0,
-  permission,
+  isPublic,
   description,
   isEnabled = true,
   globalRulesAckKey,
@@ -43,18 +43,56 @@ export async function ensureMenu(apiUrl, {
     order,
     description,
     isEnabled,
+    ...(isPublic !== undefined ? { isPublic } : (!existing ? { isPublic: false } : {})),
   };
-  if (permission !== undefined) {
-    body.permission = normalizeMenuPermissionArg(permission);
-  } else if (!existing) {
-    body.permission = null;
-  }
   const operation = await createOrPatch(apiUrl, 'enfyra_menu', existing, body);
   return {
     id: operation.id || getId(existing),
     path: normalizedPath || existing?.path || null,
     label,
     action: operation.action,
+    operation,
+  };
+}
+
+export async function ensureMenuAccess(apiUrl, {
+  menuId,
+  menuPath,
+  roleId,
+  roleName,
+  isEnabled = true,
+  globalRulesAckKey,
+}) {
+  assertGlobalRulesAck(globalRulesAckKey);
+  if ((menuId == null) === (!menuPath)) throw new Error('Provide menuId or menuPath, not both.');
+  if (roleId && roleName) throw new Error('Provide roleId or roleName, not both.');
+  if (!roleId && !roleName) throw new Error('Provide roleId or roleName.');
+
+  const menu = menuId != null
+    ? await findRecord(apiUrl, 'enfyra_menu', { id: { _eq: menuId } }, 'id,_id,path,label')
+    : await findRecord(apiUrl, 'enfyra_menu', { path: { _eq: normalizeRestPath(menuPath) } }, 'id,_id,path,label');
+  if (!menu) throw new Error(`Menu not found: ${menuId ?? menuPath}`);
+
+  const role = await resolveRole(apiUrl, { roleId, roleName });
+  const menuRecordId = getId(menu);
+  const roleRecordId = getId(role);
+  const existing = await findRecord(
+    apiUrl,
+    'enfyra_menu_permission',
+    { menu: { id: { _eq: menuRecordId } }, role: { id: { _eq: roleRecordId } } },
+    'id,_id,isEnabled,menu.id,role.id,role.name',
+  );
+  const operation = await createOrPatch(apiUrl, 'enfyra_menu_permission', existing, {
+    menu: { id: menuRecordId },
+    role: { id: roleRecordId },
+    isEnabled,
+  });
+
+  return {
+    action: 'menu_access_ensured',
+    menu: { id: menuRecordId, path: menu.path, label: menu.label },
+    role: { id: roleRecordId, name: role.name },
+    permission: { id: operation.id || getId(existing), isEnabled },
     operation,
   };
 }

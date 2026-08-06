@@ -37,6 +37,7 @@ import { validateMainTableRoutePath } from '../dist/lib/route-guards.js';
 import {
   DYNAMIC_CODE_KNOWLEDGE_ACK_KEY,
   GLOBAL_RULES_ACK_KEY,
+  REQUIRED_KNOWLEDGE_VERSION,
   buildRequiredKnowledgePayload,
 } from '../dist/lib/required-knowledge.js';
 import { WORKFLOW_SURFACES, discoverWorkflowRoutes, listWorkflowSurfaces } from '../dist/lib/tool-routing.js';
@@ -241,11 +242,12 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_trigger_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_log_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu['"]/);
-  assert.match(platformTools, /normalizeMenuPermissionArg/);
-  assert.match(platformTools, /\{ allowAll: true \} for globally visible/);
-  assert.match(platformTools, /An empty object is normalized to null \(unrestricted\)/);
-  assert.match(platformTools, /[Bb]ackend route permission is a separate layer/);
-  assert.match(platformTools, /grant it via ensure_route_access/);
+  assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu_access['"]/);
+  assert.match(platformTools, /isPublic/);
+  assert.doesNotMatch(platformTools, /normalizeMenuPermissionArg/);
+  assert.doesNotMatch(platformTools, /allowAll.*globally visible/);
+  assert.match(platformTools, /backend route permissions and owner checks still remain authoritative/);
+  assert.match(platformTools, /ensure_route_access/);
   assert.match(platformTools, /server\.tool\(\s*['"]reorder_menus['"]/);
   assert.match(platformTools, /\/admin\/menu\/reorder/);
   assert.match(platformTools, /Duplicate menu id in reorder payload/);
@@ -290,7 +292,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(routing, /kind: drawer, modal, page shell/);
   assert.match(platformTools, /Use build_extension_ui kind=drawer for generated drawer\/editing snippets/);
   assert.match(platformTools, /Use build_extension_ui kind=modal for generated modal\/confirmation snippets/);
-  assert.match(platformTools, /Unrestricted menu permission is null/);
+  assert.match(platformTools, /menu visibility only/);
   assert.match(platformTools, /patches=\[\{search,replace\}/);
   assert.match(platformTools, /searchMode="whitespace"/);
   assert.match(platformTools, /replaceAll=true/);
@@ -729,7 +731,7 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260717M$/);
   assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
-  assert.equal(payload.version, '2026-08-05.gateway-stream-observer-abort-timeout-timestamp-aggregate-contract');
+  assert.equal(payload.version, REQUIRED_KNOWLEDGE_VERSION);
   assert.match(payloadText, /internal navigation triggered by an extension action.*navigateTo/);
 
   for (const text of [entry, requiredKnowledge, examples, payloadText]) {

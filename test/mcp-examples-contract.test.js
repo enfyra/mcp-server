@@ -27,6 +27,7 @@ const WRITE_TOOLS = [
   'create_pre_hook',
   'create_post_hook',
   'ensure_menu',
+  'ensure_menu_access',
   'ensure_page_extension',
   'ensure_global_extension',
   'ensure_widget_extension',

@@ -176,13 +176,12 @@ test('extension menu-permission-sync distinguishes menu visibility from route au
   const section = payload.extensions.find(rule => rule.id === 'extension-menu-permission-sync');
   assert.ok(section, 'extension-menu-permission-sync section exists');
   const rules = section.rules.join('\n');
-  assert.match(rules, /Menu permission controls whether the menu item is visible/);
-  assert.match(rules, /backend route permission \(RoleGuard\) controls/);
-  assert.match(rules, /only when the route is intentionally anonymous/);
+  assert.match(rules, /Menu visibility and backend route permission are separate layers/);
+  assert.match(rules, /enfyra_menu\.isPublic/);
+  assert.match(rules, /ensure_menu_access/);
   assert.match(rules, /ensure_route_access/);
-  assert.match(rules, /menu permission must reference that exact route path/);
-  assert.match(rules, /normalizes an empty permission object to null/);
-  assert.match(rules, /Menu visibility without route permission still yields a 403/);
+  assert.match(rules, /PermissionGate inside the page/);
+  assert.match(rules, /menu visibility alone never prevents a 403/);
 });
 
 test('empty scope treated as full', () => {
