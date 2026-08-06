@@ -13,11 +13,31 @@ import {
 import {
   normalizeEscapedVueSource
 } from './tool-input-normalization.js';
+import { assessPermissionExposure } from './permission-exposure.js';
 
 export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
   server.tool(
+      'assess_permission_exposure',
+      [
+        'Assess whether UI visibility and server authority are aligned for one permission scope.',
+        'A hidden UI with server access is a blocked security finding; visible UI with a backend 403 is a low-risk UX/API boundary and is not treated as a permission grant.',
+      ].join(' '),
+      {
+        uiVisible: z.boolean().describe('Whether the target role/user can see the UI menu/action.'),
+        serverAllowed: z.boolean().describe('Whether the target role/user can call the backend route/method.'),
+        serverPublic: z.boolean().optional().default(false).describe('Whether the backend route/method is anonymously public.'),
+        dataClassification: z.enum(['unknown', 'public', 'internal', 'sensitive', 'secret']).optional().default('unknown').describe('Sensitivity of the data/action behind the authority.'),
+        context: z.string().optional().describe('Short route/menu/role context for the finding.'),
+      },
+      async (input) => jsonText({
+        action: 'permission_exposure_assessed',
+        assessment: assessPermissionExposure(input),
+      }),
+    );
+
+  server.tool(
       'ensure_menu',
-      'Business operation: create or update one admin menu item. Use this instead of raw enfyra_menu CRUD.',
+      'Business operation: create or update one admin menu item. Use this instead of raw enfyra_menu CRUD. A private/hidden menu must not leave matching server authority open; assess the exposure and verify route access before completion.',
       {
         label: z.string().describe('Menu label.'),
         path: z.string().optional().describe('Admin app route path for leaf menu items, e.g. /reports.'),
@@ -37,7 +57,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_menu_access',
-      'Business operation: create or update one role visibility rule for an admin menu item. This controls menu visibility only; it never grants route/API access.',
+      'Business operation: create or update one role visibility rule for an admin menu item. This controls menu visibility only; it never grants route/API access. After changing visibility, assess and verify that hidden roles do not retain unintended server authority.',
       {
         menuId: z.union([z.string(), z.number()]).optional().describe('Existing menu id. Use either menuId or menuPath.'),
         menuPath: z.string().optional().describe('Exact admin menu path, e.g. /reports. Use either menuPath or menuId.'),

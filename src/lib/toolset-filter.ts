@@ -38,6 +38,7 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     'verify_extension_runtime',
     'get_extension_theme_contract',
     'build_extension_ui',
+    'assess_permission_exposure',
     'extension_workflow',
     'update_extension_code',
     'patch_extension_code',
@@ -85,6 +86,7 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
   ],
   runtime: [
     ...CORE_TOOL_NAMES,
+    'assess_permission_exposure',
     'build_dynamic_repository_usage',
     'search_runtime_zone',
     'inspect_table',

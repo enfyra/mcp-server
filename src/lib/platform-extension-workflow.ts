@@ -225,6 +225,9 @@ export async function runExtensionWorkflow(apiUrl, opts) {
       'Set the page menu visibility with isPublic on ensure_menu, then use ensure_menu_access for each role that should see a private menu. Menu visibility is navigation-only and does not grant API access.',
       'Keep PermissionGate route/method conditions inside the page for buttons, forms, and actions. A visible page may still receive a backend 403 when its target role lacks route access.',
       'If the page calls a protected route, verify the role has that route+method permission (audit_route_access / ensure_route_access) before marking the extension complete.',
+      'Classify each page capability as public, internal, sensitive, or secret, then call assess_permission_exposure for each relevant role/action before completion.',
+      'A hidden menu/action with matching enabled route, field, or public server authority is a high/critical blocked finding; narrow server access or make the UI visibility explicit. Do not report a UI-only hide as secured.',
+      'A visible page with an expected backend 403 is a low-risk UX/API boundary and may remain intentional when the backend remains authoritative.',
     ],
   };
 }

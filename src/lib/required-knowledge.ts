@@ -2,7 +2,7 @@ export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-export const REQUIRED_KNOWLEDGE_VERSION = '2026-08-06.menu-role-visibility-contract';
+export const REQUIRED_KNOWLEDGE_VERSION = '2026-08-07.permission-exposure-severity-contract';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -132,6 +132,17 @@ const GLOBAL_RULES_SECTIONS = [
       'A mutation error does not prove the target stayed unchanged. Inspect the exact target after any failed or partial write, retry only from the returned checkpoint after a new preview, and claim saved or deleted state only from a successful postcondition or explicit verification.',
       'Do not manually reload caches unless natural partial reload is proven stale or a concrete reload error requires it.',
       'Never fabricate ids, field names, relation names, paths, package names, or permission scopes.',
+    ],
+  },
+  {
+    id: 'permission-exposure-contract',
+    rules: [
+      'Treat permission as a cross-layer authority decision: UI visibility, route/method access, field exposure, owner/tenant policy, and anonymous public access must be evaluated together.',
+      'Classify the protected capability before accepting a permission change as public, internal, sensitive, or secret. Unknown classification is not permission to silently proceed.',
+      'A hidden UI is never a security control. If a role/user cannot see the menu or action while the server still grants matching route, field, or anonymous authority, classify it as hidden_server_authority and block completion until access is narrowed or visibility is made explicit.',
+      'Visible UI with an expected backend 403 is a low-risk UX/API boundary and may remain intentional; it must be reported as visible_server_denied, not treated as a permission grant.',
+      'Anonymous server authority over sensitive or secret data is critical even when the UI is visible. Use assess_permission_exposure and require explicit review for high/critical findings.',
+      'For every permission workflow, record the assessed severity and verification evidence in the final result. Never report a UI-only hide as secured.',
     ],
   },
   {
@@ -371,7 +382,8 @@ const EXTENSION_SECTIONS = [
       'Before saving a page extension, infer which API routes its useApi/composable calls hit. For every protected route it calls, ensure the target role has that route+method permission with ensure_route_access; menu visibility alone never prevents a 403.',
       'A private menu with no enabled role rows is visible to no non-root role. A public menu is visible to every role regardless of route access. Root admins can always see enabled menus.',
       'PermissionGate inside the page remains the UX gate for buttons, forms, and actions. Keep those route/method conditions separate from the menu-role visibility contract.',
-      'After wiring menu + extension, verify both layers independently: inspect the menu and role visibility rows, then audit route access for every API route the extension calls.',
+      'Classify each capability as public, internal, sensitive, or secret and call assess_permission_exposure for every relevant role/action. A high or critical hidden-authority finding blocks completion; a visible expected 403 is low risk and can remain intentional.',
+      'After wiring menu + extension, verify both layers independently: inspect the menu and role visibility rows, audit route access for every API route the extension calls, then preserve the exposure assessment and severity in the result.',
     ],
   },
   {

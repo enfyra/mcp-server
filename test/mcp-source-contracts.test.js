@@ -243,6 +243,8 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_log_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu_access['"]/);
+  assert.match(platformTools, /server\.tool\(\s*['"]assess_permission_exposure['"]/);
+  assert.match(platformTools, /hidden UI with server access is a blocked security finding/);
   assert.match(platformTools, /isPublic/);
   assert.doesNotMatch(platformTools, /normalizeMenuPermissionArg/);
   assert.doesNotMatch(platformTools, /allowAll.*globally visible/);

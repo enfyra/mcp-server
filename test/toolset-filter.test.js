@@ -62,7 +62,7 @@ test('guided domain profiles expose a bounded task surface', () => {
   for (const profile of ['extension', 'schema', 'runtime', 'operations']) {
     const visible = [...registered].filter((name) => isToolVisibleInToolset(name, 'guided', profile));
     assert.ok(visible.length >= 20, `${profile} exposes too few tools: ${visible.length}`);
-    assert.ok(visible.length <= 45, `${profile} exposes too many tools: ${visible.length}`);
+    assert.ok(visible.length <= 46, `${profile} exposes too many tools: ${visible.length}`);
     assert.ok(visible.includes('get_enfyra_api_context'));
     assert.ok(visible.includes('get_enfyra_required_knowledge'));
     assert.ok(visible.includes('discover_enfyra_workflows'));
@@ -86,6 +86,7 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('confirm_schema_mutation', 'guided'), true);
   assert.equal(isToolVisibleInToolset('confirm_schema_mutation', 'guided', 'schema'), true);
   assert.equal(isToolVisibleInToolset('search_admin_extensions', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('assess_permission_exposure', 'guided', 'extension'), true);
   assert.equal(isToolVisibleInToolset('search_runtime_zone', 'guided'), true);
   assert.equal(isToolVisibleInToolset('inspect_rest_projection', 'guided'), true);
   assert.equal(isToolVisibleInToolset('debug_field_exposure', 'guided'), false);

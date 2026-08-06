@@ -102,7 +102,7 @@ export const TOOL_WORKFLOWS = [
     inspectTools: ['search_admin_extensions(mode=search)', 'search_admin_extensions(mode=inspect)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'build_extension_ui'],
     writeTools: ['extension_workflow', 'ensure_menu', 'ensure_menu_access', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension', 'ensure_route_access', 'delete_records'],
-    verifyTools: ['verify_extension_runtime', 'build_extension_ui(kind=runtime_review|theme_review|review)', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)', 'audit_route_access'],
+    verifyTools: ['verify_extension_runtime', 'build_extension_ui(kind=runtime_review|theme_review|review)', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)', 'audit_route_access', 'assess_permission_exposure'],
     avoidTools: [
       {
         tool: 'create_records/update_records on enfyra_extension',
@@ -115,6 +115,12 @@ export const TOOL_WORKFLOWS = [
         when: 'a page extension calls a protected backend route',
         useInstead: 'set isPublic or ensure_menu_access for navigation visibility, then grant the target role the route+method via ensure_route_access',
         reason: 'Menu-role visibility only controls sidebar navigation. Backend route permission (RoleGuard) is what prevents a 403 on the API call the page makes.',
+      },
+      {
+        tool: 'hiding UI while leaving server authority open',
+        when: 'a role cannot see the menu/action but still has enabled route, field, or public API authority for the same capability',
+        useInstead: 'assess_permission_exposure, then narrow the server permission or make the UI visibility explicit before completion',
+        reason: 'A hidden UI is not a security control. Hidden-but-authorized capability is a blocked exposure finding and must not be silently accepted.',
       },
       {
         tool: 'query_table on destination domain lists',
@@ -141,6 +147,7 @@ export const TOOL_WORKFLOWS = [
       'Choose count only when the source already owns an exact count; choose dot/chip for new-attention signals.',
       'Validate extension code or use an ensure_*_extension tool that validates before saving.',
       'For a page extension, set menu visibility with isPublic or ensure_menu_access, keep PermissionGate route/method conditions inside the page, and grant the target role backend route permission via ensure_route_access. Verify both menu access and API access independently.',
+      'Classify the capability as public, internal, sensitive, or secret and call assess_permission_exposure for each relevant role/action. Block high or critical hidden-authority findings; visible UI with an expected backend 403 is low risk and may remain intentional.',
     ],
     recommendedScope: 'extension',
   },
@@ -307,8 +314,10 @@ export const TOOL_WORKFLOWS = [
     exampleCategories: ['permissions-rls'],
     nextStepTemplate: [
       'Inspect route and permission profile before changing access.',
+      'Classify the data/action sensitivity and run assess_permission_exposure before accepting a UI/server permission mismatch.',
       'Decide anonymous publicMethods versus authenticated route permission.',
       'Use route operation tools instead of raw permission CRUD.',
+      'Do not complete the workflow while a hidden UI still has matching enabled server authority; resolve or explicitly escalate the finding with its severity.',
       'Audit and test the route after the change.',
     ],
     recommendedScope: 'schema',

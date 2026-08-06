@@ -114,6 +114,7 @@ test('globalRules sections contain expected ids', () => {
   assert.ok(ids.includes('discover-before-changing'));
   assert.ok(ids.includes('runtime-zone-locators'));
   assert.ok(ids.includes('mutations-are-intentional'));
+  assert.ok(ids.includes('permission-exposure-contract'));
   assert.ok(ids.includes('schema-constraints'));
   assert.ok(ids.includes('security-first'));
   assert.ok(ids.includes('shell-signals'));
@@ -180,6 +181,8 @@ test('extension menu-permission-sync distinguishes menu visibility from route au
   assert.match(rules, /enfyra_menu\.isPublic/);
   assert.match(rules, /ensure_menu_access/);
   assert.match(rules, /ensure_route_access/);
+  assert.match(rules, /assess_permission_exposure/);
+  assert.match(rules, /high or critical hidden-authority finding blocks completion/);
   assert.match(rules, /PermissionGate inside the page/);
   assert.match(rules, /menu visibility alone never prevents a 403/);
 });
