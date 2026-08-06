@@ -605,7 +605,7 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Separate MCP token context from application user/role/OAuth configuration.',
       'Inspect auth_security runtime records and the live table contract before writes.',
-      'Use ensure_auth_header for coding-tool header mappings and reorder_auth_headers for priority changes; keep x-enfyra-pat and Authorization Bearer system mappings enabled.',
+      'Use ensure_auth_header for coding-tool header mappings and reorder_auth_headers for priority changes; the same header key may be registered for multiple verifier types, while x-enfyra-pat and Authorization Bearer system mappings stay enabled.',
       'Verify built-in auth behavior through the app-origin proxy or the narrow REST endpoint.',
     ],
     recommendedScope: 'schema',

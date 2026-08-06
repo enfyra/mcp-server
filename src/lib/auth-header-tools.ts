@@ -8,11 +8,12 @@ export function registerAuthHeaderTools(server, ENFYRA_API_URL) {
     'ensure_auth_header',
     [
       'Business operation: create or update one native Enfyra authentication header mapping.',
-      'Use this for coding-tool API key headers such as x-api-key; header names are normalized to lowercase.',
+      'Use this for client request headers; header names are normalized to lowercase.',
+      'The same header key may have multiple verifier mappings, such as Authorization Bearer PAT and Authorization Bearer JWT; use priority to choose which mapping runs first.',
       'The built-in x-enfyra-pat and Authorization Bearer mappings remain system records and cannot be disabled or change verifier type.',
     ].join(' '),
     {
-      headerKey: z.string().describe('Request header name, e.g. x-api-key.'),
+      headerKey: z.string().describe('Request header name, e.g. x-client-token.'),
       credentialType: z.enum(['pat', 'jwt']).optional().describe('Native verifier. Defaults to pat for raw headers and jwt for bearer headers.'),
       scheme: z.enum(['raw', 'bearer']).optional().describe('Whether the header value is raw or Bearer-prefixed.'),
       priority: z.number().int().nonnegative().optional().describe('Lower values are checked first. Defaults to the next available priority for a new mapping.'),

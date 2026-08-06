@@ -233,7 +233,7 @@ const GLOBAL_RULES_SECTIONS = [
     rules: [
       'Treat permission and owner/tenant scope as the first design step for any route, handler, hook, flow, extension, websocket, or data surface.',
       'Route permission only lets authenticated users reach a route after RoleGuard; handlers, hooks, RLS, and scripts still enforce record ownership and tenant/project scope.',
-      'Native authentication header mappings live in enfyra_auth_header. Use ensure_auth_header for normalized coding-tool headers and reorder_auth_headers for priority changes; built-in x-enfyra-pat and Authorization Bearer mappings stay enabled system records.',
+      'Native authentication header mappings live in enfyra_auth_header. Use ensure_auth_header for normalized coding-tool headers and reorder_auth_headers for priority changes; the same header key may have multiple verifier mappings, while built-in x-enfyra-pat and Authorization Bearer mappings stay enabled system records.',
       'Do not expose unpublished fields, private relation facts, secret values, token hashes, stack traces, SQL, provider payloads, or generated passwords to user-facing clients.',
     ],
   },

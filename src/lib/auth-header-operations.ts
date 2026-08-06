@@ -52,7 +52,11 @@ export async function ensureAuthHeader(apiUrl: string, input: EnsureAuthHeaderIn
   const existing = await findRecord(
     apiUrl,
     'enfyra_auth_header',
-    { headerKey: { _eq: headerKey }, scheme: { _eq: scheme } },
+    {
+      headerKey: { _eq: headerKey },
+      credentialType: { _eq: credentialType },
+      scheme: { _eq: scheme },
+    },
     AUTH_HEADER_FIELDS,
   );
 
@@ -91,7 +95,11 @@ export async function ensureAuthHeader(apiUrl: string, input: EnsureAuthHeaderIn
   const saved = await findRecord(
     apiUrl,
     'enfyra_auth_header',
-    { headerKey: { _eq: headerKey }, scheme: { _eq: scheme } },
+    {
+      headerKey: { _eq: headerKey },
+      credentialType: { _eq: credentialType },
+      scheme: { _eq: scheme },
+    },
     AUTH_HEADER_FIELDS,
   );
   if (!saved) throw new Error(`Authentication header was not found after ${operation.action}.`);

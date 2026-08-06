@@ -123,3 +123,65 @@ test('reorderAuthHeaders uses the native reorder endpoint and verifies prioritie
     globalThis.fetch = originalFetch;
   }
 });
+
+test('ensureAuthHeader allows a PAT mapping to reuse Authorization Bearer beside the system JWT mapping', async () => {
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  let created = false;
+  const patMapping = {
+    id: 13,
+    headerKey: 'authorization',
+    credentialType: 'pat',
+    scheme: 'bearer',
+    priority: 0,
+    isEnabled: true,
+    isSystem: false,
+    description: 'Coding tool bearer PAT',
+  };
+
+  globalThis.fetch = async (url, init = {}) => {
+    const exchange = authExchange(url, init);
+    if (exchange) return exchange;
+    const request = { url: String(url), method: String(init.method || 'GET'), body: init.body };
+    requests.push(request);
+    const decodedUrl = decodeURIComponent(String(url));
+    if (decodedUrl.includes('credentialType":{"_eq":"pat"')) {
+      return jsonResponse({ data: created ? [patMapping] : [] });
+    }
+    if (request.method === 'POST' && String(url).endsWith('/enfyra_auth_header')) {
+      created = true;
+      return jsonResponse({ data: [patMapping] }, 201);
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    clearRuntimeCache();
+    resetTokens();
+    initAuth('https://example.test/api', 'efy_pat_test');
+    const result = await ensureAuthHeader('https://example.test/api', {
+      headerKey: 'Authorization',
+      credentialType: 'pat',
+      scheme: 'bearer',
+      priority: 0,
+      description: 'Coding tool bearer PAT',
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+
+    assert.equal(result.action, 'created');
+    assert.equal(result.header.headerKey, 'authorization');
+    assert.equal(requests.some((request) => request.method === 'POST'), true);
+    assert.deepEqual(JSON.parse(requests.find((request) => request.method === 'POST').body), {
+      headerKey: 'authorization',
+      credentialType: 'pat',
+      scheme: 'bearer',
+      priority: 0,
+      isEnabled: true,
+      description: 'Coding tool bearer PAT',
+    });
+  } finally {
+    clearRuntimeCache();
+    resetTokens();
+    globalThis.fetch = originalFetch;
+  }
+});
