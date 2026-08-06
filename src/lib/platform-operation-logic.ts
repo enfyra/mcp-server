@@ -8,3 +8,5 @@ export * from './platform-operation-types.js';
 export * from './platform-resource-operations.js';
 export * from './platform-route-operations.js';
 export * from './platform-shared-operations.js';
+export * from './auth-header-operations.js';
+export * from './auth-header-types.js';

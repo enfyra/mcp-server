@@ -55,6 +55,7 @@ export const ZONE_TABLES: Record<Exclude<RuntimeZone, 'admin_ui' | 'schema_data'
   auth_security: [
     { tableName: 'enfyra_user', fields: 'id,_id,email,isRootAdmin,isSystem,role.id,role.name,createdAt,updatedAt', labelFields: ['email', 'role.name'] },
     { tableName: 'enfyra_role', fields: 'id,_id,name,description,isSystem,createdAt,updatedAt', labelFields: ['name', 'description'] },
+    { tableName: 'enfyra_auth_header', fields: 'id,_id,headerKey,credentialType,scheme,priority,isEnabled,isSystem,description', labelFields: ['headerKey', 'credentialType', 'scheme', 'description'] },
     { tableName: 'enfyra_route_permission', fields: 'id,_id,description,isEnabled,route.id,route.path,role.name,methods.name,allowedUsers.id', labelFields: ['description', 'route.path', 'role.name'], pathFields: ['route.path'] },
     { tableName: 'enfyra_field_permission', fields: 'id,_id,description,action,effect,role.name,column.name,relation.propertyName,condition,isEnabled', labelFields: ['description', 'action', 'effect', 'role.name', 'column.name', 'relation.propertyName', 'condition'] },
     { tableName: 'enfyra_guard', fields: 'id,_id,name,description,position,isGlobal,isEnabled,route.id,route.path,methods.name', labelFields: ['name', 'description', 'route.path'], pathFields: ['route.path'] },
@@ -73,7 +74,7 @@ export const RUNTIME_ZONE_DESCRIPTIONS: Record<RuntimeZone, string> = {
   schema_data: 'Tables, columns, relations, column rules, field permissions, and route-backed data shape.',
   package_runtime: 'Installed app/server packages and runtime package availability.',
   storage_file: 'Storage configs, folders, files, public file state, and file permissions.',
-  auth_security: 'Users, roles, route/field permissions, guards, OAuth provider provisioning, and linked OAuth accounts.',
+  auth_security: 'Users, roles, native authentication header mappings, route/field permissions, guards, OAuth provider provisioning, and linked OAuth accounts.',
 };
 
 export function buildRuntimeZoneCatalog() {

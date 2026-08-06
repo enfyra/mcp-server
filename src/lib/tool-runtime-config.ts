@@ -85,8 +85,8 @@ export const CAPABILITY_AREAS = [
   },
   {
     area: 'Auth, roles, sessions, OAuth',
-    tables: ['enfyra_user', 'enfyra_role', 'enfyra_api_token', 'enfyra_session', 'enfyra_oauth_config', 'enfyra_oauth_account'],
-    workflow: 'MCP auth exchanges ENFYRA_API_TOKEN through /auth/token/exchange. Configure an API token from Enfyra admin UI /me.',
+    tables: ['enfyra_user', 'enfyra_role', 'enfyra_api_token', 'enfyra_session', 'enfyra_auth_header', 'enfyra_oauth_config', 'enfyra_oauth_account'],
+    workflow: 'MCP auth exchanges ENFYRA_API_TOKEN through /auth/token/exchange, then sends runtime requests as Authorization: Bearer <accessToken>. Manage coding-tool header mappings through ensure_auth_header and reorder_auth_headers.',
   },
   {
     area: 'Guards and permissions',
@@ -197,6 +197,12 @@ export const MCP_PERMISSION_REQUIREMENTS = [
     area: 'menu reorder',
     tools: ['reorder_menus'],
     route: '/admin/menu/reorder',
+    methods: ['POST'],
+  },
+  {
+    area: 'native auth header reorder',
+    tools: ['reorder_auth_headers'],
+    route: '/admin/auth-header/reorder',
     methods: ['POST'],
   },
   {

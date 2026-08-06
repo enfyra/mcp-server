@@ -122,6 +122,9 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('build_dynamic_repository_usage', 'guided'), true);
   assert.equal(isToolVisibleInToolset('create_handler', 'guided'), true);
   assert.equal(isToolVisibleInToolset('create_post_hook', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('ensure_auth_header', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('reorder_auth_headers', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('ensure_auth_header', 'guided', 'operations'), true);
   assert.equal(isToolVisibleInToolset('list_methods', 'guided'), true);
   assert.equal(isToolVisibleInToolset('ensure_script_flow_step', 'guided'), false);
   assert.equal(isToolVisibleInToolset('ensure_manual_flow', 'guided'), false);

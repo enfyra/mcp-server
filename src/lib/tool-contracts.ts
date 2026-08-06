@@ -51,6 +51,7 @@ const IDEMPOTENT_MUTATIONS = new Set([
   'add_route_methods',
   'remove_route_methods',
   'reorder_menus',
+  'reorder_auth_headers',
   'setup_oauth_provider',
 ]);
 

@@ -31,6 +31,7 @@ import { registerPlatformPolicyTools } from './platform-policy-tools.js';
 import { registerPlatformResourceTools } from './platform-resource-tools.js';
 import { registerPlatformRouteTools } from './platform-route-tools.js';
 import { registerPlatformWebsocketTools } from './platform-websocket-tools.js';
+import { registerAuthHeaderTools } from './auth-header-tools.js';
 
 export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
   registerPlatformExtensionTools(server, ENFYRA_API_URL);
@@ -39,4 +40,5 @@ export function registerPlatformOperationTools(server, ENFYRA_API_URL) {
   registerPlatformWebsocketTools(server, ENFYRA_API_URL);
   registerPlatformFlowTools(server, ENFYRA_API_URL);
   registerPlatformResourceTools(server, ENFYRA_API_URL);
+  registerAuthHeaderTools(server, ENFYRA_API_URL);
 }

@@ -685,6 +685,16 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
   assert.match(JSON.stringify(extension.avoidTools), /menu visibility as the only access control/);
   assert.match(JSON.stringify(extension.legacyToolSets.writeTools), /ensure_route_access/);
 
+  const authHeaders = discoverWorkflowRoutes({
+    intent: 'configure the native authentication header used by a coding tool and reorder header priority',
+    surface: 'identity-access',
+    risk: 'write',
+    detail: 'plan',
+  }).workflows[0];
+  assert.equal(authHeaders.key, 'identity-access');
+  assert.ok(authHeaders.advancedTools.includes('ensure_auth_header'));
+  assert.ok(authHeaders.advancedTools.includes('reorder_auth_headers'));
+
   const endpoint = discoverWorkflowRoutes({
     intent: 'create authenticated REST endpoint with a handler and route permission',
     risk: 'write',

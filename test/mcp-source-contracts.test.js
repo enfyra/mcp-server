@@ -151,6 +151,7 @@ test('mcp server exposes route platform operation tools', () => {
   const entry = readEntrySource();
   const tableTools = readSchemaSource();
   const platformTools = readPlatformSource();
+  const authHeaderTools = readSourceFiles('lib/auth-header-tools.ts', 'lib/auth-header-operations.ts');
   const instructions = readSourceFiles('lib/mcp-instructions.ts');
   const routing = readRoutingSource();
   const examples = readExamplesSource();
@@ -254,6 +255,10 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /\/admin\/menu\/reorder/);
   assert.match(platformTools, /Duplicate menu id in reorder payload/);
   assert.match(platformTools, /emits enfyra_menu cache invalidation/);
+  assert.match(authHeaderTools, /server\.tool\(\s*['"]ensure_auth_header['"]/);
+  assert.match(authHeaderTools, /server\.tool\(\s*['"]reorder_auth_headers['"]/);
+  assert.match(authHeaderTools, /\/admin\/auth-header\/reorder/);
+  assert.match(authHeaderTools, /header names are normalized to lowercase/);
   assert.match(platformTools, /server\.tool\(\s*['"]extension_workflow['"]/);
   assert.match(platformTools, /runExtensionWorkflow/);
   assert.match(platformTools, /extension_workflow_planned/);
@@ -353,6 +358,8 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(routing, /extension_workflow/);
   assert.match(routing, /reorder_menus/);
   assert.match(routing, /PATCH enfyra_menu for order or parent changes/);
+  assert.match(routing, /ensure_auth_header/);
+  assert.match(routing, /reorder_auth_headers/);
   assert.match(routing, /api_endpoint_workflow/);
   assert.match(routing, /create_api_endpoint/);
   assert.match(routing, /public_route_methods/);
@@ -410,6 +417,7 @@ test('OAuth provider provisioning source is treated as a script-backed identity 
   assert.match(entry, /oauthUserProvisioning/);
   assert.match(zones, /enfyra_oauth_config[^\n]*sourceCode[^\n]*appCallbackUrl/);
   assert.match(zones, /enfyra_user/);
+  assert.match(zones, /enfyra_auth_header[^\n]*headerKey[^\n]*credentialType[^\n]*priority/);
   assert.match(zones, /enfyra_oauth_account/);
 });
 
@@ -554,8 +562,9 @@ test('dynamic endpoint guidance distinguishes canonical policy from custom endpo
 
 test('gateway guard guidance keeps PAT transport limits on pre-auth IP guards', () => {
   const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
-  assert.match(requiredKnowledge, /production `\/gateway\/v1\/\*` route is explicitly IP-limited in pre_auth/);
-  assert.match(requiredKnowledge, /Do not use rate_limit_by_user for this gateway/);
+  assert.match(requiredKnowledge, /production `\/gateway\/v1\/\*` route is private and explicitly IP-limited in pre_auth/);
+  assert.match(requiredKnowledge, /Native auth resolves the configured header before the gateway pre-hook/);
+  assert.match(requiredKnowledge, /hook must not parse or verify PAT headers/);
 });
 
 test('ensure_guard exposes GraphQL target fields and pre-validates the conflict matrix', () => {

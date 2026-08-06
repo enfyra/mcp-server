@@ -586,11 +586,11 @@ export const TOOL_WORKFLOWS = [
       'Inspecting or managing Enfyra users and roles.',
       'Designing application login, session, refresh, and role access behavior.',
     ],
-    keywords: ['user role', 'oauth account', 'login flow', 'session refresh', 'identity access'],
+    keywords: ['user role', 'oauth account', 'login flow', 'session refresh', 'identity access', 'auth header', 'authentication header', 'header mapping', 'PAT header', 'coding tool API key'],
     firstTools: ['search_runtime_zone', 'get_enfyra_examples'],
     inspectTools: ['search_runtime_zone(mode=search, zone=auth_security)', 'search_runtime_zone(mode=inspect)', 'query_table', 'get_permission_profile'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_enfyra_examples(category=oauth-setup|connect)'],
-    writeTools: ['create_records', 'update_records', 'delete_records', 'ensure_route_access'],
+    writeTools: ['create_records', 'update_records', 'delete_records', 'ensure_route_access', 'ensure_auth_header', 'reorder_auth_headers'],
     verifyTools: ['query_table', 'get_permission_profile', 'test_rest_endpoint'],
     avoidTools: [
       {
@@ -605,6 +605,7 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Separate MCP token context from application user/role/OAuth configuration.',
       'Inspect auth_security runtime records and the live table contract before writes.',
+      'Use ensure_auth_header for coding-tool header mappings and reorder_auth_headers for priority changes; keep x-enfyra-pat and Authorization Bearer system mappings enabled.',
       'Verify built-in auth behavior through the app-origin proxy or the narrow REST endpoint.',
     ],
     recommendedScope: 'schema',

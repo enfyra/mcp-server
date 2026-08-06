@@ -147,6 +147,8 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     'private_route_methods',
     'enable_route',
     'disable_route',
+    'ensure_auth_header',
+    'reorder_auth_headers',
   ],
 };
 
