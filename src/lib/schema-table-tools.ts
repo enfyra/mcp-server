@@ -330,7 +330,7 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
   	          recordRule: 'If you delete seeded records before deleting test tables, delete record batches sequentially in recordDeleteOrder; do not parallelize parent/child deletes.',
   	          tableRule: 'For full test cleanup, prefer delete_tables with tableDeleteOrder after deleting custom routes/flows; table deletion removes the remaining table data.',
   	        },
-  	        created: toolset === 'full' ? created : created.map(({ result, supportedColumnTypes, schema, ...item }) => ({
+          created: created.map(({ result, supportedColumnTypes, schema, ...item }) => ({
   	          ...item,
   	          schema: {
   	            intended: schema?.intended,
@@ -338,8 +338,8 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
   	            liveMetadataError: schema?.liveMetadataError,
   	          },
   	        })),
-  	        createdRelations: toolset === 'full' ? createdRelations : createdRelations.map(({ result, responseFormat, ...item }) => item),
-  	        appliedDeferredConstraints: toolset === 'full' ? appliedDeferredConstraints : appliedDeferredConstraints.map(({ result, ...item }) => item),
+          createdRelations: createdRelations.map(({ result, responseFormat, ...item }) => item),
+          appliedDeferredConstraints: appliedDeferredConstraints.map(({ result, ...item }) => item),
   	      });
   	    }
   	  );

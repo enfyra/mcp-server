@@ -128,7 +128,7 @@ npx @enfyra/mcp-server@latest config [options]
 | `ENFYRA_API_URL` | Runtime API base written into MCP config | Required |
 | `ENFYRA_API_TOKEN` | Programmatic token from the Enfyra admin UI `/me` | Required |
 
-By default, re-running `config` preserves an existing `ENFYRA_MCP_DYNAMIC_TOOLS`, `ENFYRA_MCP_TOOLSET`, or `ENFYRA_MCP_PROFILE` value. Pass `--compact-tools` or `--static-tools` only when intentionally changing the tool-loading mode.
+The MCP server always uses the guided surface; low-level tools remain hidden. Re-running `config` preserves existing `ENFYRA_MCP_DYNAMIC_TOOLS` and `ENFYRA_MCP_PROFILE` values. Pass `--compact-tools` or `--static-tools` only when intentionally changing the tool-loading mode.
 
 The API token is exchanged for a short-lived access token at runtime. It is not sent directly as a Bearer token.
 

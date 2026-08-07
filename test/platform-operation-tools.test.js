@@ -49,7 +49,7 @@ import {
   validateMethodsForRoute,
 } from '../dist/lib/route-permission-tools.js';
 
-test('column contract broadening requires explicit acknowledgement', () => {
+test('column contract broadening stays blocked on the guided surface', () => {
   assert.throws(
     () => assertColumnContractBroadening(
       { isUpdatable: false, isPublished: false },
@@ -64,13 +64,12 @@ test('column contract broadening requires explicit acknowledgement', () => {
     ),
     /blocked in the guided toolset/,
   );
-  assert.deepEqual(
-    assertColumnContractBroadening(
+  assert.throws(
+    () => assertColumnContractBroadening(
       { isUpdatable: false, isPublished: false },
       { isUpdatable: true, isPublished: true, allowContractBroadening: true },
-      'full',
     ),
-    ['isUpdatable false→true', 'isPublished false→true'],
+    /blocked in the guided toolset/,
   );
   assert.deepEqual(
     assertColumnContractBroadening(

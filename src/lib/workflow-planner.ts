@@ -85,7 +85,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(3, 'inspect_route / inspect_table', 'Inspect the route for guard/RBAC work; inspect the table and live field propertyName for field-permission work.'),
         step(4, 'audit_route_access', 'Use only for route RBAC. Field permissions are a separate role/user field-visibility layer.'),
         step(5, 'ensure_route_rate_limit / ensure_guard / ensure_field_permission / remove_field_permission / ensure_column_rule / create_pre_hook', 'Choose the boundary: throttle, guard tree, field visibility lifecycle, body validation, or owner/tenant row filtering.'),
-        step(6, 'search_runtime_zone / inspect_table / inspect_route', 'Verify the saved field-permission target, action/effect, scope, condition, and enabled state; verify guard attachment separately. Use query_table only as an explicit full-toolset escape hatch when focused inspectors cannot prove the postcondition.'),
+        step(6, 'search_runtime_zone / inspect_table / inspect_route', 'Verify the saved field-permission target, action/effect, scope, condition, and enabled state; verify guard attachment separately. Use query_table only when focused inspectors cannot prove the postcondition.'),
         step(7, 'test_rest_endpoint or test_graphql', 'For field permissions verify projected field presence/absence with a bounded REST or GraphQL check; for guards verify rejection/rate behavior without consuming production quota.'),
       ];
     case 'flow':
@@ -156,7 +156,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
       return [
         step(1, 'discover_runtime_context', 'Read runtime/cache context and current app target.'),
         step(2, 'inspect_table / inspect_route / search_runtime_zone', 'Confirm the specific stale artifact before reloading.'),
-        step(3, 'full toolset reload tools', 'Only when stale evidence persists, switch to full toolset and reload the narrowest proven surface; reload_all is last resort.'),
+        step(3, 'visible reload workflow', 'Only when stale evidence persists, use the narrowest visible reload operation; reload_all is last resort.'),
         step(4, 'inspect_table / inspect_route / discover_enfyra_system', 'Verify the stale state cleared.'),
       ];
     case 'logs-debug':
@@ -176,7 +176,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
 }
 
 function splitCompositeToolName(tool: string) {
-  if (tool === 'full toolset reload tools') return [];
+  if (tool === 'visible reload workflow') return [];
   return tool
     .split(/\s+or\s+|\s*\/\s*/g)
     .map((item) => item.trim().replace(/\(.*/, ''))

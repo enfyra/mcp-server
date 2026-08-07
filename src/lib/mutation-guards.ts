@@ -56,22 +56,22 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   enfyra_route_handler: {
     create: 'create_handler or api_endpoint_workflow',
     update: 'patch_script_source / update_script_source for source edits, or api_endpoint_workflow(overwrite=true) for full handler replacement',
-    delete: 'delete_route (cascades all handlers) — individual handler removal requires full toolset',
+    delete: 'delete_route (cascades all handlers) — individual handler removal is not exposed',
   },
   enfyra_pre_hook: {
     create: 'create_pre_hook',
     update: 'patch_script_source / update_script_source for source edits',
-    delete: 'delete_route (cascades all hooks) — individual hook removal requires full toolset',
+    delete: 'delete_route (cascades all hooks) — individual hook removal is not exposed',
   },
   enfyra_post_hook: {
     create: 'create_post_hook',
     update: 'patch_script_source / update_script_source for source edits',
-    delete: 'delete_route (cascades all hooks) — individual hook removal requires full toolset',
+    delete: 'delete_route (cascades all hooks) — individual hook removal is not exposed',
   },
   enfyra_route_permission: {
     create: 'ensure_route_access',
     update: 'ensure_route_access (mode=merge or mode=replace)',
-    delete: 'ensure_route_access(mode=replace, methods=[]) to revoke, or delete_route to cascade — individual permission removal requires full toolset',
+    delete: 'ensure_route_access(mode=replace, methods=[]) to revoke, or delete_route to cascade — individual permission removal is not exposed',
   },
   enfyra_method: {
     create: 'create_method',
@@ -81,12 +81,12 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   enfyra_guard: {
     create: 'ensure_guard or ensure_route_rate_limit',
     update: 'ensure_guard or ensure_route_rate_limit',
-    delete: 'ensure_guard(isEnabled=false) to disable — physical removal requires full toolset',
+    delete: 'ensure_guard(isEnabled=false) to disable — physical removal is not exposed',
   },
   enfyra_guard_rule: {
     create: 'ensure_guard (rulesMode=replace or rulesMode=append)',
     update: 'ensure_guard (rulesMode=replace)',
-    delete: 'ensure_guard (rulesMode=replace with reduced rules) — individual rule removal requires full toolset',
+    delete: 'ensure_guard (rulesMode=replace with reduced rules) — individual rule removal is not exposed',
   },
   enfyra_field_permission: {
     create: 'ensure_field_permission',
@@ -96,7 +96,7 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   enfyra_column_rule: {
     create: 'ensure_column_rule',
     update: 'ensure_column_rule',
-    delete: 'ensure_column_rule(isEnabled=false) to disable — physical removal requires full toolset',
+    delete: 'ensure_column_rule(isEnabled=false) to disable — physical removal is not exposed',
   },
   enfyra_graphql: {
     create: 'set_table_graphql',
@@ -116,32 +116,32 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   enfyra_flow_trigger: {
     create: 'ensure_flow_trigger',
     update: 'ensure_flow_trigger or remove_flow_trigger to disable',
-    delete: 'remove_flow_trigger to disable — physical removal requires full toolset',
+    delete: 'remove_flow_trigger to disable — physical removal is not exposed',
   },
   enfyra_flow_execution: {
     create: 'trigger_flow',
     update: 'read-only runtime table — execution state is system-managed',
-    delete: 'read-only runtime table — execution cleanup requires full toolset',
+    delete: 'read-only runtime table — execution cleanup is not exposed',
   },
   enfyra_websocket: {
     create: 'ensure_websocket_gateway',
     update: 'ensure_websocket_gateway or patch_script_source / update_script_source for source edits',
-    delete: 'physical removal requires full toolset',
+    delete: 'physical removal is not exposed',
   },
   enfyra_websocket_event: {
     create: 'ensure_websocket_event',
     update: 'ensure_websocket_event or patch_script_source / update_script_source for source edits',
-    delete: 'physical removal requires full toolset',
+    delete: 'physical removal is not exposed',
   },
   enfyra_extension: {
     create: 'ensure_page_extension / ensure_global_extension / ensure_widget_extension or extension_workflow',
     update: 'patch_extension_code / update_extension_code',
-    delete: 'physical removal requires full toolset after verifying menu wiring',
+    delete: 'physical removal is not exposed after verifying menu wiring',
   },
   enfyra_menu: {
     create: 'ensure_menu',
     update: 'ensure_menu or reorder_menus',
-    delete: 'physical removal requires full toolset after verifying child/extension dependencies',
+    delete: 'physical removal is not exposed after verifying child/extension dependencies',
   },
   enfyra_menu_permission: {
     create: 'ensure_menu_access',
@@ -150,33 +150,33 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   },
   enfyra_package: {
     create: 'install_package',
-    update: 'install_package (re-install with new version) — upgrade requires full toolset',
-    delete: 'physical removal requires full toolset',
+    update: 'install_package (re-install with new version) — upgrade is not exposed',
+    delete: 'physical removal is not exposed',
   },
   enfyra_oauth_config: {
     create: 'setup_oauth_provider',
     update: 'setup_oauth_provider',
-    delete: 'physical removal requires full toolset',
+    delete: 'physical removal is not exposed',
   },
   enfyra_bootstrap_script: {
-    create: 'full toolset only — bootstrap scripts are platform-owned',
+    create: 'not exposed — bootstrap scripts are platform-owned',
     update: 'patch_script_source / update_script_source for source edits',
-    delete: 'full toolset only — bootstrap scripts are platform-owned',
+    delete: 'not exposed — bootstrap scripts are platform-owned',
   },
   enfyra_user: {
-    create: 'full toolset with identity safeguards — inspect enfyra_user schema first',
-    update: 'full toolset with identity safeguards',
-    delete: 'full toolset with identity safeguards',
+    create: 'not exposed — inspect enfyra_user schema first',
+    update: 'not exposed',
+    delete: 'not exposed',
   },
   enfyra_oauth_account: {
     create: 'identity-owned — OAuth accounts are created through the OAuth login flow',
-    update: 'full toolset',
-    delete: 'full toolset — unlinking requires identity safeguards',
+    update: 'not exposed',
+    delete: 'not exposed — unlinking requires identity safeguards',
   },
   enfyra_file_permission: {
-    create: 'full toolset — inspect enfyra_file_permission schema first',
-    update: 'full toolset',
-    delete: 'full toolset',
+    create: 'not exposed — inspect enfyra_file_permission schema first',
+    update: 'not exposed',
+    delete: 'not exposed',
   },
 };
 

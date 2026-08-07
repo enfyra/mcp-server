@@ -481,7 +481,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       };
     }
 
-  async function updateOneColumn({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options, metadata, placeholder, allowContractBroadening }) {
+  async function updateOneColumn({ tableId, columnId, name, type, isNullable, isPublished, isUpdatable, defaultValue, description, options, metadata, placeholder }) {
       const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
       if (!tableData) {
         throw new Error(`Table with ID ${tableId} not found.`);
@@ -496,8 +496,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       const contractBroadening = assertColumnContractBroadening(existingColumn || {}, {
         isPublished,
         isUpdatable,
-        allowContractBroadening,
-      }, toolset);
+      });
   
       const columns = existingColumns.map(col => {
         const rest = normalizeColumnForTablePatch(col);

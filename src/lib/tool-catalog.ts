@@ -66,7 +66,7 @@ function invocationFor(tool: RegisteredToolDefinition, state: ToolsetRegistratio
       };
     }
   }
-  return { mode: 'full_toolset_required', env: 'ENFYRA_MCP_TOOLSET=full' };
+  return { mode: 'hidden', reason: 'This low-level tool is intentionally hidden; use its owning guided workflow.' };
 }
 
 function defaultAvailability(toolNames: string[]) {
@@ -82,7 +82,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
     [
       'Search the live Enfyra MCP tool registry when a specialized tool is not visible in the current guided profile.',
       'Returns exact input schemas, standard annotations, PAT capability status when statically knowable, and the supported invocation path.',
-      'Hidden read-only builders, validators, and inspectors may run through execute_enfyra_tool. Hidden guided mutations return their owning workflow selection; low-level escape hatches require the full toolset.',
+      'Hidden read-only builders, validators, and inspectors may run through execute_enfyra_tool. Hidden guided mutations return their owning workflow selection; low-level escape hatches remain hidden.',
     ].join(' '),
     {
       query: z.string().optional().describe('Tool name, task phrase, domain term, or contract keyword. Omit to list the first bounded page.'),
@@ -132,7 +132,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
           'Call visible tools directly.',
           'Use execute_enfyra_tool only when invocation.mode is catalog.',
           'For invocation.mode=workflow_selection_required, call select_enfyra_workflow for the owning surface.',
-          'Reconnect with ENFYRA_MCP_TOOLSET=full only for a hidden escape-hatch mutation.',
+          'Low-level escape hatches remain hidden and are not invocable through the MCP catalog.',
           'A denied status is an optimization hint from the current PAT profile. Enfyra backend authorization remains the security boundary.',
         ],
       });
@@ -142,7 +142,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
     'execute_enfyra_tool',
     [
       'Execute one hidden long-tail tool returned by search_enfyra_tools with invocation.mode=catalog.',
-      'This gateway accepts read-only, non-destructive tools only. Call visible tools directly, select the owning workflow for guided mutations, and use ENFYRA_MCP_TOOLSET=full only for low-level escape hatches.',
+      'This gateway accepts read-only, non-destructive tools only. Call visible tools directly or select the owning workflow for guided mutations; low-level escape hatches remain hidden.',
     ].join(' '),
     {
       name: z.string().describe('Exact hidden tool name returned by search_enfyra_tools.'),
@@ -155,7 +155,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
       if (!isCatalogExecutable(name)) {
         const guidance = state.dynamic && isToolVisibleInToolset(name, state.toolset as any, state.profile as any)
           ? 'Call select_enfyra_workflow for the owning surface to expose its exact safety contract.'
-          : 'Reconnect with ENFYRA_MCP_TOOLSET=full to expose its exact safety contract.';
+          : 'This low-level tool is intentionally hidden from the MCP surface.';
         throw new Error(`${name} is a mutation or destructive tool and cannot run through execute_enfyra_tool. ${guidance}`);
       }
       if (resolveAvailability) {

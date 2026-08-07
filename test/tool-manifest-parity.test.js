@@ -10,46 +10,32 @@ const BASELINES = [
   {
     name: 'guided-default',
     env: {
-      ENFYRA_MCP_TOOLSET: 'guided',
       ENFYRA_MCP_PROFILE: 'all',
     },
     unsetDynamic: true,
     count: 95,
-    hash: '6ef32595625d3c7b5f14b38efecee909b0e5039b3633fecb7cb3ac15c540d080',
+    hash: '53a2947f654971b9a1123a2cda8716db7d7415141987335f7fa59f2b08b84a15',
     maxTokens: 38000,
   },
   {
     name: 'guided-dynamic',
     env: {
-      ENFYRA_MCP_TOOLSET: 'guided',
       ENFYRA_MCP_PROFILE: 'all',
       ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
     },
     count: 13,
-    hash: 'd7cf661155fb22bf99377a11579d0264781ac364b0cb458c6272851532af8b36',
+    hash: '2f5f93c263df6c1ece14b6b6073ba1a8d804eb6772c177f2d7b9914433dd982d',
     maxTokens: 5000,
   },
   {
     name: 'guided-static',
     env: {
-      ENFYRA_MCP_TOOLSET: 'guided',
       ENFYRA_MCP_PROFILE: 'all',
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
     count: 95,
-    hash: '6ef32595625d3c7b5f14b38efecee909b0e5039b3633fecb7cb3ac15c540d080',
+    hash: '53a2947f654971b9a1123a2cda8716db7d7415141987335f7fa59f2b08b84a15',
     maxTokens: 38000,
-  },
-  {
-    name: 'full',
-    env: {
-      ENFYRA_MCP_TOOLSET: 'full',
-      ENFYRA_MCP_PROFILE: 'all',
-      ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
-    },
-    count: 142,
-    hash: '26444dabb3892ab8aefb69789c48879973dd07a28271878e3f9040c6cfd521b6',
-    maxTokens: 52000,
   },
 ];
 

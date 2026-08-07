@@ -1,9 +1,8 @@
 import type { RegisteredToolDefinition, ToolsetRegistrationState } from './types.js';
 
-export const MCP_TOOLSETS = ['guided', 'full'] as const;
 export const MCP_PROFILES = ['all', 'extension', 'schema', 'runtime', 'operations'] as const;
 
-export type McpToolset = typeof MCP_TOOLSETS[number];
+export type McpToolset = 'guided';
 export type McpProfile = typeof MCP_PROFILES[number];
 
 export const CORE_TOOL_NAMES = [
@@ -159,19 +158,13 @@ const PROFILE_TOOL_SETS = Object.fromEntries(
   Object.entries(PROFILE_TOOL_NAMES).map(([profile, names]) => [profile, new Set(names)]),
 ) as Record<Exclude<McpProfile, 'all'>, Set<string>>;
 
-export function normalizeMcpToolset(value: unknown): McpToolset {
-  const raw = String(value || '').trim().toLowerCase();
-  if (raw === 'full') return 'full';
-  return 'guided';
-}
-
 export function normalizeMcpProfile(value: unknown): McpProfile {
   const raw = String(value || '').trim().toLowerCase();
   return MCP_PROFILES.includes(raw as McpProfile) ? raw as McpProfile : 'all';
 }
 
-export function normalizeDynamicToolPacks(value: unknown, toolset: McpToolset, profile: McpProfile) {
-  if (toolset === 'full' || profile !== 'all') return false;
+export function normalizeDynamicToolPacks(value: unknown, profile: McpProfile) {
+  if (profile !== 'all') return false;
   const raw = String(value ?? '').trim().toLowerCase();
   if (['0', 'false', 'off', 'no'].includes(raw)) return false;
   if (['1', 'true', 'on', 'yes'].includes(raw)) return true;
@@ -179,7 +172,6 @@ export function normalizeDynamicToolPacks(value: unknown, toolset: McpToolset, p
 }
 
 export function isToolVisibleInToolset(toolName: string, toolset: McpToolset, profile: McpProfile = 'all'): boolean {
-  if (toolset === 'full') return true;
   if (profile === 'all') return GUIDED_TOOL_NAMES.has(toolName);
   return PROFILE_TOOL_SETS[profile].has(toolName);
 }
@@ -247,15 +239,12 @@ export function installToolsetFilter(
 }
 
 export function summarizeToolsetForInstructions(toolset: McpToolset, profile: McpProfile = 'all', dynamic = false) {
-  if (toolset === 'full') {
-    return 'Toolset mode: full. All Enfyra MCP tools are visible, including low-level escape hatches; domain profile filtering is disabled.';
-  }
   if (profile !== 'all') {
     return [
       `Toolset mode: guided, domain profile: ${profile}. Only normal ${profile} workflow tools and shared discovery/context tools are visible.`,
       'Use this focused surface when the task belongs to one domain and lower context overhead is important.',
-      'Use search_enfyra_tools for hidden long-tail read-only tools. Normal guided mutations remain direct; only low-level escape hatches require the full toolset.',
-      'Set ENFYRA_MCP_PROFILE=all for the complete guided surface, or ENFYRA_MCP_TOOLSET=full only for expert debugging or compatibility work.',
+      'Use search_enfyra_tools for hidden long-tail read-only tools. Normal guided mutations remain direct; low-level escape hatches stay hidden.',
+      'Set ENFYRA_MCP_PROFILE=all for the complete guided surface.',
     ].join(' ');
   }
   if (!dynamic) {
@@ -263,13 +252,13 @@ export function summarizeToolsetForInstructions(toolset: McpToolset, profile: Mc
       'Toolset mode: guided, domain profile: all. The complete curated guided surface is visible.',
       'Use discover_enfyra_workflows for routing and search_enfyra_tools for hidden long-tail read-only tools.',
       'Set ENFYRA_MCP_DYNAMIC_TOOLS=on to start with a compact routing surface on hosts that refresh tools/list_changed.',
-      'Low-level escape hatches require ENFYRA_MCP_TOOLSET=full.',
+      'Low-level escape hatches stay hidden from the MCP surface.',
     ].join(' ');
   }
   return [
     'Toolset mode: guided, domain profile: all. Dynamic workflow packs start with a compact routing surface.',
     'Call select_enfyra_workflow with the task surface to expose the exact direct workflow tools for this session.',
-    'Use search_enfyra_tools for hidden long-tail read-only tools. Hidden guided mutations route through their owning workflow; only low-level escape hatches require the full toolset.',
-    'Set ENFYRA_MCP_DYNAMIC_TOOLS=off or use ENFYRA_MCP_PROFILE=extension, schema, runtime, or operations as a static fallback for hosts that do not refresh tools/list_changed. Low-level escape hatches require ENFYRA_MCP_TOOLSET=full.',
+    'Use search_enfyra_tools for hidden long-tail read-only tools. Hidden guided mutations route through their owning workflow; low-level escape hatches stay hidden.',
+    'Set ENFYRA_MCP_DYNAMIC_TOOLS=off or use ENFYRA_MCP_PROFILE=extension, schema, runtime, or operations as a static fallback for hosts that do not refresh tools/list_changed.',
   ].join(' ');
 }

@@ -3,7 +3,7 @@
  */
 
 // Import modules
-import { normalizeDynamicToolPacks, normalizeMcpProfile, normalizeMcpToolset } from './toolset-filter.js';
+import { normalizeDynamicToolPacks, normalizeMcpProfile } from './toolset-filter.js';
 export type { AnyRecord, MethodPatchBody, RouteCreateBody, RouteHandlerBody } from './enfyra-tool-types.js';
 
 export // Configuration
@@ -66,11 +66,11 @@ export function assertExtensionReadFields(tableName: string, fields?: string[]) 
   ].join(' '));
 }
 
-export const MCP_TOOLSET = normalizeMcpToolset(process.env.ENFYRA_MCP_TOOLSET);
+export const MCP_TOOLSET = 'guided' as const;
 
 export const MCP_PROFILE = normalizeMcpProfile(process.env.ENFYRA_MCP_PROFILE);
 
-export const MCP_DYNAMIC_TOOLS = normalizeDynamicToolPacks(process.env.ENFYRA_MCP_DYNAMIC_TOOLS, MCP_TOOLSET, MCP_PROFILE);
+export const MCP_DYNAMIC_TOOLS = normalizeDynamicToolPacks(process.env.ENFYRA_MCP_DYNAMIC_TOOLS, MCP_PROFILE);
 
 export const CAPABILITY_AREAS = [
   {

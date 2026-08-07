@@ -43,7 +43,7 @@ test('all supported clients are selected equally by default and explicit selecto
   }
 });
 
-test('compact and static tool modes are explicit mutually exclusive config choices', () => {
+test('compact and static tool loading modes are explicit mutually exclusive config choices', () => {
   assert.equal(parseArgs([]).toolMode, 'preserve');
   assert.equal(parseArgs(['--compact-tools']).toolMode, 'compact');
   assert.equal(parseArgs(['--static-tools']).toolMode, 'static');
@@ -51,7 +51,6 @@ test('compact and static tool modes are explicit mutually exclusive config choic
 
   assert.deepEqual(buildServerEntry('http://localhost:3000/api', 'secret-token', { toolMode: 'compact' }).env, {
     ...EXPECTED_ENV,
-    ENFYRA_MCP_TOOLSET: 'guided',
     ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
   });
 });
@@ -74,7 +73,6 @@ test('Codex config preserves existing advanced MCP runtime settings by default',
     'ENFYRA_API_URL = "http://old.test/api"',
     'ENFYRA_API_TOKEN = "old-token"',
     'ENFYRA_MCP_DYNAMIC_TOOLS = "on"',
-    'ENFYRA_MCP_TOOLSET = "guided"',
     'ENFYRA_MCP_PROFILE = "schema"',
     '',
   ].join('\n'));
@@ -87,7 +85,6 @@ test('Codex config preserves existing advanced MCP runtime settings by default',
   assert.match(config, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_URL = "http:\/\/localhost:3000\/api"/);
   assert.match(config, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_TOKEN = "secret-token"/);
   assert.match(config, /ENFYRA_MCP_DYNAMIC_TOOLS = "on"/);
-  assert.match(config, /ENFYRA_MCP_TOOLSET = "guided"/);
   assert.match(config, /ENFYRA_MCP_PROFILE = "schema"/);
 });
 
@@ -104,7 +101,6 @@ test('JSON MCP hosts preserve existing advanced MCP runtime settings by default'
           ENFYRA_API_URL: 'http://old.test/api',
           ENFYRA_API_TOKEN: 'old-token',
           ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
-          ENFYRA_MCP_TOOLSET: 'guided',
           ENFYRA_MCP_PROFILE: 'schema',
         },
       },
@@ -120,7 +116,6 @@ test('JSON MCP hosts preserve existing advanced MCP runtime settings by default'
   assert.deepEqual(config.mcpServers.enfyra.env, {
     ...EXPECTED_ENV,
     ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
-    ENFYRA_MCP_TOOLSET: 'guided',
     ENFYRA_MCP_PROFILE: 'schema',
   });
   assert.deepEqual(config.mcpServers.enfyra.args, ['-y', '@enfyra/mcp-server@latest']);
@@ -138,7 +133,6 @@ test('an explicit static mode overrides an existing compact host setting', async
           ENFYRA_API_URL: 'http://old.test/api',
           ENFYRA_API_TOKEN: 'old-token',
           ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
-          ENFYRA_MCP_TOOLSET: 'full',
           ENFYRA_MCP_PROFILE: 'runtime',
         },
       },
@@ -154,7 +148,6 @@ test('an explicit static mode overrides an existing compact host setting', async
   assert.deepEqual(config.mcpServers.enfyra.env, {
     ...EXPECTED_ENV,
     ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
-    ENFYRA_MCP_TOOLSET: 'guided',
     ENFYRA_MCP_PROFILE: 'runtime',
   });
 });
@@ -255,7 +248,6 @@ test('ZCode config uses nested mcp.servers and preserves existing settings', asy
             ENFYRA_API_URL: 'http://old.test/api',
             ENFYRA_API_TOKEN: 'old-token',
             ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
-            ENFYRA_MCP_TOOLSET: 'guided',
           },
         },
       },
@@ -272,7 +264,6 @@ test('ZCode config uses nested mcp.servers and preserves existing settings', asy
   assert.deepEqual(config.mcp.servers.enfyra.env, {
     ...EXPECTED_ENV,
     ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
-    ENFYRA_MCP_TOOLSET: 'guided',
   });
   assert.deepEqual(config.mcp.servers.other, { command: 'other' });
   assert.deepEqual(config.hooks, { enabled: true });

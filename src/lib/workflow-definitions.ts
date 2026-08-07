@@ -697,7 +697,7 @@ export const TOOL_WORKFLOWS = [
     exampleCategories: [],
     nextStepTemplate: [
       'Verify stale behavior with narrow inspect/test tools.',
-      'If stale evidence truly requires manual reload, switch to ENFYRA_MCP_TOOLSET=full and choose the narrowest reload surface.',
+      'If stale evidence truly requires manual reload, use the narrowest visible reload workflow for that surface.',
       'Re-verify the same narrow behavior after reload.',
     ],
     recommendedScope: 'schema',

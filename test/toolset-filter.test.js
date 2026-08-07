@@ -6,7 +6,6 @@ import {
   isToolVisibleInToolset,
   normalizeDynamicToolPacks,
   normalizeMcpProfile,
-  normalizeMcpToolset,
   summarizeToolsetForInstructions,
 } from '../dist/lib/toolset-filter.js';
 import { isMutationTool } from '../dist/lib/tool-contracts.js';
@@ -23,19 +22,12 @@ function registeredToolNames() {
 }
 
 function splitWorkflowToolNames(value) {
-  if (value === 'full toolset reload tools') return [];
+  if (value === 'visible reload workflow') return [];
   return value
     .split(/\s+or\s+|\s*\/\s*/g)
     .map((tool) => tool.trim().replace(/\(.*/, ''))
     .filter(Boolean);
 }
-
-test('normalizes MCP toolset mode to guided by default', () => {
-  assert.equal(normalizeMcpToolset(undefined), 'guided');
-  assert.equal(normalizeMcpToolset(''), 'guided');
-  assert.equal(normalizeMcpToolset('unknown'), 'guided');
-  assert.equal(normalizeMcpToolset('FULL'), 'full');
-});
 
 test('normalizes MCP domain profile to all by default', () => {
   assert.equal(normalizeMcpProfile(undefined), 'all');
@@ -47,14 +39,13 @@ test('normalizes MCP domain profile to all by default', () => {
   assert.equal(normalizeMcpProfile('operations'), 'operations');
 });
 
-test('dynamic tool packs are explicit opt-in for guided/all and keep profile fallback', () => {
-  assert.equal(normalizeDynamicToolPacks(undefined, 'guided', 'all'), false);
-  assert.equal(normalizeDynamicToolPacks('', 'guided', 'all'), false);
-  assert.equal(normalizeDynamicToolPacks('off', 'guided', 'all'), false);
-  assert.equal(normalizeDynamicToolPacks('on', 'guided', 'all'), true);
-  assert.equal(normalizeDynamicToolPacks(undefined, 'guided', 'extension'), false);
-  assert.equal(normalizeDynamicToolPacks('on', 'guided', 'extension'), false);
-  assert.equal(normalizeDynamicToolPacks('on', 'full', 'all'), false);
+test('dynamic tool packs are explicit opt-in and keep profile fallback', () => {
+  assert.equal(normalizeDynamicToolPacks(undefined, 'all'), false);
+  assert.equal(normalizeDynamicToolPacks('', 'all'), false);
+  assert.equal(normalizeDynamicToolPacks('off', 'all'), false);
+  assert.equal(normalizeDynamicToolPacks('on', 'all'), true);
+  assert.equal(normalizeDynamicToolPacks(undefined, 'extension'), false);
+  assert.equal(normalizeDynamicToolPacks('on', 'extension'), false);
 });
 
 test('guided domain profiles expose a bounded task surface', () => {
@@ -90,7 +81,6 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('search_runtime_zone', 'guided'), true);
   assert.equal(isToolVisibleInToolset('inspect_rest_projection', 'guided'), true);
   assert.equal(isToolVisibleInToolset('debug_field_exposure', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('debug_field_exposure', 'full'), true);
   assert.equal(isToolVisibleInToolset('api_endpoint_workflow', 'guided'), true);
   assert.equal(isToolVisibleInToolset('patch_extension_code', 'guided'), true);
   assert.equal(isToolVisibleInToolset('verify_extension_runtime', 'guided'), true);
@@ -136,14 +126,6 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('get_log_content', 'guided'), false);
 });
 
-test('full toolset exposes all tools', () => {
-  assert.equal(isToolVisibleInToolset('create_route', 'full'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_drawer', 'full'), true);
-  assert.equal(isToolVisibleInToolset('review_extension_ui_contract', 'full'), true);
-  assert.equal(isToolVisibleInToolset('any_future_tool', 'full'), true);
-  assert.equal(isToolVisibleInToolset('any_future_tool', 'full', 'extension'), true);
-});
-
 test('installToolsetFilter registers disabled tools and activates one bounded pack', () => {
   const registered = [];
   const server = {
@@ -174,14 +156,13 @@ test('guided profiles expose the hybrid catalog front doors', () => {
   }
 });
 
-test('toolset instruction summary names guided/full behavior', () => {
+test('toolset instruction summary describes the fixed guided surface', () => {
   assert.match(summarizeToolsetForInstructions('guided', 'all'), /guided/);
-  assert.match(summarizeToolsetForInstructions('guided', 'all'), /ENFYRA_MCP_TOOLSET=full/);
+  assert.match(summarizeToolsetForInstructions('guided', 'all'), /stay hidden/);
   assert.match(summarizeToolsetForInstructions('guided', 'extension'), /extension/);
   assert.match(summarizeToolsetForInstructions('guided', 'extension'), /ENFYRA_MCP_PROFILE=all/);
   assert.doesNotMatch(summarizeToolsetForInstructions('guided', 'extension'), /T[0-3]|tier/i);
   assert.doesNotMatch(summarizeToolsetForInstructions('guided', 'all'), /T[0-3]|tier/i);
-  assert.match(summarizeToolsetForInstructions('full'), /full/);
 });
 
 test('guided workflow primary paths never direct callers to hidden tools', () => {
@@ -189,7 +170,7 @@ test('guided workflow primary paths never direct callers to hidden tools', () =>
     const result = discoverWorkflowRoutes({ surface, detail: 'plan', limit: 1 });
     const primaryPath = result.workflows[0].primaryPath;
     for (const step of primaryPath) {
-      if (step.tool === 'full toolset reload tools') continue;
+      if (step.tool === 'visible reload workflow') continue;
       const toolNames = step.tool.split(/\s+or\s+|\s*\/\s*/g).map((tool) => tool.trim());
       for (const toolName of toolNames) {
         assert.equal(
@@ -285,7 +266,7 @@ test('domain-profile workflow routes only direct callers to visible profile tool
       const result = discoverWorkflowRoutes({ surface, detail: 'plan', limit: 1 }, profile);
       assert.equal(result.workflows.length, 1);
       for (const step of result.workflows[0].primaryPath) {
-        if (step.tool === 'full toolset reload tools') continue;
+        if (step.tool === 'visible reload workflow') continue;
         for (const toolName of splitWorkflowToolNames(step.tool)) {
           assert.equal(
             isToolVisibleInToolset(toolName, 'guided', profile),
