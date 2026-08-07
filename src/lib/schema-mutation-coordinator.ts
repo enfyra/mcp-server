@@ -22,7 +22,6 @@ let schemaQueue: Promise<unknown> = Promise.resolve();
 export function assertColumnContractBroadening(existingColumn: AnyRecord, requested: AnyRecord) {
   const broadened: string[] = [];
   if (existingColumn?.isUpdatable === false && requested?.isUpdatable === true) broadened.push('isUpdatable false→true');
-  if (existingColumn?.isPublished === false && requested?.isPublished === true) broadened.push('isPublished false→true');
   if (broadened.length > 0) {
     throw new Error(
       `Column contract broadening is blocked in the guided toolset: ${broadened.join(', ')}. Do not broaden canonical metadata merely for a custom action or E2E fixture; use the owning schema workflow after explicit authorization.`,
