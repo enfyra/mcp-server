@@ -75,7 +75,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
   server.tool(
       'reorder_menus',
       [
-        'Business operation: reorder Enfyra admin menus and optionally move menus under a new parent.',
+        'Business operation: reorder Enfyra admin menus and optionally move menus under a new parent. Omit parent to preserve the existing hierarchy; pass parent: null to move a menu to the root.',
         'Uses the server /admin/menu/reorder route introduced in Enfyra 2.2.6 instead of PATCHing each enfyra_menu record.',
         'The server validates duplicate ids, non-negative integer order, dropdown-only parents, /data child restrictions, system menu parent locks, cycle prevention, persistence, and menu cache invalidation.',
       ].join(' '),
@@ -83,7 +83,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
         updates: z.array(z.object({
           id: z.union([z.string(), z.number()]).describe('Menu id to reorder.'),
           order: z.number().int().nonnegative().describe('Sibling order index. Must be a non-negative integer.'),
-          parent: z.union([z.string(), z.number(), z.null()]).optional().describe('New parent menu id, or null for a root menu. Parent must be a Dropdown Menu.'),
+          parent: z.union([z.string(), z.number(), z.null()]).optional().describe('New parent menu id, or null for a root menu. Omit to preserve the existing parent. Parent must be a Dropdown Menu.'),
         })).min(1).describe('Menu order/parent updates, usually the changed siblings from drag-and-drop.'),
         globalRulesAckKey: globalRulesAckParam(z),
       },

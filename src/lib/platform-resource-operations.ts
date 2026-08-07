@@ -112,10 +112,16 @@ export async function reorderMenus(apiUrl, { updates, globalRulesAckKey }) {
     if (!Number.isInteger(order) || order < 0) {
       throw new Error(`updates[${index}].order must be a non-negative integer.`);
     }
-    const parent = item.parent === undefined || item.parent === null || String(item.parent).trim() === ''
-      ? null
-      : item.parent;
-    return { id, order, parent };
+    const normalizedUpdate: { id: string | number; order: number; parent?: string | number | null } = {
+      id,
+      order,
+    };
+    if (item.parent !== undefined) {
+      normalizedUpdate.parent = item.parent === null || String(item.parent).trim() === ''
+        ? null
+        : item.parent;
+    }
+    return normalizedUpdate;
   });
   const result = await fetchAPI(apiUrl, '/admin/menu/reorder', {
     method: 'POST',
