@@ -2,6 +2,8 @@ import { z } from 'zod';
 import {
   FLOW_STEP_TOOL_GUIDANCE,
   chooseFlowStepTool,
+  deleteFlow,
+  deleteFlowStep,
   ensureFlow,
   ensureFlowStep,
   ensureFlowTrigger,
@@ -10,6 +12,7 @@ import {
   planFlowSteps,
   runFlowWorkflow,
 } from './platform-operation-logic.js';
+import { destructivePreviewContent } from './destructive-preview.js';
 import {
   dynamicCodeKnowledgeAckParam,
   globalRulesAckParam
@@ -103,6 +106,51 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z),
       },
       async (input) => jsonText(await removeFlowTrigger(ENFYRA_API_URL, input)),
+    );
+
+  server.tool(
+      'delete_flow',
+      'Business operation: preview-first physical deletion of an already-disabled Enfyra flow, its triggers, and its saved steps. confirm=true requires the exact flow id and name from the preview; this tool never disables the flow for you.',
+      {
+        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
+        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
+        expectedFlowId: z.union([z.string(), z.number()]).optional().describe('Required when confirm=true. Exact flow id returned by the preview.'),
+        expectedFlowName: z.string().optional().describe('Required when confirm=true. Exact flow name returned by the preview.'),
+        confirm: z.boolean().optional().default(false).describe('false returns the dependency preview or an enabled-flow reminder; true deletes only an already-disabled flow and owned triggers/steps.'),
+        skipNotFound: z.boolean().optional().default(true).describe('Continue when a dependency was already removed during a prior partial attempt.'),
+        globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      },
+      async (input) => {
+        const result = await deleteFlow(ENFYRA_API_URL, input);
+        if (!input.confirm) return destructivePreviewContent('delete_flow', result, 1);
+        const content = jsonText(result);
+        return result.status === 'partial_failure' || result.postcondition?.confirmedAbsent !== true
+          ? { ...content, isError: true }
+          : content;
+      },
+    );
+
+  server.tool(
+      'delete_flow_step',
+      'Business operation: preview-first physical deletion of one saved Enfyra flow step and any nested child steps. Locate by stepId or flowName/flowId plus stepKey, then confirm with the exact ids from the preview.',
+      {
+        flowName: z.string().optional().describe('Flow name. Required with stepKey unless flowId is supplied.'),
+        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Required with stepKey unless flowName is supplied.'),
+        stepId: z.union([z.string(), z.number()]).optional().describe('Flow step id. Use stepId or stepKey.'),
+        stepKey: z.string().optional().describe('Stable step key. Use with flowName or flowId when stepId is unavailable.'),
+        expectedFlowId: z.union([z.string(), z.number()]).optional().describe('Required when confirm=true. Exact flow id returned by the preview.'),
+        expectedStepId: z.union([z.string(), z.number()]).optional().describe('Required when confirm=true. Exact step id returned by the preview.'),
+        confirm: z.boolean().optional().default(false).describe('false returns the dependency preview; true deletes the step.'),
+        globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      },
+      async (input) => {
+        const result = await deleteFlowStep(ENFYRA_API_URL, input);
+        if (!input.confirm) return destructivePreviewContent('delete_flow_step', result, 1);
+        const content = jsonText(result);
+        return result.postcondition?.confirmedAbsent !== true
+          ? { ...content, isError: true }
+          : content;
+      },
     );
 
   server.tool(

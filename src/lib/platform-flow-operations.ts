@@ -1,8 +1,10 @@
 import {
   createOrPatch,
   findRecord,
+  fetchRecords,
   normalizeFlowStepBody,
 } from './platform-data-operations.js';
+import { fetchAPI } from './fetch.js';
 import {
   naturalPartialReload,
   parseJsonArrayArg,
@@ -19,6 +21,7 @@ import {
   assertGlobalRulesAck
 } from './required-knowledge.js';
 import { materializeSourceInput } from './source-artifacts.js';
+import { executeSequentialBatch } from './sequential-batch.js';
 
 export async function ensureFlow(apiUrl, {
   name,
@@ -111,6 +114,283 @@ export async function removeFlowTrigger(apiUrl, {
   if (!existing) return { action: 'flow_trigger_not_found', ...(flowRef ? { flow: flowRef } : {}) };
   const operation = await createOrPatch(apiUrl, 'enfyra_flow_trigger', existing, { isEnabled: false });
   return { action: 'flow_trigger_disabled', ...(flowRef ? { flow: flowRef } : {}), trigger: { id: getId(existing), type: existing.type }, operation };
+}
+
+async function resolveFlowForOperation(apiUrl, { flowName, flowId }) {
+  if (!flowName && flowId === undefined) throw new Error('Provide flowName or flowId.');
+  if (flowName && flowId !== undefined) throw new Error('Provide flowName or flowId, not both.');
+  const flow = flowId !== undefined
+    ? await findRecord(apiUrl, 'enfyra_flow', { id: { _eq: flowId } }, 'id,_id,name,isEnabled,description,timeout,maxExecutions')
+    : await findRecord(apiUrl, 'enfyra_flow', { name: { _eq: flowName } }, 'id,_id,name,isEnabled,description,timeout,maxExecutions');
+  if (!flow) throw new Error(`Flow not found: ${flowId ?? flowName}`);
+  return flow;
+}
+
+function summarizeFlowRows(rows, fields) {
+  return rows.map((row) => Object.fromEntries(fields.map((field) => [field, field === 'id' ? getId(row) : row[field]])));
+}
+
+function parentId(row) {
+  return row.parent?.id ?? row.parent?._id ?? null;
+}
+
+function orderFlowStepsForDeletion(rows) {
+  const byId = new Map(rows.map((row) => [String(getId(row)), row]));
+  const depth = (row) => {
+    let current = row;
+    let value = 0;
+    const seen = new Set();
+    while (current) {
+      const currentId = String(getId(current));
+      if (seen.has(currentId)) break;
+      seen.add(currentId);
+      const currentParentId = parentId(current);
+      if (currentParentId === null || currentParentId === undefined) break;
+      value += 1;
+      current = byId.get(String(currentParentId));
+    }
+    return value;
+  };
+  return [...rows].sort((left, right) => depth(right) - depth(left));
+}
+
+function isDescendantOf(row, ancestorId, byId) {
+  let currentParentId = parentId(row);
+  const seen = new Set();
+  while (currentParentId !== null && currentParentId !== undefined) {
+    const parentKey = String(currentParentId);
+    if (parentKey === String(ancestorId)) return true;
+    if (seen.has(parentKey)) return false;
+    seen.add(parentKey);
+    const parent = byId.get(parentKey);
+    if (!parent) return false;
+    currentParentId = parentId(parent);
+  }
+  return false;
+}
+
+async function verifyFlowAbsent(apiUrl, flowId) {
+  const [flow, triggers, steps] = await Promise.all([
+    findRecord(apiUrl, 'enfyra_flow', { id: { _eq: flowId } }, 'id,_id,name'),
+    fetchRecords(apiUrl, 'enfyra_flow_trigger', { flow: { id: { _eq: flowId } } }, 'id,_id,type', 1000),
+    fetchRecords(apiUrl, 'enfyra_flow_step', { flow: { id: { _eq: flowId } } }, 'id,_id,key,type', 1000),
+  ]);
+  return {
+    verificationMethod: 'flow_and_owned_records_reloaded',
+    confirmedAbsent: !flow && triggers.length === 0 && steps.length === 0,
+    remainingFlow: flow ? { id: getId(flow), name: flow.name } : null,
+    remainingTriggerIds: triggers.map(getId),
+    remainingStepIds: steps.map(getId),
+  };
+}
+
+function isNotFoundFlowDeleteError(error) {
+  return /API error \(404\)|not found/i.test(error instanceof Error ? error.message : String(error));
+}
+
+export async function deleteFlow(apiUrl, {
+  flowName,
+  flowId,
+  expectedFlowId,
+  expectedFlowName,
+  confirm = false,
+  skipNotFound = true,
+  globalRulesAckKey,
+}) {
+  const flow = await resolveFlowForOperation(apiUrl, { flowName, flowId });
+  const resolvedFlowId = getId(flow);
+  if (confirm && (expectedFlowId === undefined || expectedFlowId === null)) {
+    throw new Error('expectedFlowId is required when confirm=true. Pass the exact flow id returned by the preview.');
+  }
+  if (expectedFlowId !== undefined && expectedFlowId !== null && String(resolvedFlowId) !== String(expectedFlowId)) {
+    throw new Error(`Flow id mismatch: resolved ${resolvedFlowId}, expected ${expectedFlowId}.`);
+  }
+  if (flow.isEnabled !== false) {
+    if (confirm) {
+      throw new Error(`Cannot delete enabled flow ${resolvedFlowId} (${flow.name}). Disable it first with ensure_flow(isEnabled=false), then request a fresh delete preview.`);
+    }
+    return {
+      action: 'delete_flow_blocked_enabled',
+      status: 'blocked_enabled',
+      flow: { id: resolvedFlowId, name: flow.name, isEnabled: true },
+      postcondition: {
+        verificationMethod: 'not_run_enabled_flow',
+        confirmedAbsent: false,
+        remainingFlow: { id: resolvedFlowId, name: flow.name },
+        remainingTriggerIds: [],
+        remainingStepIds: [],
+      },
+      next: 'Disable the flow with ensure_flow(isEnabled=false), then request a fresh delete_flow preview before confirming deletion.',
+    };
+  }
+  if (confirm && !expectedFlowName) {
+    throw new Error('expectedFlowName is required when confirm=true. Pass the exact flow name returned by the preview.');
+  }
+  if (expectedFlowName && flow.name !== expectedFlowName) {
+    throw new Error(`Flow name mismatch: resolved ${flow.name}, expected ${expectedFlowName}.`);
+  }
+
+  const [triggers, steps] = await Promise.all([
+    fetchRecords(apiUrl, 'enfyra_flow_trigger', { flow: { id: { _eq: resolvedFlowId } } }, 'id,_id,type,isEnabled', 1000),
+    fetchRecords(apiUrl, 'enfyra_flow_step', { flow: { id: { _eq: resolvedFlowId } } }, 'id,_id,key,type,stepOrder,isEnabled,parent.id', 1000),
+  ]);
+  const orderedSteps = orderFlowStepsForDeletion(steps);
+  const preview = {
+    flow: {
+      id: resolvedFlowId,
+      name: flow.name,
+      isEnabled: flow.isEnabled !== false,
+    },
+    dependencies: {
+      triggers: summarizeFlowRows(triggers, ['id', 'type', 'isEnabled']),
+      steps: summarizeFlowRows(orderedSteps, ['id', 'key', 'type', 'stepOrder', 'isEnabled']),
+    },
+  };
+
+  if (!confirm) {
+    return {
+      action: 'delete_flow_preview',
+      ...preview,
+      postcondition: {
+        verificationMethod: 'not_run_preview',
+        confirmedAbsent: false,
+        remainingFlow: { id: resolvedFlowId, name: flow.name },
+        remainingTriggerIds: triggers.map(getId),
+        remainingStepIds: orderedSteps.map(getId),
+      },
+      next: 'Call delete_flow again with the same locator, confirm=true, expectedFlowId, and expectedFlowName from this preview.',
+    };
+  }
+
+  assertGlobalRulesAck(globalRulesAckKey);
+  const targets = [
+    ...triggers.map((row) => ({ tableName: 'enfyra_flow_trigger', category: 'trigger', id: getId(row) })),
+    ...orderedSteps.map((row) => ({ tableName: 'enfyra_flow_step', category: 'step', id: getId(row) })),
+    { tableName: 'enfyra_flow', category: 'flow', id: resolvedFlowId },
+  ];
+  const batch = await executeSequentialBatch(targets, async (target) => {
+    try {
+      const result = await fetchAPI(apiUrl, `/${target.tableName}/${encodeURIComponent(String(target.id))}`, { method: 'DELETE' });
+      return { category: target.category, id: target.id, statusCode: result?.statusCode, success: result?.success };
+    } catch (error) {
+      if (skipNotFound && isNotFoundFlowDeleteError(error)) {
+        return { category: target.category, id: target.id, status: 'skipped_not_found', skipped: true };
+      }
+      throw error;
+    }
+  });
+  const postcondition = await verifyFlowAbsent(apiUrl, resolvedFlowId);
+  if (batch.status === 'partial_failure') {
+    return {
+      action: 'delete_flow_partial_failure',
+      status: 'partial_failure',
+      ...preview,
+      deleted: batch.completed,
+      failure: { ...batch.failure, target: targets[batch.failure.index] },
+      remainingIndexes: batch.remainingIndexes,
+      remainingTargets: batch.remainingIndexes.map((index) => targets[index]),
+      requiresNewPreview: true,
+      postcondition,
+    };
+  }
+  return {
+    action: 'flow_deleted',
+    ...preview,
+    deleted: batch.completed,
+    postcondition,
+    flowReload: naturalPartialReload('Flow deletion reloads the active flow registry and removes queued execution jobs owned by the deleted flow.'),
+  };
+}
+
+export async function deleteFlowStep(apiUrl, {
+  flowName,
+  flowId,
+  stepId,
+  stepKey,
+  expectedFlowId,
+  expectedStepId,
+  confirm = false,
+  globalRulesAckKey,
+}) {
+  if (stepId === undefined && !stepKey) throw new Error('Provide stepId or stepKey.');
+  if (stepId !== undefined && stepKey) throw new Error('Provide stepId or stepKey, not both.');
+  if (stepKey && !flowName && flowId === undefined) throw new Error('flowName or flowId is required when locating a step by stepKey.');
+  const flow = flowName || flowId !== undefined ? await resolveFlowForOperation(apiUrl, { flowName, flowId }) : null;
+  const resolvedFlowId = flow ? getId(flow) : null;
+  const step = stepId !== undefined
+    ? await findRecord(apiUrl, 'enfyra_flow_step', { id: { _eq: stepId } }, 'id,_id,key,type,stepOrder,isEnabled,flow.id,flow.name,parent.id')
+    : await findRecord(apiUrl, 'enfyra_flow_step', { flow: { id: { _eq: resolvedFlowId } }, key: { _eq: stepKey } }, 'id,_id,key,type,stepOrder,isEnabled,flow.id,flow.name,parent.id');
+  if (!step) throw new Error(`Flow step not found: ${stepId ?? stepKey}`);
+  const resolvedStepId = getId(step);
+  const stepFlowId = step.flow?.id ?? step.flow?._id ?? null;
+  if (resolvedFlowId !== null && String(stepFlowId) !== String(resolvedFlowId)) {
+    throw new Error(`Flow step ${resolvedStepId} does not belong to flow ${resolvedFlowId}.`);
+  }
+  if (confirm && (expectedStepId === undefined || expectedStepId === null)) {
+    throw new Error('expectedStepId is required when confirm=true. Pass the exact step id returned by the preview.');
+  }
+  if (confirm && (expectedFlowId === undefined || expectedFlowId === null)) {
+    throw new Error('expectedFlowId is required when confirm=true. Pass the exact flow id returned by the preview.');
+  }
+  if (expectedStepId !== undefined && expectedStepId !== null && String(resolvedStepId) !== String(expectedStepId)) {
+    throw new Error(`Flow step id mismatch: resolved ${resolvedStepId}, expected ${expectedStepId}.`);
+  }
+  if (expectedFlowId !== undefined && expectedFlowId !== null && String(stepFlowId) !== String(expectedFlowId)) {
+    throw new Error(`Flow step flow id mismatch: resolved ${stepFlowId}, expected ${expectedFlowId}.`);
+  }
+  const allSteps = stepFlowId
+    ? await fetchRecords(apiUrl, 'enfyra_flow_step', { flow: { id: { _eq: stepFlowId } } }, 'id,_id,key,type,stepOrder,isEnabled,parent.id', 1000)
+    : [];
+  const allStepsById = new Map(allSteps.map((row) => [String(getId(row)), row]));
+  const children = allSteps.filter((row) => isDescendantOf(row, resolvedStepId, allStepsById));
+  const orderedSteps = orderFlowStepsForDeletion([step, ...children]);
+  const preview = {
+    flow: { id: stepFlowId, name: step.flow?.name ?? flow?.name ?? null },
+    step: { id: resolvedStepId, key: step.key, type: step.type, stepOrder: step.stepOrder, isEnabled: step.isEnabled !== false },
+    dependencies: { childSteps: summarizeFlowRows(orderedSteps.filter((row) => String(getId(row)) !== String(resolvedStepId)), ['id', 'key', 'type', 'stepOrder', 'isEnabled']) },
+  };
+  if (!confirm) {
+    return {
+      action: 'delete_flow_step_preview',
+      ...preview,
+      postcondition: {
+        verificationMethod: 'not_run_preview',
+        confirmedAbsent: false,
+        remainingStepIds: orderedSteps.map(getId),
+      },
+      next: 'Call delete_flow_step again with the same locator, confirm=true, expectedFlowId, and expectedStepId from this preview.',
+    };
+  }
+  assertGlobalRulesAck(globalRulesAckKey);
+  const batch = await executeSequentialBatch(orderedSteps, async (target) => fetchAPI(
+    apiUrl,
+    `/enfyra_flow_step/${encodeURIComponent(String(getId(target)))}`,
+    { method: 'DELETE' },
+  ));
+  const remaining = await fetchRecords(apiUrl, 'enfyra_flow_step', { id: { _in: orderedSteps.map(getId) } }, 'id,_id,key', 1000);
+  const postcondition = {
+    verificationMethod: 'flow_steps_reloaded',
+    confirmedAbsent: batch.status === 'completed' && remaining.length === 0,
+    remainingStepIds: remaining.map(getId),
+  };
+  return {
+    action: batch.status === 'partial_failure'
+      ? 'delete_flow_step_partial_failure'
+      : postcondition.confirmedAbsent ? 'flow_step_deleted' : 'delete_flow_step_unverified',
+    ...preview,
+    ...(batch.status === 'partial_failure'
+      ? {
+        status: 'partial_failure',
+        deleted: batch.completed,
+        failure: batch.failure,
+        remainingIndexes: batch.remainingIndexes,
+        remainingTargets: batch.remainingIndexes.map((index) => orderedSteps[index]),
+        requiresNewPreview: true,
+      }
+      : { deleted: batch.completed }),
+    postcondition,
+    reload: naturalPartialReload('Flow step deletion reloads the active flow registry.'),
+  };
 }
 
 export async function ensureFlowStep(apiUrl, {

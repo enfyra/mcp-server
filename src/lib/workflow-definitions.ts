@@ -393,7 +393,7 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'flow_workflow', 'ensure_flow', 'ensure_flow_trigger', 'plan_flow_steps', 'discover_script_contexts'],
     inspectTools: ['search_runtime_zone', 'inspect_feature', 'query_table'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts'],
-    writeTools: ['flow_workflow', 'ensure_flow', 'ensure_flow_trigger', 'remove_flow_trigger', 'plan_flow_steps'],
+    writeTools: ['flow_workflow', 'ensure_flow', 'ensure_flow_trigger', 'remove_flow_trigger', 'delete_flow', 'delete_flow_step', 'plan_flow_steps'],
     verifyTools: ['test_flow_step', 'run_admin_test', 'trigger_flow'],
     avoidTools: [
       {
@@ -408,6 +408,7 @@ export const TOOL_WORKFLOWS = [
     nextStepTemplate: [
       'Use flow_workflow with apply=false for multi-step flows, or ensure_flow when only the base flow definition changes.',
       'Use ensure_flow_trigger after the flow exists to attach schedule, event, or webhook activation. Use remove_flow_trigger to disable one.',
+      'Physical deletion is preview-first: use delete_flow for a disabled flow and its owned triggers/steps, or delete_flow_step for one step. Never confirm delete_flow while the flow is enabled.',
       'Prefer fixed step types for static config. Fixed-step config is not template-transformed; use one focused script step for @FLOW_PAYLOAD/@FLOW_LAST/@FLOW values.',
       'In scripts call @LOGS(message, details?); @LOGS has no .info/.warn/.error/.debug methods.',
       'Pass the reviewed sourceFile/sourceResourceUri to flow_workflow, ensure_*_flow_step, and test_flow_step so validation, test, and save consume the same tmp artifact.',

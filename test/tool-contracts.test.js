@@ -6,6 +6,7 @@ import {
   installToolAnnotations,
   isCatalogExecutable,
 } from '../dist/lib/tool-contracts.js';
+import { destructiveToolInputsMatch } from '../dist/lib/session-safety.js';
 
 test('tool contracts distinguish reads, mutations, destructive operations, and local builders', () => {
   assert.deepEqual(getToolContract('query_table').annotations, {
@@ -17,6 +18,8 @@ test('tool contracts distinguish reads, mutations, destructive operations, and l
   });
   assert.equal(getToolContract('delete_records').annotations.readOnlyHint, false);
   assert.equal(getToolContract('delete_records').annotations.destructiveHint, true);
+  assert.equal(getToolContract('delete_flow').annotations.destructiveHint, true);
+  assert.equal(getToolContract('delete_flow_step').annotations.destructiveHint, true);
   assert.equal(getToolContract('create_handler').annotations.idempotentHint, false);
   assert.equal(getToolContract('build_extension_drawer').annotations.openWorldHint, false);
   assert.equal(getToolContract('build_extension_drawer').annotations.readOnlyHint, true);
@@ -46,4 +49,15 @@ test('annotation installer adds a complete annotation contract to legacy tool re
   assert.equal(registrations.length, 1);
   assert.equal(registrations[0].length, 5);
   assert.deepEqual(registrations[0][3], getToolContract('query_table').annotations);
+});
+
+test('flow destructive confirmation fingerprints ignore preview-only expected ids and names', () => {
+  assert.equal(destructiveToolInputsMatch(
+    { flowId: 7, confirm: false },
+    { flowId: 7, expectedFlowId: 7, expectedFlowName: 'Usage flow', confirm: true },
+  ), true);
+  assert.equal(destructiveToolInputsMatch(
+    { flowId: 7, stepId: 71, confirm: false },
+    { flowId: 7, stepId: 71, expectedFlowId: 7, expectedStepId: 71, confirm: true },
+  ), true);
 });

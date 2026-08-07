@@ -122,7 +122,7 @@ test('record read and delete output contracts require deterministic receipts', (
     action: 'deleted_records',
   }).success, false);
 
-  for (const toolName of ['delete_tables', 'delete_columns', 'delete_relations', 'delete_method', 'delete_route']) {
+  for (const toolName of ['delete_tables', 'delete_columns', 'delete_relations', 'delete_method', 'delete_route', 'delete_flow', 'delete_flow_step']) {
     assert.equal(validateStructuredToolOutput(toolName, {
       responseFormat: 'json-v1',
       action: `${toolName}_preview`,

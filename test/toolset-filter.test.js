@@ -62,7 +62,7 @@ test('guided domain profiles expose a bounded task surface', () => {
   for (const profile of ['extension', 'schema', 'runtime', 'operations']) {
     const visible = [...registered].filter((name) => isToolVisibleInToolset(name, 'guided', profile));
     assert.ok(visible.length >= 20, `${profile} exposes too few tools: ${visible.length}`);
-    assert.ok(visible.length <= 46, `${profile} exposes too many tools: ${visible.length}`);
+    assert.ok(visible.length <= 48, `${profile} exposes too many tools: ${visible.length}`);
     assert.ok(visible.includes('get_enfyra_api_context'));
     assert.ok(visible.includes('get_enfyra_required_knowledge'));
     assert.ok(visible.includes('discover_enfyra_workflows'));
@@ -117,6 +117,8 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('ensure_flow', 'guided'), true);
   assert.equal(isToolVisibleInToolset('ensure_flow_trigger', 'guided'), true);
   assert.equal(isToolVisibleInToolset('remove_flow_trigger', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('delete_flow', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('delete_flow_step', 'guided'), true);
   assert.equal(isToolVisibleInToolset('plan_flow_steps', 'guided'), true);
   assert.equal(isToolVisibleInToolset('test_graphql', 'guided'), true);
   assert.equal(isToolVisibleInToolset('build_dynamic_repository_usage', 'guided'), true);

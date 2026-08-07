@@ -346,6 +346,7 @@ const DYNAMIC_CODE_SECTIONS = [
       'ESV fixed flow step configs are static host-side objects. Do not put @FLOW_PAYLOAD, @FLOW_LAST, or @FLOW inside query/create/update/delete/http/sleep/trigger/log config; use a focused script step when runtime values are required.',
       'trigger_flow only executes enabled flows. Verify a disabled flow with test_flow_step; enable it explicitly before testing the real queue/runtime trigger path.',
       'For test_flow_step, pass runtime @FLOW_PAYLOAD values through the payload object. mockFlow is only for advanced $last/$meta flow context.',
+      'Flow deletion is preview-first. Use delete_flow for physical flow cleanup only after the exact flow has been disabled; use delete_flow_step for one step. Never confirm deletion of an enabled flow, and do not use generic delete_records for flow metadata.',
       'For intentional HTTP errors, numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message).',
       'When numeric helpers include details, pass an object or array such as @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut.',
       'Use @THROW.http(status, message, details?) for dynamic status codes. Use @THROW.notFound(resource, id?) and @THROW.duplicate(resource, field, value) only when you intentionally want Enfyra-formatted semantic messages.',

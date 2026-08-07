@@ -118,6 +118,8 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     'ensure_flow',
     'ensure_flow_trigger',
     'remove_flow_trigger',
+    'delete_flow',
+    'delete_flow_step',
     'plan_flow_steps',
   ],
   operations: [

@@ -106,12 +106,12 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   enfyra_flow: {
     create: 'flow_workflow',
     update: 'flow_workflow',
-    delete: 'flow_workflow or disable via flow editor — physical removal requires full toolset',
+    delete: 'delete_flow (preview first; the flow must already be disabled)',
   },
   enfyra_flow_step: {
     create: 'flow_workflow (manages steps within a flow)',
     update: 'flow_workflow or patch_script_source / update_script_source for source edits',
-    delete: 'flow_workflow (omit the step to remove it) — individual step removal requires full toolset',
+    delete: 'delete_flow_step (preview first)',
   },
   enfyra_flow_trigger: {
     create: 'ensure_flow_trigger',

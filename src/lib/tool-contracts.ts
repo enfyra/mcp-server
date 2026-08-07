@@ -7,6 +7,8 @@ const DESTRUCTIVE_TOOLS = new Set([
   'delete_relations',
   'delete_method',
   'delete_route',
+  'delete_flow',
+  'delete_flow_step',
   'remove_field_permission',
 ]);
 
