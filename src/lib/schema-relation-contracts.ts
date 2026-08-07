@@ -9,6 +9,7 @@ import {
   FALLBACK_COLUMN_TYPES,
   FORBIDDEN_RELATION_KEYS,
   RELATION_TYPE_ALIASES,
+  RelationConstraintUpdate,
   RelationPatch,
   VALID_RELATION_TYPES,
   normalizeTablesFromMetadata,
@@ -89,6 +90,116 @@ export function assertNoForbiddenRelationKeys(args: AnyRecord) {
       throw new Error(`create_relations must not include physical column field "${key}". Use sourceTableId/targetTableId and relation propertyName only; Enfyra derives FK and junction columns.`);
     }
   }
+}
+
+const RELATION_CONSTRAINT_STRUCTURAL_KEYS = new Set([
+  'targetTable',
+  'targetTableId',
+  'type',
+  'propertyName',
+  'inversePropertyName',
+  'mappedBy',
+  'description',
+]);
+
+const RELATION_CONSTRAINT_ALLOWED_KEYS = new Set([
+  'tableId',
+  'relationId',
+  'isNullable',
+  'onDelete',
+]);
+
+const VALID_RELATION_ON_DELETE = new Set(['CASCADE', 'RESTRICT', 'SET NULL']);
+
+function isMissingIdentifier(value: unknown) {
+  return value === undefined
+    || value === null
+    || (typeof value === 'string' && value.trim() === '');
+}
+
+export function validateRelationConstraintUpdate(item: AnyRecord): RelationConstraintUpdate {
+  if (isMissingIdentifier(item.tableId)) {
+    throw new Error('Relation constraint update requires a non-empty tableId.');
+  }
+  if (isMissingIdentifier(item.relationId)) {
+    throw new Error('Relation constraint update requires a non-empty relationId.');
+  }
+
+  for (const key of Object.keys(item)) {
+    if (RELATION_CONSTRAINT_STRUCTURAL_KEYS.has(key)) {
+      throw new Error(`update_relation_constraints does not accept structural relation field "${key}".`);
+    }
+    if (FORBIDDEN_RELATION_KEYS.includes(key)) {
+      throw new Error(`update_relation_constraints does not accept physical relation field "${key}".`);
+    }
+    if (!RELATION_CONSTRAINT_ALLOWED_KEYS.has(key)) {
+      throw new Error(`update_relation_constraints does not accept field "${key}".`);
+    }
+  }
+
+  if (item.isNullable === undefined && item.onDelete === undefined) {
+    throw new Error('Relation constraint update requires isNullable and/or onDelete.');
+  }
+  if (item.isNullable !== undefined && typeof item.isNullable !== 'boolean') {
+    throw new Error('Relation constraint update field "isNullable" must be a boolean.');
+  }
+  if (item.onDelete !== undefined && !VALID_RELATION_ON_DELETE.has(item.onDelete)) {
+    throw new Error('Relation constraint update field "onDelete" must be CASCADE, RESTRICT, or SET NULL.');
+  }
+
+  return {
+    tableId: item.tableId,
+    relationId: item.relationId,
+    ...(item.isNullable !== undefined ? { isNullable: item.isNullable } : {}),
+    ...(item.onDelete !== undefined ? { onDelete: item.onDelete } : {}),
+  };
+}
+
+export function assertNoDuplicateRelationConstraintTargets(
+  updates: readonly RelationConstraintUpdate[],
+): void {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const update of updates) {
+    const target = `${String(update.tableId)}:${String(update.relationId)}`;
+    if (seen.has(target)) duplicates.add(target);
+    seen.add(target);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(
+      `update_relation_constraints rejects duplicate table/relation targets: ${[...duplicates].join(', ')}`,
+    );
+  }
+}
+
+function canonicalizeRelationValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value
+      .map(canonicalizeRelationValue)
+      .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, canonicalizeRelationValue(entry)]),
+    );
+  }
+  return value;
+}
+
+export function relationMetadataFingerprint(
+  relation: RelationPatch,
+  options: { omitConstraints?: boolean } = {},
+): string {
+  const normalized = { ...relation };
+  delete normalized.id;
+  delete normalized._id;
+  if (options.omitConstraints) {
+    delete normalized.isNullable;
+    delete normalized.onDelete;
+  }
+  return JSON.stringify(canonicalizeRelationValue(normalized));
 }
 
 export function sanitizeExistingRelationForTablePatch(relation: AnyRecord): RelationPatch {

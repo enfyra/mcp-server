@@ -163,7 +163,7 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'get_schema_design_context', 'inspect_table', 'get_all_tables'],
     inspectTools: ['get_schema_design_context', 'inspect_table', 'get_table_metadata', 'get_all_tables'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_schema_design_context', 'get_enfyra_examples'],
-    writeTools: ['create_tables', 'update_tables', 'delete_tables', 'confirm_schema_mutation', 'create_columns', 'update_columns', 'delete_columns', 'create_relations', 'delete_relations', 'ensure_column_rule'],
+    writeTools: ['create_tables', 'update_tables', 'delete_tables', 'confirm_schema_mutation', 'create_columns', 'update_columns', 'delete_columns', 'create_relations', 'update_relation_constraints', 'delete_relations', 'ensure_column_rule'],
     verifyTools: ['inspect_table', 'get_table_metadata'],
     avoidTools: [
       {

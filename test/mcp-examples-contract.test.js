@@ -23,6 +23,7 @@ const WRITE_TOOLS = [
   'create_columns',
   'update_columns',
   'create_relations',
+  'update_relation_constraints',
   'delete_relations',
   'create_pre_hook',
   'create_post_hook',

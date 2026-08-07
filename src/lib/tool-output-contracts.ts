@@ -186,6 +186,7 @@ const CORE_ACTION_OUTPUT_TOOLS = new Set([
   'update_columns',
   'delete_columns',
   'create_relations',
+  'update_relation_constraints',
   'delete_relations',
   'create_records',
   'update_records',

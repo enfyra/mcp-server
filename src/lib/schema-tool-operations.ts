@@ -37,6 +37,8 @@ import {
   resolveTableIdentifierFromMetadata,
   sanitizeExistingRelationForTablePatch,
   splitRelationConstraintGroups,
+  validateRelationConstraintUpdate,
+  relationMetadataFingerprint,
   stripAutoManagedColumns,
   summarizeCreatedTableSchema,
   verifyColumnCascade,
@@ -119,6 +121,93 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       });
       });
     }
+
+  async function updateRelationConstraints({ globalRulesAckKey, ...args }) {
+    const update = validateRelationConstraintUpdate(args);
+    assertGlobalRulesAck(globalRulesAckKey);
+    return withSchemaQueue(async () => {
+      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, update.tableId);
+      if (!tableData) {
+        throw new Error(`Table with ID ${update.tableId} not found.`);
+      }
+
+      const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
+      const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
+      const targetIndex = existingRelations.findIndex(
+        (relation) => String(getId(relation)) === String(update.relationId),
+      );
+      if (targetIndex < 0) {
+        throw new Error(`Relation ${update.relationId} was not found on table ${update.tableId}; refusing schema constraint patch.`);
+      }
+
+      const target = existingRelations[targetIndex];
+      const relations = existingRelations.slice();
+      relations[targetIndex] = {
+        ...target,
+        ...(update.isNullable !== undefined ? { isNullable: update.isNullable } : {}),
+        ...(update.onDelete !== undefined ? { onDelete: update.onDelete } : {}),
+      };
+      const expectedTargetStructure = relationMetadataFingerprint(target, { omitConstraints: true });
+      const expectedSiblingStructures = new Map(
+        existingRelations
+          .filter((_, index) => index !== targetIndex)
+          .map((relation) => [String(getId(relation)), relationMetadataFingerprint(relation)]),
+      );
+      const result = await patchTableAutoConfirm(ENFYRA_API_URL, update.tableId, { relations });
+      const afterRelations = await verifyRelationCascade(ENFYRA_API_URL, update.tableId, beforeIds, {
+        action: 'update',
+        relationId: update.relationId,
+      });
+      const savedTarget = afterRelations.find(
+        (relation) => String(getId(relation)) === String(update.relationId),
+      );
+      if (!savedTarget) {
+        throw new Error(`Schema constraint verification failed: relation ${update.relationId} was not found after update.`);
+      }
+      if (update.isNullable !== undefined && savedTarget.isNullable !== update.isNullable) {
+        throw new Error(`Schema constraint verification failed: relation ${update.relationId} isNullable was not saved.`);
+      }
+      if (update.onDelete !== undefined && savedTarget.onDelete !== update.onDelete) {
+        throw new Error(`Schema constraint verification failed: relation ${update.relationId} onDelete was not saved.`);
+      }
+      const afterIds = afterRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
+      if (beforeIds.length !== afterIds.length || beforeIds.some((id) => !afterIds.includes(id))) {
+        throw new Error(`Schema constraint verification failed: relation ids changed unexpectedly on table ${update.tableId}.`);
+      }
+      if (relationMetadataFingerprint(savedTarget, { omitConstraints: true }) !== expectedTargetStructure) {
+        throw new Error(`Schema constraint verification failed: relation ${update.relationId} structure changed unexpectedly.`);
+      }
+      const savedSiblingStructures = new Map(
+        afterRelations
+          .filter((relation) => String(getId(relation)) !== String(update.relationId))
+          .map((relation) => [String(getId(relation)), relationMetadataFingerprint(relation)]),
+      );
+      const siblingRelationMetadataPreserved =
+        expectedSiblingStructures.size === savedSiblingStructures.size
+        && [...expectedSiblingStructures].every(([id, fingerprint]) => savedSiblingStructures.get(id) === fingerprint);
+      if (!siblingRelationMetadataPreserved) {
+        throw new Error(`Schema constraint verification failed: sibling relation metadata changed unexpectedly on table ${update.tableId}.`);
+      }
+
+      return jsonContent({
+        action: 'relation_constraints_updated',
+        tableId: update.tableId,
+        relationId: update.relationId,
+        relation: savedTarget,
+        result,
+        postcondition: {
+          verificationMethod: 'table_schema_relation_constraints',
+          confirmedRelationId: getId(savedTarget),
+          relationStillPresent: true,
+          ...(update.isNullable !== undefined ? { isNullable: savedTarget.isNullable } : {}),
+          ...(update.onDelete !== undefined ? { onDelete: savedTarget.onDelete } : {}),
+          siblingRelationIdsPreserved: true,
+          siblingRelationMetadataPreserved,
+          targetRelationStructurePreserved: true,
+        },
+      });
+    });
+  }
 
   async function removeColumnFromTable({ tableId, columnId, confirm, globalRulesAckKey }) {
       return withSchemaQueue(async () => {
@@ -539,6 +628,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
     removeColumnFromTable,
     removeRelationFromTable,
     updateOneColumn,
+    updateRelationConstraints,
     updateOneTable,
   };
 }

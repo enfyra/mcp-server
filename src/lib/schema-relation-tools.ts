@@ -10,8 +10,10 @@ import { executeSequentialBatch } from './sequential-batch.js';
 import {
   AnyRecord,
   assertBulkLimit,
+  assertNoDuplicateRelationConstraintTargets,
   bulkObjectArrayParam,
   parseBulkItemsParam,
+  validateRelationConstraintUpdate,
 } from './table-tool-logic.js';
 
 export function registerSchemaRelationTools(server, ENFYRA_API_URL, options: { toolset?: string } = {}) {
@@ -19,6 +21,7 @@ export function registerSchemaRelationTools(server, ENFYRA_API_URL, options: { t
   const {
     appendRelationToTable,
     removeRelationFromTable,
+    updateRelationConstraints,
   } = createSchemaToolOperations(ENFYRA_API_URL, toolset);
   // ─── RELATION MUTATIONS ───
   
@@ -44,6 +47,49 @@ export function registerSchemaRelationTools(server, ENFYRA_API_URL, options: { t
         return jsonContent({ action: 'relations_created', requested: parsedItems.length, createdCount: created.length, sequential: true, created });
       }
     );
+
+  server.tool(
+    'update_relation_constraints',
+    'Update isNullable and/or onDelete for existing relations without changing relation structure. Always pass items as a native JSON array; items run sequentially through the schema queue and preserve the complete table relation aggregate.',
+    {
+      items: bulkObjectArrayParam(z, 'Relation constraint updates').describe('Native JSON array of relation constraint updates: [{ tableId, relationId, isNullable?, onDelete? }]. onDelete must be CASCADE, RESTRICT, or SET NULL. Structural and physical relation fields are rejected.'),
+      maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+    },
+    async ({ items, maxItems, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      const parsedItems = parseBulkItemsParam('items', items);
+      assertBulkLimit('update_relation_constraints', parsedItems, maxItems);
+      const validatedItems = parsedItems.map((item, index) => {
+        try {
+          return validateRelationConstraintUpdate(item);
+        } catch (error) {
+          throw new Error(`items[${index}]: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      });
+      assertNoDuplicateRelationConstraintTargets(validatedItems);
+      const batch = await executeSequentialBatch(validatedItems, async (item, index) => {
+        const result = await updateRelationConstraints({ ...item, globalRulesAckKey });
+        return { index, ...JSON.parse(result.content[0].text) };
+      });
+      const updated = batch.completed;
+      const payload = {
+        action: batch.status === 'completed' ? 'relation_constraints_updated' : 'update_relation_constraints_partial_failure',
+        requested: parsedItems.length,
+        updatedCount: updated.length,
+        sequential: true,
+        updated,
+        ...(batch.status === 'partial_failure' ? {
+          status: 'partial_failure',
+          failure: batch.failure,
+          remainingIndexes: batch.remainingIndexes,
+          requiresNewInspection: true,
+        } : {}),
+      };
+      const result = jsonContent(payload);
+      return batch.status === 'partial_failure' ? { ...result, isError: true } : result;
+    },
+  );
 
   server.tool(
       'delete_relations',

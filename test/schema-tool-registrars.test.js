@@ -31,6 +31,7 @@ import {
   resolveTableFromMetadata,
   resolveTableFromMetadataByName,
   sanitizeExistingRelationForTablePatch,
+  validateRelationConstraintUpdate,
 } from '../dist/lib/table-tools.js';
 import { prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource } from '../dist/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../dist/lib/route-guards.js';
@@ -203,6 +204,115 @@ test('update_columns persists rich-text metadata through the table cascade patch
     assert.deepEqual(patchBodies[1].columns[0].metadata, {
       richText: { toolbar: 'bold | link' },
     });
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('update_relation_constraints preserves relation structure and sibling ids', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let currentMetadata = {
+    id: 9,
+    name: 'mcp_issue',
+    columns: [{ id: 1, name: 'title', type: 'varchar' }],
+    relations: [
+      { id: 20, targetTable: { id: 4, name: 'enfyra_user' }, type: 'many-to-one', propertyName: 'owner', mappedBy: null, isNullable: true, onDelete: 'SET NULL', description: 'Owner' },
+      { id: 21, targetTable: { id: 5, name: 'mcp_project' }, type: 'many-to-one', propertyName: 'project', isNullable: false, onDelete: 'CASCADE' },
+    ],
+  };
+  const patchBodies = [];
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    if (urlText.includes('/enfyra_table?')) return jsonResponse({ data: [{ id: 9, name: 'mcp_issue' }] });
+    if (urlText.endsWith('/metadata/mcp_issue')) return jsonResponse({ data: currentMetadata });
+    if (urlText.includes('/enfyra_table/9') && init.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patchBodies.push(body);
+      if (!urlText.includes('schemaConfirmHash=')) return jsonResponse({ data: { _preview: true, requiredConfirmHash: 'confirm-relation' } });
+      currentMetadata = { ...currentMetadata, relations: body.relations };
+      return jsonResponse({ data: [{ id: 9, name: 'mcp_issue' }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    const result = await server.get('update_relation_constraints').handler({
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      items: [{ tableId: 9, relationId: 20, isNullable: false, onDelete: 'CASCADE' }],
+    });
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.action, 'relation_constraints_updated');
+    assert.equal(payload.updatedCount, 1);
+    assert.equal(patchBodies.length, 2);
+    const updated = patchBodies[1].relations[0];
+    assert.equal(updated.id, 20);
+    assert.equal(updated.targetTable, 4);
+    assert.equal(updated.propertyName, 'owner');
+    assert.equal(updated.description, 'Owner');
+    assert.equal(updated.isNullable, false);
+    assert.equal(updated.onDelete, 'CASCADE');
+    assert.deepEqual(patchBodies[1].relations.map((relation) => relation.id), [20, 21]);
+    assert.equal(payload.updated[0].postcondition.siblingRelationIdsPreserved, true);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('update_relation_constraints rejects invalid focused inputs', () => {
+  assert.throws(() => validateRelationConstraintUpdate({ tableId: 1, relationId: 2 }), /requires isNullable and\/or onDelete/);
+  assert.throws(() => validateRelationConstraintUpdate({ tableId: 1, relationId: 2, onDelete: 'NOPE' }), /must be CASCADE, RESTRICT, or SET NULL/);
+  assert.throws(() => validateRelationConstraintUpdate({ tableId: 1, relationId: 2, isNullable: true, propertyName: 'owner' }), /structural relation field/);
+  assert.throws(() => validateRelationConstraintUpdate({ tableId: 1, relationId: 2, isNullable: true, foreignKeyColumn: 'ownerId' }), /physical relation field/);
+  assert.throws(() => validateRelationConstraintUpdate({ tableId: '', relationId: 2, isNullable: true }), /non-empty tableId/);
+});
+
+test('update_relation_constraints rejects duplicate table/relation targets before mutation', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let patchCount = 0;
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    if (urlText.includes('/enfyra_table?')) return jsonResponse({ data: [{ id: 9, name: 'mcp_issue' }] });
+    if (urlText.endsWith('/metadata/mcp_issue')) return jsonResponse({
+      data: {
+        id: 9,
+        name: 'mcp_issue',
+        columns: [{ id: 1, name: 'title', type: 'varchar' }],
+        relations: [{ id: 20, propertyName: 'owner', targetTable: { id: 4, name: 'enfyra_user' }, type: 'many-to-one' }],
+      },
+    });
+    if (urlText.includes('/enfyra_table/9') && init.method === 'PATCH') {
+      patchCount += 1;
+      return jsonResponse({ data: { _preview: true, requiredConfirmHash: 'unexpected' } });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await assert.rejects(
+      server.get('update_relation_constraints').handler({
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+        items: [
+          { tableId: 9, relationId: 20, onDelete: 'CASCADE' },
+          { tableId: 9, relationId: 20, onDelete: 'RESTRICT' },
+        ],
+      }),
+      /duplicate table\/relation targets/,
+    );
+    assert.equal(patchCount, 0);
   } finally {
     resetTokens();
     global.fetch = originalFetch;

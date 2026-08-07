@@ -11,7 +11,7 @@ import {
   getId,
 } from './schema-relation-contracts.js';
 import type { AnyRecord, ColumnPatch } from './schema-tool-types.js';
-export type { AnyRecord, CascadeVerifyOptions, ColumnPatch, ConstraintGroup, RelationPatch } from './schema-tool-types.js';
+export type { AnyRecord, CascadeVerifyOptions, ColumnPatch, ConstraintGroup, RelationConstraintUpdate, RelationPatch } from './schema-tool-types.js';
 
 export function bulkObjectArrayParam(z, label: string) {
   return z.array(z.record(z.any())).describe(`${label} as a native JSON array of objects. Pass one object in the array for a single mutation.`);

@@ -35,6 +35,13 @@ export type RelationPatch = AnyRecord & {
   description?: string;
 };
 
+export type RelationConstraintUpdate = {
+  tableId: string | number;
+  relationId: string | number;
+  isNullable?: boolean;
+  onDelete?: 'CASCADE' | 'RESTRICT' | 'SET NULL';
+};
+
 export type CascadeVerifyOptions = {
   action: 'create' | 'update' | 'delete';
   columnId?: unknown;

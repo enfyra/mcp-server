@@ -180,6 +180,11 @@ create_relations({
   ]
 })
 
+update_relation_constraints({
+  globalRulesAckKey: "<globalRulesAckKey>",
+  items: [{ tableId: "<table_id>", relationId: "<relation_id>", onDelete: "CASCADE" }]
+})
+
 // Destructive tools preview first.
 delete_columns({
   items: [{ tableId: "<table_id>", columnId: "<column_id>" }]
@@ -192,7 +197,8 @@ delete_columns({
   items: [{ tableId: "<table_id>", columnId: "<column_id>" }]
 })`,
         notes: [
-          'update_tables/update_columns/update_records reject ambiguous duplicate ids where applicable and run sequentially.',
+          'update_tables/update_columns/update_relation_constraints/update_records reject ambiguous duplicate ids where applicable and run sequentially.',
+          'update_relation_constraints changes only isNullable and/or onDelete; it preserves the full relation and table aggregate.',
           'delete_tables/delete_columns/delete_relations/delete_records return previews unless confirm=true.',
           'Schema tools serialize internally; do not parallelize schema mutation tool calls.',
         ],
