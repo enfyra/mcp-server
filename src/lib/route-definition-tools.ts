@@ -240,7 +240,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
       {
         routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
         name: z.string().describe('Hook name (unique per route)'),
-        code: z.string().optional().describe('Hook JavaScript sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceCode: z.string().optional().describe('Hook JavaScript sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
         sourceFile: z.string().optional().describe('Previously returned hook source artifact tmpFile.'),
         sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the hook.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
@@ -251,15 +251,15 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z),
         knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
       },
-      async ({ routeId, name, code, sourceFile, sourceResourceUri, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
+      async ({ routeId, name, sourceCode, sourceFile, sourceResourceUri, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
         assertGlobalRulesAck(globalRulesAckKey);
         assertDynamicCodeKnowledgeAck(knowledgeAckKey);
-        const materialized = materializeSourceInput({ source: code, sourceFile, sourceResourceUri, fieldName: 'sourceCode', tableName: 'enfyra_pre_hook', id: routeId });
-        code = materialized.source;
+        const materialized = materializeSourceInput({ source: sourceCode, sourceFile, sourceResourceUri, fieldName: 'sourceCode', tableName: 'enfyra_pre_hook', id: routeId });
+        sourceCode = materialized.source;
         const methodMap = await getMethodMap();
         const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
         const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_pre_hook', {
-          sourceCode: code,
+          sourceCode,
           scriptLanguage,
         });
     
@@ -268,7 +268,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
           body: JSON.stringify({
             route: { id: routeId },
             name,
-            sourceCode: code,
+            sourceCode,
             scriptLanguage,
             methods: resolveMethodIds(methodMap, methodNames),
             priority,
@@ -303,7 +303,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
       {
         routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
         name: z.string().describe('Hook name (unique per route)'),
-        code: z.string().optional().describe('Hook JavaScript sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceCode: z.string().optional().describe('Hook JavaScript sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
         sourceFile: z.string().optional().describe('Previously returned hook source artifact tmpFile.'),
         sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the hook.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
@@ -314,15 +314,15 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z),
         knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
       },
-      async ({ routeId, name, code, sourceFile, sourceResourceUri, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
+      async ({ routeId, name, sourceCode, sourceFile, sourceResourceUri, scriptLanguage, methods, priority, isEnabled, globalRulesAckKey, knowledgeAckKey }) => {
         assertGlobalRulesAck(globalRulesAckKey);
         assertDynamicCodeKnowledgeAck(knowledgeAckKey);
-        const materialized = materializeSourceInput({ source: code, sourceFile, sourceResourceUri, fieldName: 'sourceCode', tableName: 'enfyra_post_hook', id: routeId });
-        code = materialized.source;
+        const materialized = materializeSourceInput({ source: sourceCode, sourceFile, sourceResourceUri, fieldName: 'sourceCode', tableName: 'enfyra_post_hook', id: routeId });
+        sourceCode = materialized.source;
         const methodMap = await getMethodMap();
         const methodNames = methods || ['GET', 'POST', 'PATCH', 'DELETE'];
         const scriptValidation = await validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_post_hook', {
-          sourceCode: code,
+          sourceCode,
           scriptLanguage,
         });
     
@@ -331,7 +331,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
           body: JSON.stringify({
             route: { id: routeId },
             name,
-            sourceCode: code,
+            sourceCode,
             scriptLanguage,
             methods: resolveMethodIds(methodMap, methodNames),
             priority,

@@ -153,5 +153,7 @@ test('dynamic endpoint examples preserve TypeORM body usage and shape trusted ou
   assert.match(layeredHooks.code, /create_pre_hook/);
   assert.match(layeredHooks.code, /create_handler/);
   assert.match(layeredHooks.code, /create_post_hook/);
+  assert.match(layeredHooks.code, /sourceCode:/);
+  assert.doesNotMatch(layeredHooks.code, /(?:create_pre_hook|create_post_hook)\(\{[\s\S]*?\n\s+code:/);
   assert.match(layeredHooks.notes.join(' '), /rate limits\/IP allow-deny.*Guard Engine/i);
 });

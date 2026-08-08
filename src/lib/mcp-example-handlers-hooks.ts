@@ -288,7 +288,7 @@ const scope = {
   priority: -20,
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
-  code: \`const incoming = @QUERY.filter || {}
+  sourceCode: \`const incoming = @QUERY.filter || {}
 const scope = { owner: { id: { _eq: @USER.id } } }
 @QUERY.filter = Object.keys(incoming).length
   ? { _and: [incoming, scope] }
@@ -318,7 +318,7 @@ create_post_hook({
   methods: ["GET"],
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
-  code: \`if (@ERROR) {
+  sourceCode: \`if (@ERROR) {
   @LOGS("Orders read failed", @ERROR.message)
   return
 }
@@ -394,7 +394,7 @@ delete @BODY.emailVerificationSentAt\`
   priority: 0,
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   knowledgeAckKey: "<dynamicCodeAckKey from get_enfyra_required_knowledge>",
-  code: \`if (@ERROR) {
+  sourceCode: \`if (@ERROR) {
   @LOGS("Request failed", @ERROR.message)
   return
 }
@@ -407,7 +407,7 @@ if (row) {
 return @DATA\`
 })`,
         notes: [
-          'MCP create_post_hook accepts code as the tool argument, then persists sourceCode/scriptLanguage to Enfyra.',
+          'MCP hook tools accept sourceCode as the inline tool argument, then persist sourceCode/scriptLanguage to Enfyra.',
           'Post-hooks run after success and error paths.',
           'Return non-undefined only when replacing the response body.',
         ],

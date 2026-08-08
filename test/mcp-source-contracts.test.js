@@ -147,6 +147,25 @@ test('code-writing tools require session or explicit required-knowledge acknowle
   assert.doesNotMatch(platformTools, /validate_extension_code[\s\S]{0,500}extensionKnowledgeAckKey/);
 });
 
+test('hook creation tools expose sourceCode as the public source field', () => {
+  const routeDefinitions = readSourceFiles('lib/route-definition-tools.ts');
+  const preHook = routeDefinitions.slice(
+    routeDefinitions.indexOf("'create_pre_hook'"),
+    routeDefinitions.indexOf("'create_post_hook'"),
+  );
+  const postHook = routeDefinitions.slice(routeDefinitions.indexOf("'create_post_hook'"));
+
+  for (const source of [preHook, postHook]) {
+    assert.match(source, /sourceCode: z\.string\(\)\.optional\(\)/);
+    assert.doesNotMatch(source, /\bcode: z\.string\(\)\.optional\(\)/);
+    assert.match(source, /sourceFile: z\.string\(\)\.optional\(\)/);
+    assert.match(source, /sourceResourceUri: z\.string\(\)\.optional\(\)/);
+    assert.match(source, /sourceCode, sourceFile, sourceResourceUri/);
+    assert.match(source, /sourceCode = materialized\.source/);
+    assert.match(source, /sourceCode,\n\s+scriptLanguage/);
+  }
+});
+
 test('mcp server exposes route platform operation tools', () => {
   const entry = readEntrySource();
   const tableTools = readSchemaSource();
