@@ -35,6 +35,15 @@ test('writeSourceArtifact stores full source in tmp and returns compact metadata
   assert.ok(artifact.preview.length <= 600);
 });
 
+test('source input accepts public code and sourceCode aliases without weakening exclusivity', () => {
+  assert.equal(resolveSourceInput({ code: 'hook code', fieldName: 'sourceCode' }), 'hook code');
+  assert.equal(resolveSourceInput({ sourceCode: 'script code', fieldName: 'sourceCode' }), 'script code');
+  assert.throws(
+    () => resolveSourceInput({ source: 'inline', code: 'alias', fieldName: 'sourceCode' }),
+    /exactly one/,
+  );
+});
+
 test('source input rejects arbitrary files and ambiguous inline/artifact inputs', () => {
   assert.throws(
     () => readSourceArtifactFile('/tmp/not-an-enfyra-artifact.js'),

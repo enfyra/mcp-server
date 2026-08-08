@@ -112,30 +112,35 @@ export function readSourceArtifactFile(tmpFile: string) {
   return readFileSync(artifact.path, 'utf8');
 }
 
-export function resolveSourceInput({ source, sourceFile, sourceResourceUri, fieldName }: {
+export function resolveSourceInput({ source, sourceCode, code, sourceFile, sourceResourceUri, fieldName }: {
   source?: string;
+  sourceCode?: string;
+  code?: string;
   sourceFile?: string;
   sourceResourceUri?: string;
   fieldName: string;
 }) {
-  const provided = [source !== undefined, sourceFile !== undefined, sourceResourceUri !== undefined].filter(Boolean).length;
-  if (provided !== 1) {
+  const inlineSources = [source, sourceCode, code].filter((value) => value !== undefined);
+  const provided = [inlineSources.length > 0, sourceFile !== undefined, sourceResourceUri !== undefined].filter(Boolean).length;
+  if (provided !== 1 || inlineSources.length > 1) {
     throw new Error(`Provide exactly one of ${fieldName}, sourceFile, or sourceResourceUri.`);
   }
-  if (source !== undefined) return source;
+  if (inlineSources.length === 1) return inlineSources[0];
   if (sourceFile !== undefined) return readSourceArtifactFile(sourceFile);
   return readSourceArtifactResource(sourceResourceUri!).text;
 }
 
-export function materializeSourceInput({ source, sourceFile, sourceResourceUri, fieldName, tableName = 'mcp', id = 'input' }: {
+export function materializeSourceInput({ source, sourceCode, code, sourceFile, sourceResourceUri, fieldName, tableName = 'mcp', id = 'input' }: {
   source?: string;
+  sourceCode?: string;
+  code?: string;
   sourceFile?: string;
   sourceResourceUri?: string;
   fieldName: string;
   tableName?: string;
   id?: string | number;
 }) {
-  const resolved = resolveSourceInput({ source, sourceFile, sourceResourceUri, fieldName });
+  const resolved = resolveSourceInput({ source, sourceCode, code, sourceFile, sourceResourceUri, fieldName });
   const artifact = writeSourceArtifact({ tableName, id, fieldName, source: resolved });
   return {
     source: readSourceArtifactFile(artifact.tmpFile),
