@@ -12,7 +12,7 @@ import { jsonContent } from './response-format.js';
 import {
   AnyRecord,
   RelationPatch,
-  assertColumnContractBroadening,
+  getColumnContractBroadening,
   assertColumnNameCanBeCreated,
   assertIndexesDoNotReferenceUniqueFields,
   assertNoColumnRelationNameCollision,
@@ -582,7 +582,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         throw new Error(`Column ${columnId} was not found on table ${tableId}; refusing schema cascade patch.`);
       }
       const existingColumn = existingColumns.find((column) => String(getId(column)) === String(columnId));
-      const contractBroadening = assertColumnContractBroadening(existingColumn || {}, {
+      const contractBroadening = getColumnContractBroadening(existingColumn || {}, {
         isPublished,
         isUpdatable,
       });

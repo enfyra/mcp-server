@@ -49,9 +49,9 @@ export function registerSchemaColumnTools(server, ENFYRA_API_URL, options: { too
 
   server.tool(
       'update_columns',
-      'Update one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue. The guided schema workflow allows isPublished visibility toggles and blocks isUpdatable false→true broadening. Metadata and placeholder changes are supported; for richtext use metadata.richText with JSON-safe editor configuration. Do not set isUpdatable=true merely to seed E2E data or let a custom action change a server-owned field; use an exact trusted internal write after authorization and preserve the canonical metadata contract.',
+      'Update one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue. isUpdatable changes the canonical write contract and requires the global rules acknowledgement. Metadata and placeholder changes are supported; for richtext use metadata.richText with JSON-safe editor configuration.',
       {
-        items: bulkObjectArrayParam(z, 'Column update items').describe('Native JSON array of column update items: [{ tableId, columnId, name?, type?, isNullable?, isPublished?, isUpdatable?, defaultValue?, description?, options?, placeholder?, metadata? }]. For richtext, metadata.richText is the editor configuration path. The guided schema workflow allows isPublished toggles and blocks false→true isUpdatable changes; never broaden isUpdatable only for custom-action writes or test fixtures.'),
+        items: bulkObjectArrayParam(z, 'Column update items').describe('Native JSON array of column update items: [{ tableId, columnId, name?, type?, isNullable?, isPublished?, isUpdatable?, defaultValue?, description?, options?, placeholder?, metadata? }]. For richtext, metadata.richText is the editor configuration path. Changing isUpdatable alters the canonical write contract.'),
         maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
         globalRulesAckKey: globalRulesAckParam(z),
       },

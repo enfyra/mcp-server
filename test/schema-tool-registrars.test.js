@@ -210,6 +210,59 @@ test('update_columns persists rich-text metadata through the table cascade patch
   }
 });
 
+test('update_columns permits isUpdatable broadening through the acknowledged schema cascade', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let currentMetadata = {
+    id: 10,
+    name: 'quota_usage',
+    columns: [{ id: 100, name: 'usedTokens', type: 'bigint', isUpdatable: false }],
+    relations: [],
+  };
+  const patchBodies = [];
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    }
+    if (urlText.includes('/enfyra_table?')) {
+      return jsonResponse({ data: [{ id: 10, name: 'quota_usage' }] });
+    }
+    if (urlText.endsWith('/metadata/quota_usage')) {
+      return jsonResponse({ data: currentMetadata });
+    }
+    if (urlText.includes('/enfyra_table/10') && init.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patchBodies.push(body);
+      if (!urlText.includes('schemaConfirmHash=')) {
+        return jsonResponse({ data: { _preview: true, requiredConfirmHash: 'confirm-updatable' } });
+      }
+      currentMetadata = { ...currentMetadata, columns: body.columns };
+      return jsonResponse({ data: [{ id: 10, name: 'quota_usage' }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    const result = await server.get('update_columns').handler({
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      items: [{ tableId: 10, columnId: 100, isUpdatable: true }],
+    });
+    const payload = JSON.parse(result.content[0].text);
+
+    assert.equal(patchBodies.length, 2);
+    assert.equal(patchBodies[1].columns[0].isUpdatable, true);
+    assert.deepEqual(payload.updated[0].contractBroadening, ['isUpdatable false→true']);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
 test('update_relation_constraints preserves relation structure and sibling ids', async () => {
   const originalFetch = global.fetch;
   const server = createToolHarness();

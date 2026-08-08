@@ -49,20 +49,20 @@ import {
   validateMethodsForRoute,
 } from '../dist/lib/route-permission-tools.js';
 
-test('column updatable broadening stays blocked while publication can be toggled', () => {
-  assert.throws(
-    () => assertColumnContractBroadening(
+test('column updatable broadening is reported and remains available through schema updates', () => {
+  assert.deepEqual(
+    assertColumnContractBroadening(
       { isUpdatable: false, isPublished: false },
       { isUpdatable: true },
     ),
-    /blocked in the guided toolset/,
+    ['isUpdatable false→true'],
   );
-  assert.throws(
-    () => assertColumnContractBroadening(
+  assert.deepEqual(
+    assertColumnContractBroadening(
       { isUpdatable: false, isPublished: false },
       { isUpdatable: true, isPublished: true },
     ),
-    /blocked in the guided toolset/,
+    ['isUpdatable false→true'],
   );
   assert.deepEqual(
     assertColumnContractBroadening(
