@@ -5,6 +5,11 @@
 import { z } from 'zod';
 // Import modules
 import { fetchAPI } from './fetch.js';
+
+export function normalizeLogLevelFilter(level: string): string {
+  return level.trim().toLowerCase();
+}
+
 export function registerLogTools(server, ENFYRA_API_URL) {
   // ============================================================================
   // LOGS TOOLS
@@ -46,6 +51,7 @@ export function registerLogTools(server, ENFYRA_API_URL) {
   }, async ({ level, keyword, limit }) => {
     const logFilesResult = await fetchAPI(ENFYRA_API_URL, '/logs');
     const logFiles = logFilesResult.files || [];
+    const normalizedLevel = normalizeLogLevelFilter(level);
     const recentFiles = logFiles.filter((file) => {
       const name = file?.name || '';
       return /^app[.-]/.test(name) || /^error[.-]/.test(name);
@@ -53,7 +59,7 @@ export function registerLogTools(server, ENFYRA_API_URL) {
     const results = [];
     for (const file of recentFiles.slice(0, 3)) {
       try {
-        const contentResult = await fetchAPI(ENFYRA_API_URL, `/logs/${file.name}?level=${level}&pageSize=${limit}`);
+        const contentResult = await fetchAPI(ENFYRA_API_URL, `/logs/${file.name}?level=${normalizedLevel}&pageSize=${limit}`);
         const lines = contentResult.lines || contentResult.data || [];
         const filteredLines = keyword ? lines.filter(l => JSON.stringify(l).toLowerCase().includes(keyword.toLowerCase())) : lines;
         if (filteredLines.length > 0) results.push({ file: file.name, level, logs: filteredLines });
