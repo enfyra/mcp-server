@@ -62,6 +62,16 @@ test('mcp server exposes update_script_source for raw source updates', () => {
   assert.match(entry, /savedSource/);
 });
 
+test('identity tools expose idempotent multi-role membership assignment', () => {
+  const identityTools = readSourceFiles('lib/identity-tools.ts');
+  const routing = readRoutingSource();
+
+  assert.match(identityTools, /server\.tool\(\s*['"]ensure_user_role['"]/);
+  assert.match(identityTools, /roles:\s*\[\.\.\.currentRoleIds, resolvedRoleId\]/);
+  assert.match(identityTools, /assertGlobalRulesAck\(globalRulesAckKey\)/);
+  assert.match(routing, /'ensure_user_role'/);
+});
+
 test('permission profile unions permissions from every assigned role', () => {
   const profile = summarizePermissionProfile({
     id: 'user-1',

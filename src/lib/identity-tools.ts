@@ -9,9 +9,11 @@ import {
   DEFAULT_ME_PERMISSION_FIELDS,
   ENFYRA_API_TOKEN,
   firstDataRecord,
+  getId,
   summarizePermissionProfile,
 } from './enfyra-tool-logic.js';
 import { fetchAPI } from './fetch.js';
+import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
 import { jsonContent } from './response-format.js';
 
 export function registerIdentityTools(server, ENFYRA_API_URL) {
@@ -44,6 +46,29 @@ export function registerIdentityTools(server, ENFYRA_API_URL) {
   server.tool('get_all_roles', 'Get all role definitions', {}, async () => {
     const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_role?limit=100');
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
+  });
+
+  server.tool('ensure_user_role', 'Add one role to a user without removing existing roles or creating duplicates. Use this for multi-role membership; route, field, asset, and menu authority is the union of assigned roles.', {
+    userId: z.string().min(1).describe('Existing user id.'),
+    roleId: z.union([z.string(), z.number()]).optional().describe('Existing role id.'),
+    roleName: z.string().min(1).optional().describe('Existing role name.'),
+    globalRulesAckKey: globalRulesAckParam(z),
+  }, async ({ userId, roleId, roleName, globalRulesAckKey }) => {
+    assertGlobalRulesAck(globalRulesAckKey);
+    if ((roleId == null) === (!roleName)) throw new Error('Provide exactly one of roleId or roleName.');
+    const userQuery = new URLSearchParams({ filter: JSON.stringify({ id: { _eq: userId } }), fields: 'id,email,roles', deep: JSON.stringify({ roles: { fields: ['id', 'name'] } }), limit: '1' });
+    const user = firstDataRecord(await fetchAPI(ENFYRA_API_URL, `/enfyra_user?${userQuery}`));
+    if (!user) throw new Error(`User not found: ${userId}`);
+    const roleFilter = roleId == null ? { name: { _eq: roleName } } : { id: { _eq: roleId } };
+    const roleQuery = new URLSearchParams({ filter: JSON.stringify(roleFilter), fields: 'id,name', limit: '1' });
+    const role = firstDataRecord(await fetchAPI(ENFYRA_API_URL, `/enfyra_role?${roleQuery}`));
+    if (!role) throw new Error(roleName ? `Role not found: ${roleName}` : `Role not found: ${roleId}`);
+    const resolvedRoleId = getId(role);
+    const currentRoleIds = [...new Set((Array.isArray(user.roles) ? user.roles : []).map(getId).filter((id) => id != null))];
+    const alreadyAssigned = currentRoleIds.some((id) => String(id) === String(resolvedRoleId));
+    if (!alreadyAssigned) await fetchAPI(ENFYRA_API_URL, `/enfyra_user/${encodeURIComponent(String(getId(user)))}`, { method: 'PATCH', body: JSON.stringify({ roles: [...currentRoleIds, resolvedRoleId] }) });
+    const verified = firstDataRecord(await fetchAPI(ENFYRA_API_URL, `/enfyra_user?${userQuery}`));
+    return jsonContent({ action: alreadyAssigned ? 'unchanged' : 'user_role_ensured', user: { id: getId(verified), email: verified?.email ?? null }, addedRole: { id: resolvedRoleId, name: role.name ?? null }, roles: Array.isArray(verified?.roles) ? verified.roles.map((item) => ({ id: getId(item), name: item?.name ?? null })) : [] });
   });
 
   server.tool('login', 'Force authentication to Enfyra and get a new access token', {

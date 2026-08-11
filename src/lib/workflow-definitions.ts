@@ -591,7 +591,7 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['search_runtime_zone', 'get_enfyra_examples'],
     inspectTools: ['search_runtime_zone(mode=search, zone=auth_security)', 'search_runtime_zone(mode=inspect)', 'query_table', 'get_permission_profile'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_enfyra_examples(category=oauth-setup|connect)'],
-    writeTools: ['create_records', 'update_records', 'delete_records', 'ensure_route_access', 'ensure_auth_header', 'reorder_auth_headers'],
+    writeTools: ['create_records', 'update_records', 'delete_records', 'ensure_user_role', 'ensure_route_access', 'ensure_auth_header', 'reorder_auth_headers'],
     verifyTools: ['query_table', 'get_permission_profile', 'test_rest_endpoint'],
     avoidTools: [
       {
