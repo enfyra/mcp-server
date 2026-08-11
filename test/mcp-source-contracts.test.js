@@ -34,6 +34,7 @@ import {
 } from '../dist/lib/table-tools.js';
 import { prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource } from '../dist/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../dist/lib/route-guards.js';
+import { summarizePermissionProfile } from '../dist/lib/tool-permission-profile.js';
 import {
   DYNAMIC_CODE_KNOWLEDGE_ACK_KEY,
   GLOBAL_RULES_ACK_KEY,
@@ -59,6 +60,37 @@ test('mcp server exposes update_script_source for raw source updates', () => {
   assert.match(entry, /sourceResourceUri/);
   assert.match(entry, /expectedSourceSha256/);
   assert.match(entry, /savedSource/);
+});
+
+test('permission profile unions permissions from every assigned role', () => {
+  const profile = summarizePermissionProfile({
+    id: 'user-1',
+    email: 'member@example.com',
+    roles: [
+      { id: 'member', name: 'Member', routePermissions: [] },
+      {
+        id: 'moderator',
+        name: 'Moderator',
+        routePermissions: [
+          {
+            isEnabled: true,
+            route: { path: '/admin/script/validate' },
+            methods: [{ name: 'POST' }],
+            allowedUsers: [],
+          },
+        ],
+      },
+    ],
+  });
+
+  const scriptValidation = profile.mcpRequirements.find(
+    (item) => item.area === 'script validation',
+  );
+  assert.equal(scriptValidation.allowed, true);
+  assert.deepEqual(profile.user.roles, [
+    { id: 'member', name: 'Member' },
+    { id: 'moderator', name: 'Moderator' },
+  ]);
 });
 
 test('mcp server exposes script source inspection and patch tools', () => {

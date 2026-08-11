@@ -118,6 +118,7 @@ const GLOBAL_RULES_SECTIONS = [
       'Use search_runtime_zone with zone=package_runtime for installed app/server packages.',
       'Use search_runtime_zone with zone=storage_file for storage configs, folders, files, public asset state, and file permissions.',
       'Use search_runtime_zone with zone=auth_security for users, roles, native auth header mappings, route/field permissions, guards, OAuth configs, linked OAuth accounts, and access surfaces.',
+      'An enfyra_user has an owning roles[] many-to-many relation. Effective REST, GraphQL, field, asset, and menu authority is the union of every assigned role; never read or write a singular user.role or choose a primary role.',
       'After search_runtime_zone mode=search, call search_runtime_zone mode=inspect with the returned nextInspect.input before editing source or metadata.',
       'Use zone-specific write tools after inspection; do not mutate DB-backed runtime artifacts with generic CRUD when a business operation tool exists.',
     ],

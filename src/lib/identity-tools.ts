@@ -19,8 +19,9 @@ export function registerIdentityTools(server, ENFYRA_API_URL) {
   // AUTH & USER TOOLS
   // ============================================================================
   
-  server.tool('get_current_user', 'Get current authenticated user info', {}, async () => {
-    const result = await fetchAPI(ENFYRA_API_URL, '/me');
+  server.tool('get_current_user', 'Get the current authenticated user and every assigned role.', {}, async () => {
+    const fields = DEFAULT_ME_PERMISSION_FIELDS.join(',');
+    const result = await fetchAPI(ENFYRA_API_URL, `/me?fields=${encodeURIComponent(fields)}`);
     return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
   });
 

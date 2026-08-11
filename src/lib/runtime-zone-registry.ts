@@ -53,7 +53,7 @@ export const ZONE_TABLES: Record<Exclude<RuntimeZone, 'admin_ui' | 'schema_data'
     { tableName: 'enfyra_file_permission', fields: 'id,_id,file.id,file.fileName,role.name,allowedUsers.id,methods.name,description,isEnabled', labelFields: ['file.fileName', 'role.name', 'description'] },
   ],
   auth_security: [
-    { tableName: 'enfyra_user', fields: 'id,_id,email,isRootAdmin,isSystem,role.id,role.name,createdAt,updatedAt', labelFields: ['email', 'role.name'] },
+    { tableName: 'enfyra_user', fields: 'id,_id,email,isRootAdmin,isSystem,roles.id,roles.name,createdAt,updatedAt', labelFields: ['email'] },
     { tableName: 'enfyra_role', fields: 'id,_id,name,description,isSystem,createdAt,updatedAt', labelFields: ['name', 'description'] },
     { tableName: 'enfyra_auth_header', fields: 'id,_id,headerKey,credentialType,scheme,priority,isEnabled,isSystem,description', labelFields: ['headerKey', 'credentialType', 'scheme', 'description'] },
     { tableName: 'enfyra_route_permission', fields: 'id,_id,description,isEnabled,route.id,route.path,role.name,methods.name,allowedUsers.id', labelFields: ['description', 'route.path', 'role.name'], pathFields: ['route.path'] },

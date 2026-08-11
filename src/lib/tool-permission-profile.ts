@@ -51,7 +51,8 @@ function userHasRoutePermission(user, routePath, method) {
   const normalizedMethod = String(method || '').toUpperCase();
   const userId = getId(user);
   const directPermissions = user.allowedRoutePermissions || [];
-  const rolePermissions = user.role?.routePermissions || [];
+  const rolePermissions = (Array.isArray(user.roles) ? user.roles : [])
+    .flatMap((role) => role?.routePermissions || []);
 
   const matchesRouteAndMethod = (permission) => (
     permission?.isEnabled !== false
@@ -86,13 +87,13 @@ export function summarizePermissionProfile(user) {
       id: getId(user),
       email: user.email || null,
       isRootAdmin: !!user.isRootAdmin,
-      role: user.role ? {
-        id: getId(user.role),
-        name: user.role.name || null,
-      } : null,
+      roles: (Array.isArray(user.roles) ? user.roles : []).map((role) => ({
+        id: getId(role),
+        name: role.name || null,
+      })),
     } : null,
     permissionModel: {
-      sameAsAdminUi: 'Mirrors Enfyra admin usePermissions(): root admin passes; otherwise direct allowedRoutePermissions are checked before role.routePermissions.',
+      sameAsAdminUi: 'Mirrors Enfyra admin usePermissions(): root admin passes; otherwise direct allowedRoutePermissions are checked together with the union of every assigned role routePermissions.',
       publicMethods: 'Anonymous REST access is controlled by route.publicMethods; this profile only reports authenticated route permissions for the configured token.',
     },
     mcpRequirements: requirements,
