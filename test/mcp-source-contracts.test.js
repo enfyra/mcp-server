@@ -731,7 +731,9 @@ test('list query tools require explicit limit or all intent except bounded locat
   assert.match(entry, /If search is provided without limit, the tool returns a bounded lookup window of 10 matches/);
   assert.match(entry, /query_table accepts either all=true or limit, not both/);
   assert.match(entry, /get_all_routes accepts either all=true or limit, not both/);
-  assert.match(entry, /all: z\.boolean\(\)\.optional\(\)\.default\(false\)\.describe\('Return all matching rows by sending REST limit=0/);
+  assert.match(entry, /capped at .* rows \(never no-limit\)/);
+  assert.match(entry, /narrow with a filter\/range/);
+  assert.match(entry, /paginate with limit\+page/);
   assert.match(examples, /pass all: true instead of choosing an arbitrary page size such as 30 or 50/);
   assert.match(schemaSkill, /Locator searches on `get_all_routes` and `get_all_tables` may omit `limit`/);
 });

@@ -289,16 +289,38 @@ export async function updateExtensionCode(apiUrl, {
     ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,isEnabled,version,menu.id,code')
     : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,isEnabled,version,menu.id,code');
   if (!existing) throw new Error(`Extension not found: ${id || name}`);
+  const extensionId = getId(existing);
+  const hasSourceInput = code !== undefined || sourceFile !== undefined || sourceResourceUri !== undefined;
+  if (!hasSourceInput && description === undefined && version === undefined && isEnabled !== undefined) {
+    const result = await fetchAPI(apiUrl, `/enfyra_extension/${encodeURIComponent(String(extensionId))}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ isEnabled }),
+    });
+    return {
+      action: 'extension_state_updated',
+      id: extensionId,
+      name: existing.name || name || null,
+      type: existing.type || null,
+      saved: summarizeExtensionSaveResult(result, {
+        id: extensionId,
+        name: existing.name || name,
+        type: existing.type,
+        isEnabled,
+        version: existing.version,
+      }),
+      validation: { skipped: true, reason: 'Only isEnabled changed.' },
+      verification: { skipped: true, reason: 'Only isEnabled changed; source and runtime contract are unchanged.' },
+    };
+  }
   const materialized = materializeSourceInput({
     source: code,
     sourceFile,
     sourceResourceUri,
     fieldName: 'code',
     tableName: 'enfyra_extension',
-    id: getId(existing) ?? id ?? name ?? 'extension',
+    id: extensionId ?? id ?? name ?? 'extension',
   });
   const resolvedCode = materialized.source;
-  const extensionId = getId(existing);
   const currentSha256 = sha256Text(existing.code || '');
   if (expectedSha256 && expectedSha256 !== currentSha256) {
     throw new Error(`Extension code hash mismatch. Expected ${expectedSha256}, got ${currentSha256}. Re-read the extension before replacing it.`);

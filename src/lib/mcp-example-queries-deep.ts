@@ -27,7 +27,7 @@ export const queriesDeepExamples = {
         notes: [
           'Use a conversation read pre-hook/RLS boundary so the route only returns conversations visible to @USER.',
           'lastMessage is a relation to chat_message; do not duplicate preview fields on chat_conversation.',
-          'all: true tells MCP to send REST limit=0 and load all matching conversation rows.',
+          'all: true is capped hard at 1000 rows and never sends REST limit=0, so it cannot load an unbounded inventory.',
           'This is a small bounded user inbox example. For larger inventories, prefer pagination even when RLS scopes the records.',
           'Do not fetch messages for every conversation on initial list load; load messages after selecting a conversation.',
         ],

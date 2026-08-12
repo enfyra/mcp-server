@@ -144,7 +144,8 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
       [
         'Business operation: update an existing Enfyra admin extension code by id or name.',
         'Pass sourceFile or sourceResourceUri from a prior extension inspect when the full source already exists as an MCP artifact; the server reads that file and avoids sending the whole SFC through the model call.',
-        'It runs local extension guards and /enfyra_extension/preview first, saves only when validation succeeds, then re-reads and verifies the exact saved source in the same call.',
+        'It runs local extension guards and /enfyra_extension/preview first when source code changes, saves only when validation succeeds, then re-reads and verifies the exact saved source in the same call.',
+        'When only isEnabled changes, it performs a lightweight metadata PATCH without source validation or runtime verification.',
         'Use this instead of validate_extension_code followed by update_record when editing an existing page/widget/global extension.',
         'Call get_extension_theme_contract first when generating or reviewing UI.',
       ].join(' '),

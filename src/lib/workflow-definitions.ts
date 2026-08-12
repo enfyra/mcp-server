@@ -94,6 +94,7 @@ export const TOOL_WORKFLOWS = [
     title: 'Admin extension, menu, shell notification, or account panel UI',
     useWhen: [
       'Creating or changing Enfyra admin page/widget/global extensions.',
+      'Enabling or disabling an existing extension without changing its source.',
       'Adding menu entries, menu notification dots/counts, account panel rows, or shell actions.',
       'Reviewing extension UI theme/layout/component usage.',
     ],

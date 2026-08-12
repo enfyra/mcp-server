@@ -14,7 +14,7 @@ const BASELINES = [
     },
     unsetDynamic: true,
     count: 97,
-    hash: 'bcdd8fdaf01b8aa996ed562f8567005ea9690deca27db6c78969af243ca6b49b',
+    hash: '1b6799820f16797d04f77e47d7dbc8e9c7dac453d93f6b1e931412f49b7c9dca',
     maxTokens: 38000,
   },
   {
@@ -34,7 +34,7 @@ const BASELINES = [
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
     count: 97,
-    hash: 'bcdd8fdaf01b8aa996ed562f8567005ea9690deca27db6c78969af243ca6b49b',
+    hash: '1b6799820f16797d04f77e47d7dbc8e9c7dac453d93f6b1e931412f49b7c9dca',
     maxTokens: 38000,
   },
 ];

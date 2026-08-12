@@ -45,14 +45,16 @@ import { inspectRestProjection } from './rest-projection.js';
 import { executeSequentialBatch } from './sequential-batch.js';
 import { compactSourceFields } from './source-artifacts.js';
 
+const QUERY_TABLE_ALL_CAP = 1000;
+
 export function registerRecordTools(server, ENFYRA_API_URL) {
-  server.tool('query_table', 'Query any route-backed table with a recursive live metadata preflight. Explicit dotted fields and deep relation fields are validated against every target table before the REST read, and the result includes schemaReceipt. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects. Aggregate operations use field configs such as { amount: { sum: true } }, not _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
+  server.tool('query_table', 'Query any route-backed table with a recursive live metadata preflight. Explicit dotted fields and deep relation fields are validated against every target table before the REST read, and the result includes schemaReceipt. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. all=true is capped hard at ' + String(QUERY_TABLE_ALL_CAP) + ' rows and never returns an unbounded result; for more rows, narrow with a filter/range (for example a recent time window) and paginate with limit+page. OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects. Aggregate operations use field configs such as { amount: { sum: true } }, not _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
     tableName: z.string().describe('Table name to query'),
-    filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object. Example: {"status": {"_eq": "active"}}.'),
+    filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object to narrow the result set. Prefer a range filter (for example a record time window) over all=true so queries stay bounded. Example: {"status": {"_eq": "active"}}.'),
     sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
-    page: z.number().optional().describe('Page number (default: 1)'),
+    page: z.number().optional().describe('Page number (default: 1). Paginate with limit+page to page through more than one cap-sized batch instead of requesting an unbounded all.'),
     limit: z.number().int().min(0).optional().describe('Items per page. Required unless all=true. Do not invent arbitrary limits for "all"; use all=true instead. Use count_records for counts.'),
-    all: z.boolean().optional().default(false).describe('Return all matching rows by sending REST limit=0. Use this when the user asks for all rows or a complete list.'),
+    all: z.boolean().optional().default(false).describe('Return matching rows capped at ' + String(QUERY_TABLE_ALL_CAP) + ' rows (never no-limit). Prefer a filter/range; if the result is capped, paginate with limit+page to read further.'),
     fields: z.array(z.string()).optional().describe('Fields to select. If omitted, MCP selects only the table primary key to avoid oversized responses.'),
     meta: z.string().optional().describe('Optional REST meta request, e.g. "totalCount", "filterCount", or aggregate modes supported by the route. Use count_records for simple counts.'),
     deep: jsonObjectParam(z, 'Deep relation fetch object').optional().describe('Optional deep relation fetch object. Keys must be relation propertyName values.'),
@@ -93,7 +95,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     if (meta) queryParams.set('meta', meta);
     if (deepParam) queryParams.set('deep', deepParam);
     if (aggregateParam) queryParams.set('aggregate', aggregateParam);
-    const effectiveLimit = all ? 0 : limit;
+    const effectiveLimit = all ? QUERY_TABLE_ALL_CAP : limit;
     queryParams.set('limit', String(effectiveLimit));
     queryParams.set('fields', selectedFields.join(','));
   
@@ -108,6 +110,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
       autoAddedDeepFields: deepFieldSelection.autoAdded,
       limit: effectiveLimit,
       all: !!all,
+      cappedByAll: all,
       queryOptions: {
         meta: meta || null,
         deep: parsedDeep ?? null,
@@ -117,6 +120,9 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
       schemaReceipt,
       meta: result?.meta,
       data: compactSourceFields(result?.data || [], { tableName }),
+      paginationHint: all
+        ? 'all=true was capped at ' + String(QUERY_TABLE_ALL_CAP) + ' rows. To read further, narrow with a filter/range and paginate with limit+page; to count without fetching rows, use count_records.'
+        : undefined,
       detailHint: fields && fields.length > 0
         ? undefined
         : 'Only the primary key was returned because fields was omitted. Re-run query_table with explicit fields for details, or use inspect_table to find valid field names.',
