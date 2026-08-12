@@ -13,6 +13,7 @@ test('mcp usage telemetry summarizes token, retry, failure, and compression evid
       outputEstimatedTokens: 0,
       durationMs: 10,
       errorName: 'ValidationError',
+      errorCode: 'INVALID_SCHEMA',
     },
     {
       timestamp: '2026-07-04T00:01:00.000Z',
@@ -70,7 +71,8 @@ test('mcp usage telemetry summarizes token, retry, failure, and compression evid
   assert.equal(report.wasted_token_estimate, 200);
   assert.equal(report.compression_stats.savedTokens, 50);
   assert.equal(report.tool_stats.create_tables.count, 2);
-  assert.equal(report.failure_stats['create_tables:ValidationError'].count, 1);
+  assert.equal(report.failure_stats['create_tables:ValidationError:INVALID_SCHEMA'].count, 1);
+  assert.equal(report.failure_stats['create_tables:ValidationError:INVALID_SCHEMA'].errorCode, 'INVALID_SCHEMA');
   assert.equal(report.retry_stats.create_tables.count, 1);
   assert.equal(report.samples.some((item) => item.kind === 'token_hotspot' && item.toolName === 'query_table'), true);
   assert.equal(report.samples.some((item) => item.kind === 'cache_summary' && item.hitRate === 0.8 && item.warmSuccessRate === 0.5), true);
@@ -83,4 +85,14 @@ test('mcp usage telemetry summarizes token, retry, failure, and compression evid
   assert.match(report.client_hash, /^[a-f0-9]{32}$/);
   assert.match(report.api_host_hash, /^[a-f0-9]{32}$/);
   assert.equal(JSON.stringify(report).includes('admin.enfyra.io'), false);
+});
+
+test('mcp usage telemetry preserves bounded diagnostic error details without secrets', () => {
+  const details = __mcpUsageTelemetryForTests.safeErrorDetails(new Error('Request failed https://admin.enfyra.io/api?token=secret-value at /Users/thinhdo/private/file.ts'));
+  assert.equal(details.errorName, 'Error');
+  assert.equal(details.errorCode, undefined);
+  assert.equal(details.errorMessage.includes('secret-value'), false);
+  assert.equal(details.errorMessage.includes('admin.enfyra.io'), false);
+  assert.equal(details.errorMessage.includes('/Users/thinhdo'), false);
+  assert.ok(details.errorMessage.length <= 160);
 });

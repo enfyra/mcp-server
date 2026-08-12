@@ -44,6 +44,15 @@ test('source input accepts public code and sourceCode aliases without weakening 
   );
 });
 
+test('source input ignores blank artifact fields from weak clients', () => {
+  assert.equal(resolveSourceInput({
+    sourceCode: 'valid source',
+    sourceFile: '',
+    sourceResourceUri: '  ',
+    fieldName: 'sourceCode',
+  }), 'valid source');
+});
+
 test('source input rejects arbitrary files and ambiguous inline/artifact inputs', () => {
   assert.throws(
     () => readSourceArtifactFile('/tmp/not-an-enfyra-artifact.js'),
@@ -51,6 +60,10 @@ test('source input rejects arbitrary files and ambiguous inline/artifact inputs'
   );
   assert.throws(
     () => resolveSourceInput({ source: 'inline', sourceFile: '/tmp/not-an-enfyra-artifact.js', fieldName: 'sourceCode' }),
+    /exactly one/,
+  );
+  assert.throws(
+    () => resolveSourceInput({ sourceCode: 'inline', sourceResourceUri: 'enfyra-source://artifact/real', fieldName: 'sourceCode' }),
     /exactly one/,
   );
 });

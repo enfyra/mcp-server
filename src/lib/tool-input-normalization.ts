@@ -16,6 +16,12 @@ export function normalizeTableName(value: unknown) {
   return String(value ?? '').toLowerCase();
 }
 
+export function normalizeOptionalText(value: string | undefined) {
+  if (value === undefined) return undefined;
+  const normalized = value.trim();
+  return normalized === '' ? undefined : normalized;
+}
+
 export function normalizeEscapedVueSource(value: unknown) {
   if (typeof value !== 'string') return value;
   if (/\r|\n/u.test(value)) return value;

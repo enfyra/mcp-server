@@ -87,6 +87,26 @@ function tryParseJson(text: string | undefined) {
   }
 }
 
+function safeErrorDetails(error: unknown) {
+  const candidate = error && typeof error === 'object' ? error as Record<string, unknown> : undefined;
+  const name = error instanceof Error ? error.name : typeof error;
+  const code = candidate?.code ?? candidate?.errorCode ?? candidate?.statusCode ?? candidate?.status;
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  const sanitizedMessage = message
+    .replace(/Bearer\s+[^\s,;]+/giu, 'Bearer [redacted]')
+    .replace(/(?:token|secret|password|api[-_]?key|clientSecret)=([^\s&;,]+)/giu, '$1=[redacted]')
+    .replace(/https?:\/\/[^\s)]+/giu, '[url]')
+    .replace(/(?:\/Users\/|\/private\/|\/tmp\/)[^\s)]+/gu, '[path]')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 160);
+  return {
+    errorName: String(name || 'Error').slice(0, 80),
+    errorCode: code === undefined || code === null ? undefined : String(code).slice(0, 80),
+    errorMessage: sanitizedMessage || undefined,
+  };
+}
+
 function compactInputStats(args: unknown[]) {
   const input = args[0] ?? {};
   const text = safeJson(input);
@@ -237,7 +257,7 @@ export function recordMcpToolUsage(toolName: string, startedAt: number, args: un
   if (error) {
     appendUsage({
       ...base,
-      errorName: error instanceof Error ? error.name : typeof error,
+      ...safeErrorDetails(error),
     });
     return;
   }
@@ -336,7 +356,9 @@ function summarizeUsage(lines: UnknownRecord[], apiUrl: string, toolset: string,
     });
     if (failed) {
       const errorName = String(line.errorName || 'Error').slice(0, 80);
-      incrementBucket(failureStats, `${toolName}:${errorName}`, { count: 1, toolName, errorName });
+      const errorCode = line.errorCode ? String(line.errorCode).slice(0, 80) : undefined;
+      const failureKey = `${toolName}:${errorCode ? `${errorName}:${errorCode}` : errorName}`;
+      incrementBucket(failureStats, failureKey, { count: 1, toolName, errorName, errorCode });
       previousErrorTool = toolName;
       previousErrorAt = Date.parse(String(line.timestamp || '')) || 0;
     } else if (previousErrorTool === toolName && previousErrorAt) {
@@ -534,4 +556,5 @@ export const __mcpUsageTelemetryForTests = {
   summarizeUsage,
   dayKey,
   currentBucket,
+  safeErrorDetails,
 };

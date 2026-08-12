@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { normalizeOptionalText } from './tool-input-normalization.js';
+
 const DEFAULT_PREVIEW_CHARS = 480;
 const DEFAULT_INLINE_LIMIT = 1400;
 const SOURCE_FIELD_NAMES = new Set([
@@ -120,14 +122,16 @@ export function resolveSourceInput({ source, sourceCode, code, sourceFile, sourc
   sourceResourceUri?: string;
   fieldName: string;
 }) {
+  const normalizedSourceFile = normalizeOptionalText(sourceFile);
+  const normalizedSourceResourceUri = normalizeOptionalText(sourceResourceUri);
   const inlineSources = [source, sourceCode, code].filter((value) => value !== undefined);
-  const provided = [inlineSources.length > 0, sourceFile !== undefined, sourceResourceUri !== undefined].filter(Boolean).length;
+  const provided = [inlineSources.length > 0, normalizedSourceFile !== undefined, normalizedSourceResourceUri !== undefined].filter(Boolean).length;
   if (provided !== 1 || inlineSources.length > 1) {
     throw new Error(`Provide exactly one of ${fieldName}, sourceFile, or sourceResourceUri.`);
   }
   if (inlineSources.length === 1) return inlineSources[0];
-  if (sourceFile !== undefined) return readSourceArtifactFile(sourceFile);
-  return readSourceArtifactResource(sourceResourceUri!).text;
+  if (normalizedSourceFile !== undefined) return readSourceArtifactFile(normalizedSourceFile);
+  return readSourceArtifactResource(normalizedSourceResourceUri!).text;
 }
 
 export function materializeSourceInput({ source, sourceCode, code, sourceFile, sourceResourceUri, fieldName, tableName = 'mcp', id = 'input' }: {
