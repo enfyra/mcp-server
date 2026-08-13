@@ -13,9 +13,9 @@ const BASELINES = [
       ENFYRA_MCP_PROFILE: 'all',
     },
     unsetDynamic: true,
-    count: 98,
-    hash: '601b9ca64a776ae5d2c168062c0ef5e249abfce0f72ae12f6486aad2fc502a69',
-    maxTokens: 38000,
+    count: 99,
+    hash: 'bbfd10db68e67d923840d0b6e86d0d966436318f832d6577e3251ab8ec9dc73b',
+    maxTokens: 40000,
   },
   {
     name: 'guided-dynamic',
@@ -33,9 +33,9 @@ const BASELINES = [
       ENFYRA_MCP_PROFILE: 'all',
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
-    count: 98,
-    hash: '601b9ca64a776ae5d2c168062c0ef5e249abfce0f72ae12f6486aad2fc502a69',
-    maxTokens: 38000,
+    count: 99,
+    hash: 'bbfd10db68e67d923840d0b6e86d0d966436318f832d6577e3251ab8ec9dc73b',
+    maxTokens: 40000,
   },
 ];
 

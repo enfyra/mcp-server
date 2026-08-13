@@ -3,6 +3,7 @@ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mc
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
 import { initAuth } from './auth.js';
+import { registerCompoundTools } from './compound-tools.js';
 import { registerDiscoveryTools } from './discovery-tools.js';
 import { registerDynamicRepositoryBuilder } from './dynamic-repository-builder.js';
 import {
@@ -95,10 +96,11 @@ export function createEnfyraMcpServer() {
   registerLogTools(server, ENFYRA_API_URL);
   registerIdentityTools(server, ENFYRA_API_URL);
   registerPackageTools(server, ENFYRA_API_URL);
-  registerToolCatalogTools(server, toolsetState, {
-    resolveAvailability: resolveCatalogToolAvailability,
-  });
-  registerWorkflowToolPack(server, toolsetState);
+registerToolCatalogTools(server, toolsetState, {
+	  resolveAvailability: resolveCatalogToolAvailability,
+	});
+	registerWorkflowToolPack(server, toolsetState);
+	registerCompoundTools(server, ENFYRA_API_URL);
 
   return server;
 }
