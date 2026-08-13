@@ -182,6 +182,12 @@ export const MCP_PERMISSION_REQUIREMENTS = [
     methods: ['POST'],
   },
   {
+    area: 'Redis key inspection',
+    tools: ['inspect_redis_key'],
+    route: '/admin/redis/key',
+    methods: ['GET'],
+  },
+  {
     area: 'manual flow trigger',
     tools: ['trigger_flow'],
     route: '/admin/flow/trigger/:id',

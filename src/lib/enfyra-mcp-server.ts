@@ -22,6 +22,7 @@ import { registerOAuthProviderTools } from './oauth-tools.js';
 import { registerPackageTools } from './package-tools.js';
 import { registerPlatformOperationTools } from './platform-operation-tools.js';
 import { registerRecordTools } from './record-tools.js';
+import { registerRedisInspectionTools } from './redis-inspection-tools.js';
 import { installColumnarToolFormatter } from './response-format.js';
 import { registerRouteTools } from './route-tools.js';
 import { startRuntimeCacheSocket } from './runtime-cache-socket.js';
@@ -90,6 +91,7 @@ export function createEnfyraMcpServer() {
   registerOAuthProviderTools(server, ENFYRA_API_URL);
   registerDynamicRepositoryBuilder(server);
   registerSystemTools(server, ENFYRA_API_URL);
+  registerRedisInspectionTools(server, ENFYRA_API_URL);
   registerLogTools(server, ENFYRA_API_URL);
   registerIdentityTools(server, ENFYRA_API_URL);
   registerPackageTools(server, ENFYRA_API_URL);
