@@ -9,7 +9,56 @@ import {
   assertGlobalRulesAck,
   globalRulesAckParam
 } from './required-knowledge.js';
+import { destructivePreviewContent } from './destructive-preview.js';
 import { jsonContent } from './response-format.js';
+
+function packageFilter(id: string | number) {
+  return encodeURIComponent(JSON.stringify({ id: { _eq: id } }));
+}
+
+async function findPackage(ENFYRA_API_URL: string, id: string | number) {
+  const result = await fetchAPI(
+    ENFYRA_API_URL,
+    `/enfyra_package?filter=${packageFilter(id)}&limit=1`,
+  );
+  const packageRecord = result.data?.[0];
+  if (!packageRecord) throw new Error(`Package with ID ${id} was not found`);
+  return packageRecord;
+}
+
+function packageSummary(packageRecord: Record<string, unknown>) {
+  return {
+    id: packageRecord.id ?? packageRecord._id,
+    name: packageRecord.name,
+    version: packageRecord.version,
+    type: packageRecord.type,
+    isEnabled: packageRecord.isEnabled === true,
+    status: packageRecord.status ?? null,
+  };
+}
+
+async function setPackageEnabled(
+  ENFYRA_API_URL: string,
+  id: string | number,
+  isEnabled: boolean,
+) {
+  const current = await findPackage(ENFYRA_API_URL, id);
+  if (current.isSystem === true) {
+    throw new Error('Cannot change system-owned package state');
+  }
+
+  const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_package/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ isEnabled }),
+  });
+  const saved = await findPackage(ENFYRA_API_URL, id);
+  if ((saved.isEnabled === true) !== isEnabled) {
+    throw new Error(`Package ${id} did not persist isEnabled=${isEnabled}`);
+  }
+
+  return { current, saved, result };
+}
+
 export function registerPackageTools(server, ENFYRA_API_URL) {
   // ============================================================================
   // PACKAGE TOOLS
@@ -115,6 +164,98 @@ export function registerPackageTools(server, ENFYRA_API_URL) {
         package: { name, version: pkgVersion, type },
         result,
       });
+    },
+  );
+
+  server.tool(
+    'enable_package',
+    'Business operation: enable one non-system Enfyra package and verify its persisted runtime metadata state.',
+    {
+      id: z.union([z.string(), z.number()]).describe('Package record id from package_runtime inspection.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+    },
+    async ({ id, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      const operation = await setPackageEnabled(ENFYRA_API_URL, id, true);
+      return jsonContent({
+        action: 'package_enabled',
+        package: packageSummary(operation.saved),
+        previousPackage: packageSummary(operation.current),
+        result: operation.result,
+        postcondition: { isEnabled: true, verified: true },
+      });
+    },
+  );
+
+  server.tool(
+    'disable_package',
+    'Business operation: disable one non-system Enfyra package and verify its persisted runtime metadata state.',
+    {
+      id: z.union([z.string(), z.number()]).describe('Package record id from package_runtime inspection.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+    },
+    async ({ id, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      const operation = await setPackageEnabled(ENFYRA_API_URL, id, false);
+      return jsonContent({
+        action: 'package_disabled',
+        package: packageSummary(operation.saved),
+        previousPackage: packageSummary(operation.current),
+        result: operation.result,
+        postcondition: { isEnabled: false, verified: true },
+      });
+    },
+  );
+
+  server.tool(
+    'uninstall_package',
+    'Business operation: preview-first uninstall for one non-system Enfyra package. Confirmation requires the exact package id from the preview and verifies that the package metadata is absent afterward.',
+    {
+      id: z.union([z.string(), z.number()]).describe('Package record id from package_runtime inspection.'),
+      expectedId: z.union([z.string(), z.number()]).optional().describe('Required when confirm=true. Pass the exact package id returned by the preview.'),
+      confirm: z.boolean().optional().default(false).describe('false returns a package uninstall preview only; true deletes the package metadata and invalidates its runtime cache.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+    },
+    async ({ id, expectedId, confirm, globalRulesAckKey }) => {
+      const packageRecord = await findPackage(ENFYRA_API_URL, id);
+      if (packageRecord.isSystem === true) {
+        throw new Error('Cannot uninstall system-owned packages');
+      }
+
+      if (!confirm) {
+        return destructivePreviewContent('uninstall_package', {
+          action: 'package_uninstall_preview',
+          package: packageSummary(packageRecord),
+          next: 'Call uninstall_package again with confirm=true and expectedId set to this package id.',
+        }, 1);
+      }
+
+      assertGlobalRulesAck(globalRulesAckKey);
+      if (expectedId === undefined) throw new Error('expectedId is required when confirm=true');
+      if (String(expectedId) !== String(packageRecord.id ?? packageRecord._id)) {
+        throw new Error('expectedId does not match the current package');
+      }
+
+      const result = await fetchAPI(ENFYRA_API_URL, `/enfyra_package/${id}`, {
+        method: 'DELETE',
+      });
+      const verification = await fetchAPI(
+        ENFYRA_API_URL,
+        `/enfyra_package?filter=${packageFilter(id)}&limit=1`,
+      );
+      const remainingPackages = verification.data ?? [];
+      const postcondition = {
+        verificationMethod: 'package_read_by_id',
+        confirmedAbsent: remainingPackages.length === 0,
+        remainingPackages: remainingPackages.map(packageSummary),
+      };
+      const content = jsonContent({
+        action: 'package_uninstalled',
+        package: packageSummary(packageRecord),
+        result,
+        postcondition,
+      });
+      return postcondition.confirmedAbsent ? content : { ...content, isError: true };
     },
   );
 }

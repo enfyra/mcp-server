@@ -150,8 +150,8 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   },
   enfyra_package: {
     create: 'install_package',
-    update: 'install_package (re-install with new version) — upgrade is not exposed',
-    delete: 'physical removal is not exposed',
+    update: 'enable_package, disable_package, or install_package for a new package version',
+    delete: 'uninstall_package (preview-first physical removal)',
   },
   enfyra_oauth_config: {
     create: 'setup_oauth_provider',

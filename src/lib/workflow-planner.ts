@@ -149,7 +149,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
       return [
         step(1, 'search_npm', 'Find package candidates from npm.'),
         step(2, 'get_enfyra_required_knowledge', 'Read package/runtime mutation contracts.'),
-        step(3, 'install_package', 'Install the selected package through the package operation tool.'),
+        step(3, 'install_package / enable_package / disable_package / uninstall_package', 'Apply the selected package lifecycle operation; uninstall_package is preview-first.'),
         step(4, 'search_runtime_zone', 'Verify package runtime state with zone=package_runtime when needed.'),
       ];
     case 'cache':

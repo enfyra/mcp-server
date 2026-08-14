@@ -226,7 +226,7 @@ export function getToolOutputSchema(toolName: string): ZodRawShape | undefined {
   if (toolName === 'query_table') return queryTableOutputSchema;
   if (toolName === 'inspect_rest_projection') return restProjectionOutputSchema;
   if (toolName === 'delete_records') return deleteRecordsOutputSchema;
-  if (['delete_tables', 'delete_columns', 'delete_relations', 'delete_method', 'delete_route', 'delete_flow', 'delete_flow_step'].includes(toolName)) {
+  if (['delete_tables', 'delete_columns', 'delete_relations', 'delete_method', 'delete_route', 'delete_flow', 'delete_flow_step', 'uninstall_package'].includes(toolName)) {
     return destructiveOutputSchema;
   }
   if (toolName === 'setup_oauth_provider') return oauthProviderOutputSchema;

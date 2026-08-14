@@ -647,14 +647,14 @@ export const TOOL_WORKFLOWS = [
     key: 'package',
     title: 'Runtime package install or package-backed extension/script support',
     useWhen: [
-      'Installing npm packages for dynamic code or extension runtime use.',
+      'Installing, enabling, disabling, or uninstalling npm packages for dynamic code or extension runtime use.',
       'Checking package availability before using getPackages in extensions.',
     ],
-    keywords: ['package', 'npm', 'install', 'dependency', 'getpackages'],
+    keywords: ['package', 'npm', 'install', 'uninstall', 'enable', 'disable', 'dependency', 'getpackages'],
     firstTools: ['search_npm', 'get_enfyra_required_knowledge'],
     inspectTools: ['search_npm', 'query_table'],
     knowledgeTools: ['get_enfyra_required_knowledge'],
-    writeTools: ['install_package'],
+    writeTools: ['install_package', 'enable_package', 'disable_package', 'uninstall_package'],
     verifyTools: ['query_table'],
     avoidTools: [
       {
@@ -668,7 +668,7 @@ export const TOOL_WORKFLOWS = [
     exampleCategories: ['extensions', 'handlers-hooks'],
     nextStepTemplate: [
       'Search package metadata first.',
-      'Install with install_package and globalRulesAckKey.',
+      'Install with install_package, toggle with enable_package/disable_package, or preview uninstall_package before confirmation.',
       'Use getPackages inside extension runtime code rather than static imports.',
     ],
     recommendedScope: 'schema',

@@ -10,9 +10,10 @@ const DESTRUCTIVE_TOOLS = new Set([
   'delete_flow',
   'delete_flow_step',
   'remove_field_permission',
+  'uninstall_package',
 ]);
 
-const MUTATION_TOOL_PATTERN = /^(?:create|update|delete|ensure|patch|install|enable|disable|reorder|reload|trigger|set|add|remove)_/;
+const MUTATION_TOOL_PATTERN = /^(?:create|update|delete|ensure|patch|install|uninstall|enable|disable|reorder|reload|trigger|set|add|remove)_/;
 const MUTATION_TOOLS = new Set([
   'api_endpoint_workflow',
   'confirm_schema_mutation',
