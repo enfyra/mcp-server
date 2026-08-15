@@ -29,7 +29,9 @@ test('dynamic script context contract exposes trusted script-visible runtime typ
   assert.match(text, /bound websocket socket/);
   assert.match(text, /observer\?: \(chunkText: string, kind:.*chunk.*end.*error/);
   assert.match(text, /transform\?: \(chunkText: string, kind:.*chunk.*end/);
-  assert.match(text, /return a string to replace output, null to suppress it, or undefined to preserve it/);
+  assert.match(text, /return a string to replace output, null to suppress it, or undefined to preserve it/i);
+  assert.match(text, /one decoder spans the full stream/i);
+  assert.match(text, /blank-line-delimited events/i);
   assert.match(text, /single deadline for observer, transform, and stream relay/);
   assert.match(text, /client abort\/response close cancels the task/);
 });
