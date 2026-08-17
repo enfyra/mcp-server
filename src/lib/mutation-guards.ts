@@ -136,12 +136,12 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   enfyra_extension: {
     create: 'ensure_page_extension / ensure_global_extension / ensure_widget_extension or extension_workflow',
     update: 'patch_extension_code / update_extension_code',
-    delete: 'physical removal is not exposed after verifying menu wiring',
+    delete: 'delete_extension (preview first; the linked menu is preserved and unlinked)',
   },
   enfyra_menu: {
     create: 'ensure_menu',
     update: 'ensure_menu or reorder_menus',
-    delete: 'physical removal is not exposed after verifying child/extension dependencies',
+    delete: 'delete_menu (preview first; system menus, system-owned children, and system-owned extensions are blocked)',
   },
   enfyra_menu_permission: {
     create: 'ensure_menu_access',

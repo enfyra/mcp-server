@@ -12,11 +12,13 @@ const PREVIEW_IGNORED_KEYS = new Set([
   'expectedFlowId',
   'expectedFlowName',
   'expectedStepId',
+  'expectedExtensionId',
+  'expectedMenuId',
   'globalRulesAckKey',
   'maxItems',
   'skipNotFound',
 ]);
-const ID_KEYS = new Set(['id', '_id', 'columnId', 'flowId', 'relationId', 'routeId', 'tableId']);
+const ID_KEYS = new Set(['id', '_id', 'columnId', 'extensionId', 'menuId', 'flowId', 'relationId', 'routeId', 'tableId']);
 
 let targetConfirmed = false;
 const destructivePreviews = new Set<string>();

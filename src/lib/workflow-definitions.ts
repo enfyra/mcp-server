@@ -102,7 +102,7 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'search_admin_extensions'],
     inspectTools: ['search_admin_extensions(mode=search)', 'search_admin_extensions(mode=inspect)', 'search_runtime_zone(mode=search, zone=admin_ui)'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_extension_theme_contract', 'build_extension_ui'],
-    writeTools: ['extension_workflow', 'ensure_menu', 'ensure_menu_access', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension', 'ensure_route_access', 'delete_records'],
+    writeTools: ['extension_workflow', 'ensure_menu', 'ensure_menu_access', 'reorder_menus', 'patch_extension_code', 'update_extension_code', 'ensure_page_extension', 'ensure_global_extension', 'ensure_widget_extension', 'ensure_route_access', 'delete_extension', 'delete_menu', 'delete_records'],
     verifyTools: ['verify_extension_runtime', 'build_extension_ui(kind=runtime_review|theme_review|review)', 'search_admin_extensions(mode=search)', 'search_runtime_zone(mode=search, zone=admin_ui)', 'audit_route_access', 'assess_permission_exposure'],
     avoidTools: [
       {
@@ -135,6 +135,12 @@ export const TOOL_WORKFLOWS = [
         useInstead: 'reorder_menus',
         reason: 'The Enfyra 2.2.6 /admin/menu/reorder route validates menu hierarchy constraints and emits menu cache invalidation.',
       },
+      {
+        tool: 'delete_records on enfyra_extension or enfyra_menu',
+        when: 'physically removing an admin extension or menu',
+        useInstead: 'delete_extension or delete_menu',
+        reason: 'The dedicated destructive operations inspect dependencies, reject system-owned records, require exact preview ids, and verify runtime metadata absence after deletion.',
+      },
     ],
     requiredAck: ['globalRulesAckKey', 'extensionAckKey when saving extension code'],
     exampleCategories: ['extensions'],
@@ -144,7 +150,7 @@ export const TOOL_WORKFLOWS = [
       'Use extension_workflow with apply=false only when page/menu wiring is ambiguous or needs approval; use applyAll after narrow inspection when the requested create/wire contract is fully specified.',
       'Use reorder_menus for menu order/parent changes instead of patching individual enfyra_menu records.',
       'Use ensure_menu_access to link a private menu to a role; do not put route/method predicates in the menu visibility contract.',
-      'For temporary extension cleanup, inspect the exact extension id, preview delete_records on enfyra_extension with confirm=false, repeat with confirm=true, then verify absence with search_admin_extensions.',
+      'For extension cleanup, inspect the exact extension id, preview delete_extension with confirm=false, repeat with confirm=true and expectedExtensionId, then verify absence with search_admin_extensions. For menu cleanup, preview delete_menu with confirm=false, repeat with confirm=true and expectedMenuId, then verify the menu hierarchy and linked extension wiring.',
       'Choose count only when the source already owns an exact count; choose dot/chip for new-attention signals.',
       'Validate extension code or use an ensure_*_extension tool that validates before saving.',
       'For a page extension, set menu visibility with isPublic or ensure_menu_access, keep PermissionGate route/method conditions inside the page, and grant the target role backend route permission via ensure_route_access. Verify both menu access and API access independently.',

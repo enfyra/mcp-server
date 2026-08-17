@@ -218,7 +218,7 @@ test('transport-only Vue source escaping is normalized without rewriting valid s
 test('generic CRUD cannot bypass domain-owned schema and route operations', () => {
   assert.throws(() => assertGenericRecordMutationAllowed('delete', 'enfyra_table'), /delete_tables/);
   assert.throws(() => assertGenericRecordMutationAllowed('create', 'enfyra_route'), /api_endpoint_workflow/);
-  assert.throws(() => assertGenericRecordMutationAllowed('delete', 'enfyra_extension'), /not exposed/);
+  assert.throws(() => assertGenericRecordMutationAllowed('delete', 'enfyra_extension'), /delete_extension/);
   assert.throws(() => assertGenericRecordMutationAllowed('create', 'enfyra_flow_trigger'), /ensure_flow_trigger/);
   assert.throws(() => assertGenericRecordMutationAllowed('delete', 'enfyra_flow_trigger'), /remove_flow_trigger/);
   assert.doesNotThrow(() => assertGenericRecordMutationAllowed('create', 'enfyra_role'));

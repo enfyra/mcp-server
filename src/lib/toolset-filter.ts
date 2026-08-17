@@ -39,6 +39,8 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     'build_extension_ui',
     'assess_permission_exposure',
     'extension_workflow',
+    'delete_extension',
+    'delete_menu',
     'update_extension_code',
     'patch_extension_code',
     'ensure_menu',

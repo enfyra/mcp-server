@@ -20,6 +20,8 @@ test('tool contracts distinguish reads, mutations, destructive operations, and l
   assert.equal(getToolContract('delete_records').annotations.destructiveHint, true);
   assert.equal(getToolContract('delete_flow').annotations.destructiveHint, true);
   assert.equal(getToolContract('delete_flow_step').annotations.destructiveHint, true);
+  assert.equal(getToolContract('delete_extension').annotations.destructiveHint, true);
+  assert.equal(getToolContract('delete_menu').annotations.destructiveHint, true);
   assert.equal(getToolContract('create_handler').annotations.idempotentHint, false);
   assert.equal(getToolContract('build_extension_drawer').annotations.openWorldHint, false);
   assert.equal(getToolContract('build_extension_drawer').annotations.readOnlyHint, true);
@@ -59,5 +61,13 @@ test('flow destructive confirmation fingerprints ignore preview-only expected id
   assert.equal(destructiveToolInputsMatch(
     { flowId: 7, stepId: 71, confirm: false },
     { flowId: 7, stepId: 71, expectedFlowId: 7, expectedStepId: 71, confirm: true },
+  ), true);
+  assert.equal(destructiveToolInputsMatch(
+    { id: 16, confirm: false },
+    { id: 16, expectedExtensionId: 16, confirm: true },
+  ), true);
+  assert.equal(destructiveToolInputsMatch(
+    { menuId: 24, confirm: false },
+    { menuId: 24, expectedMenuId: 24, confirm: true },
   ), true);
 });

@@ -9,6 +9,8 @@ const DESTRUCTIVE_TOOLS = new Set([
   'delete_route',
   'delete_flow',
   'delete_flow_step',
+  'delete_extension',
+  'delete_menu',
   'remove_field_permission',
   'uninstall_package',
 ]);

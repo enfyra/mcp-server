@@ -63,6 +63,8 @@ test('guided domain profiles expose a bounded task surface', () => {
 test('extension and schema profiles isolate normal domain tools', () => {
   assert.equal(isToolVisibleInToolset('extension_workflow', 'guided', 'extension'), true);
   assert.equal(isToolVisibleInToolset('patch_extension_code', 'guided', 'extension'), true);
+  assert.equal(isToolVisibleInToolset('delete_extension', 'guided', 'extension'), true);
+  assert.equal(isToolVisibleInToolset('delete_menu', 'guided', 'extension'), true);
   assert.equal(isToolVisibleInToolset('create_tables', 'guided', 'extension'), false);
   assert.equal(isToolVisibleInToolset('create_handler', 'guided', 'extension'), false);
 

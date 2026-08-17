@@ -89,8 +89,8 @@ export const MODEL_EVAL_SCENARIOS: ModelEvalScenario[] = [
       ['get_enfyra_required_knowledge'],
       ['get_extension_theme_contract'],
       ['ensure_widget_extension', 'extension_workflow'],
-      ['delete_records'],
-      ['delete_records', 'search_admin_extensions', 'find_one_record', 'query_table'],
+      ['delete_extension', 'delete_records'],
+      ['delete_extension', 'delete_records', 'search_admin_extensions', 'find_one_record', 'query_table'],
     ],
     verificationTools: ['delete_records', 'search_admin_extensions', 'find_one_record', 'query_table'],
     maxToolCalls: 14,
@@ -261,6 +261,11 @@ function provesAbsence(event: ModelEvalTraceEvent) {
       && event.result.postcondition.confirmedAbsent === true
       && isEmptyCollection(event.result.postcondition.remainingIds);
   }
+  if (event.tool === 'delete_extension') {
+    return isRecord(event.result.postcondition)
+      && event.result.postcondition.confirmedAbsent === true
+      && (event.result.postcondition.remainingExtension === null || event.result.postcondition.remainingExtension === undefined);
+  }
   if (event.tool === 'search_admin_extensions') {
     if (typeof event.result.resultCount === 'number') return event.result.resultCount === 0;
     return isEmptyCollection(event.result.results);
@@ -282,7 +287,7 @@ function creationVerificationCheck(scenario: ModelEvalScenario, events: ModelEva
     ['ensure_widget_extension', 'extension_workflow'].includes(event.tool) && !event.isError
   ));
   const confirmedDelete = events.findIndex((event, index) => (
-    index > creation && event.tool === 'delete_records' && event.arguments?.confirm === true && !event.isError
+    index > creation && ['delete_extension', 'delete_records'].includes(event.tool) && event.arguments?.confirm === true && !event.isError
   ));
   const explicitVerification = events.findIndex((event, index) => (
     index > creation && (confirmedDelete < 0 || index < confirmedDelete)
@@ -306,7 +311,7 @@ function cleanupAbsenceCheck(scenario: ModelEvalScenario, events: ModelEvalTrace
     return { key: 'cleanup_absence', passed: true, detail: 'No cleanup absence proof required.' };
   }
   const confirmedDelete = events.findIndex((event) => (
-    event.tool === 'delete_records' && event.arguments?.confirm === true && !event.isError
+    ['delete_extension', 'delete_records'].includes(event.tool) && event.arguments?.confirm === true && !event.isError
   ));
   const inlineProof = confirmedDelete >= 0 && provesAbsence(events[confirmedDelete]);
   const verification = events.find((event, index) => (

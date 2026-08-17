@@ -1,5 +1,8 @@
 import { z } from 'zod';
+import { destructivePreviewContent } from './destructive-preview.js';
 import {
+  deleteExtension,
+  deleteMenu,
   ensureExtension,
   ensureMenuAccess,
   ensureMenu,
@@ -88,6 +91,49 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z),
       },
       async (input) => jsonText(await reorderMenus(ENFYRA_API_URL, input)),
+    );
+
+  server.tool(
+      'delete_menu',
+      [
+        'Business operation: preview-first physical deletion of one non-system admin menu.',
+        'The preview includes child menus, role visibility rows, and linked extensions. Confirmation requires the exact menu id from the preview and verifies the menu plus those dependency references are absent afterward.',
+        'Child menus are detached and linked extensions are preserved and unlinked by the server relation contract; system menus, system-owned child menus, and menus linked to system extensions cannot be deleted.',
+      ].join(' '),
+      {
+        menuId: z.union([z.string(), z.number()]).optional().describe('Existing menu id. Provide menuId or menuPath. If confirming, use the exact id returned by the preview.'),
+        menuPath: z.string().optional().describe('Exact admin menu path, e.g. /settings/reports. Provide menuPath or menuId.'),
+        expectedMenuId: z.union([z.string(), z.number()]).optional().describe('Required when confirm=true. Pass the exact menu id returned by the preview.'),
+        confirm: z.boolean().optional().default(false).describe('false returns the dependency preview only; true deletes the non-system menu.'),
+        globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      },
+      async (input) => {
+        const result = await deleteMenu(ENFYRA_API_URL, input);
+        if (!input.confirm) return destructivePreviewContent('delete_menu', result, 1);
+        const content = jsonText(result);
+        return result.postcondition.confirmedAbsent ? content : { ...content, isError: true };
+      },
+    );
+
+  server.tool(
+      'delete_extension',
+      [
+        'Business operation: preview-first physical deletion of one non-system admin extension.',
+        'The preview includes linked menu wiring. Confirmation requires the exact extension id from the preview and verifies the extension is absent afterward; its linked menu is preserved and unlinked.',
+      ].join(' '),
+      {
+        id: z.union([z.string(), z.number()]).optional().describe('Existing extension id. Provide id or name.'),
+        name: z.string().optional().describe('Existing extension unique name. Provide name or id.'),
+        expectedExtensionId: z.union([z.string(), z.number()]).optional().describe('Required when confirm=true. Pass the exact extension id returned by the preview.'),
+        confirm: z.boolean().optional().default(false).describe('false returns the dependency preview only; true deletes the non-system extension.'),
+        globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      },
+      async (input) => {
+        const result = await deleteExtension(ENFYRA_API_URL, input);
+        if (!input.confirm) return destructivePreviewContent('delete_extension', result, 1);
+        const content = jsonText(result);
+        return result.postcondition.confirmedAbsent ? content : { ...content, isError: true };
+      },
     );
 
   server.tool(
