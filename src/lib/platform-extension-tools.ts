@@ -34,7 +34,7 @@ import {
 import {
   normalizeEscapedVueSource
 } from './tool-input-normalization.js';
-import { materializeSourceInput } from './source-artifacts.js';
+import { materializeSourceInput, normalizeExtensionSourceArgs } from './source-artifacts.js';
 
 export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
   const extensionFooterActionSchema = z.object({
@@ -163,7 +163,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z),
         extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
       },
-      async (input) => jsonText(await updateExtensionCode(ENFYRA_API_URL, input)),
+      async (input) => jsonText(await updateExtensionCode(ENFYRA_API_URL, normalizeExtensionSourceArgs(input) as any)),
     );
 
   server.tool(
@@ -651,6 +651,6 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when apply/applyAll mutates metadata. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
         extensionKnowledgeAckKey: extensionKnowledgeAckParam(z).optional().describe('Required when apply/applyAll saves extension code. Use extensionAckKey from get_enfyra_required_knowledge.'),
       },
-      async (input) => jsonText(await runExtensionWorkflow(ENFYRA_API_URL, input)),
+      async (input) => jsonText(await runExtensionWorkflow(ENFYRA_API_URL, normalizeExtensionSourceArgs(input) as any)),
     );
 }

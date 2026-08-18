@@ -27,7 +27,7 @@ import {
   assertExtensionKnowledgeAck,
   assertGlobalRulesAck
 } from './required-knowledge.js';
-import { materializeSourceInput, resolveSourceInput, writeSourceArtifact } from './source-artifacts.js';
+import { materializeSourceInput, normalizeExtensionSourceArgs, resolveSourceInput, writeSourceArtifact } from './source-artifacts.js';
 
 export function parseJsonObjectArg(name, value, fallback = {}) {
   if (value === undefined || value === null || value === '') return fallback;
@@ -285,6 +285,10 @@ export async function updateExtensionCode(apiUrl, {
   assertGlobalRulesAck(globalRulesAckKey);
   assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
   if (!id && !name) throw new Error('Provide id or name to update an existing extension.');
+  const normalizedSourceArgs = normalizeExtensionSourceArgs({ code, sourceFile, sourceResourceUri });
+  code = normalizedSourceArgs.code;
+  sourceFile = normalizedSourceArgs.sourceFile;
+  sourceResourceUri = normalizedSourceArgs.sourceResourceUri;
   const existing = id
     ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,isEnabled,version,menu.id,code')
     : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,isEnabled,version,menu.id,code');
@@ -534,6 +538,9 @@ export async function patchExtensionCode(apiUrl, {
   assertGlobalRulesAck(globalRulesAckKey);
   assertExtensionKnowledgeAck(extensionKnowledgeAckKey);
   if (!id && !name) throw new Error('Provide id or name to patch an existing extension.');
+  const normalizedPatchSourceArgs = normalizeExtensionSourceArgs({ sourceFile, sourceResourceUri });
+  sourceFile = normalizedPatchSourceArgs.sourceFile;
+  sourceResourceUri = normalizedPatchSourceArgs.sourceResourceUri;
   const existing = id
     ? await findRecord(apiUrl, 'enfyra_extension', { id: { _eq: id } }, 'id,_id,name,type,menu.id,code')
     : await findRecord(apiUrl, 'enfyra_extension', { name: { _eq: name } }, 'id,_id,name,type,menu.id,code');
@@ -596,7 +603,6 @@ export async function patchExtensionCode(apiUrl, {
         input: {
           id: extensionId,
           expectedSha256: currentSha256,
-          sourceFile: nextArtifact.sourceArtifact.tmpFile,
           sourceResourceUri: nextArtifact.sourceArtifact.resourceUri,
           apply: true,
         },
@@ -606,7 +612,7 @@ export async function patchExtensionCode(apiUrl, {
   const result = await updateExtensionCode(apiUrl, {
     id: extensionId,
     name: undefined,
-    sourceFile: nextArtifact.sourceArtifact.tmpFile,
+    sourceResourceUri: nextArtifact.sourceArtifact.resourceUri,
     description,
     isEnabled,
     version,

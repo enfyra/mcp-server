@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   compactSourceFields,
   materializeSourceInput,
+  normalizeExtensionSourceArgs,
   readSourceArtifactFile,
   readSourceArtifactResource,
   resolveSourceInput,
@@ -51,6 +52,24 @@ test('source input ignores blank artifact fields from weak clients', () => {
     sourceResourceUri: '  ',
     fieldName: 'sourceCode',
   }), 'valid source');
+});
+
+test('extension source serialization keeps exactly one selected source field', () => {
+  const artifact = writeSourceArtifact({ tableName: 'enfyra_extension', id: 9, fieldName: 'code', source: '<template />' });
+  assert.deepEqual(normalizeExtensionSourceArgs({ code: '<template />', description: 'x' }), { code: '<template />', description: 'x' });
+  assert.deepEqual(normalizeExtensionSourceArgs({ sourceFile: artifact.tmpFile, description: 'x' }), { sourceFile: artifact.tmpFile, description: 'x' });
+  assert.deepEqual(normalizeExtensionSourceArgs({ sourceResourceUri: artifact.resourceUri, description: 'x' }), { sourceResourceUri: artifact.resourceUri, description: 'x' });
+  assert.deepEqual(normalizeExtensionSourceArgs({ code: '', sourceFile: artifact.tmpFile }), { sourceFile: artifact.tmpFile });
+});
+
+test('extension source serialization rejects ambiguous source fields', () => {
+  const artifact = writeSourceArtifact({ tableName: 'enfyra_extension', id: 10, fieldName: 'code', source: '<template />' });
+  for (const input of [
+    { code: '<template />', sourceFile: artifact.tmpFile },
+    { code: '<template />', sourceResourceUri: artifact.resourceUri },
+    { sourceFile: artifact.tmpFile, sourceResourceUri: artifact.resourceUri },
+  ]) assert.throws(() => normalizeExtensionSourceArgs(input), /exactly one/);
+  assert.throws(() => resolveSourceInput({ fieldName: 'code' }), /Provide exactly one of code, sourceFile, or sourceResourceUri/);
 });
 
 test('source input rejects arbitrary files and ambiguous inline/artifact inputs', () => {

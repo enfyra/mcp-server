@@ -6,6 +6,7 @@ import {
   resolveRole,
 } from './platform-data-operations.js';
 import {
+  reloadBestEffort,
   sha256Text,
   validateExtensionCode,
   verifyExtensionRuntime,
@@ -22,38 +23,85 @@ import {
 import { materializeSourceInput } from './source-artifacts.js';
 
 export async function ensureMenu(apiUrl, {
+  menuId = undefined,
   label,
   path,
   icon,
-  type = 'Menu',
-  order = 0,
+  type,
+  order,
   isPublic,
   description,
-  isEnabled = true,
+  isEnabled,
   globalRulesAckKey,
 }) {
   assertGlobalRulesAck(globalRulesAckKey);
+  const effectiveType = type || 'Menu';
   const normalizedPath = path ? normalizeRestPath(path) : undefined;
-  const existing = normalizedPath
-    ? await findRecord(apiUrl, 'enfyra_menu', { path: { _eq: normalizedPath } }, 'id,_id,path,label')
-    : await findRecord(apiUrl, 'enfyra_menu', { label: { _eq: label } }, 'id,_id,path,label');
-  const body: Record<string, any> = {
-    label,
-    ...(normalizedPath ? { path: normalizedPath } : {}),
-    icon,
-    type,
-    order,
-    description,
-    isEnabled,
-    ...(isPublic !== undefined ? { isPublic } : (!existing ? { isPublic: false } : {})),
-  };
+  const fields = 'id,_id,label,path,icon,type,order,description,isEnabled,isPublic,parent.id,extension.id,menuPermissions.id';
+  let existing = menuId != null
+    ? await findRecord(apiUrl, 'enfyra_menu', { id: { _eq: menuId } }, fields)
+    : normalizedPath
+      ? await findRecord(apiUrl, 'enfyra_menu', { path: { _eq: normalizedPath } }, fields)
+      : await findRecord(apiUrl, 'enfyra_menu', { label: { _eq: label }, type: { _eq: effectiveType } }, fields);
+  if (menuId != null && !existing) throw new Error(`Menu not found: ${menuId}`);
+  if (!existing && label) {
+    const sameLabel = await fetchRecords(apiUrl, 'enfyra_menu', { label: { _eq: label }, type: { _eq: effectiveType } }, fields, 1000);
+    if (sameLabel.length > 1) throw new Error(`Multiple menus match label "${label}" and type "${type}". Provide menuId.`);
+    if (sameLabel.length === 1) existing = sameLabel[0];
+  }
+  if (existing && normalizedPath) {
+    const pathOwner = await findRecord(apiUrl, 'enfyra_menu', { path: { _eq: normalizedPath } }, 'id,_id,label,path,type');
+    if (pathOwner && !sameId(getId(pathOwner), getId(existing))) {
+      throw new Error(`Menu path collision: ${normalizedPath} is already used by menu ${getId(pathOwner)}.`);
+    }
+  }
+  const body: Record<string, any> = {};
+  if (label !== undefined) body.label = label;
+  if (normalizedPath !== undefined) body.path = normalizedPath;
+  if (!existing) {
+    body.icon = icon;
+    body.type = effectiveType;
+    body.order = order;
+    body.description = description;
+    body.isEnabled = isEnabled;
+    body.isPublic = isPublic ?? false;
+  } else {
+    if (icon !== undefined) body.icon = icon;
+    if (type !== undefined) body.type = type;
+    if (order !== undefined) body.order = order;
+    if (description !== undefined) body.description = description;
+    if (isEnabled !== undefined) body.isEnabled = isEnabled;
+    if (isPublic !== undefined) body.isPublic = isPublic;
+  }
   const operation = await createOrPatch(apiUrl, 'enfyra_menu', existing, body);
+  const id = operation.id || getId(existing);
+  const runtimeReload = await reloadBestEffort(apiUrl, '/admin/reload/metadata');
+  const saved = await findRecord(apiUrl, 'enfyra_menu', { id: { _eq: id } }, fields);
   return {
-    id: operation.id || getId(existing),
-    path: normalizedPath || existing?.path || null,
-    label,
+    id,
+    menuId: id,
+    oldPath: existing?.path || null,
+    newPath: saved?.path || normalizedPath || existing?.path || null,
+    path: saved?.path || normalizedPath || existing?.path || null,
+    label: saved?.label || label || null,
     action: operation.action,
-    operation,
+    operation: { action: operation.action, id },
+    runtimeReload,
+    postcondition: {
+      confirmed: Boolean(saved && sameId(getId(saved), id)),
+      menu: saved ? {
+        id: getId(saved),
+        label: saved.label || null,
+        path: saved.path || null,
+        parentId: saved.parent ? getId(saved.parent) : null,
+        order: saved.order ?? null,
+        type: saved.type || null,
+        isEnabled: saved.isEnabled,
+        isPublic: saved.isPublic,
+        extensionId: saved.extension ? getId(saved.extension) : null,
+        menuPermissionIds: Array.isArray(saved.menuPermissions) ? saved.menuPermissions.map((item) => getId(item)) : [],
+      } : null,
+    },
   };
 }
 

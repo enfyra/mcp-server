@@ -136,6 +136,7 @@ async function applyExtensionWorkflowStep(apiUrl, state, opts, stepId) {
     return {
       action: 'menu_ensured',
       menu: await ensureMenu(apiUrl, {
+        menuId: opts.menuId || state.menu?.id,
         label: opts.menuLabel || state.menu?.label || opts.name,
         path: opts.menuPath || state.menu?.path,
         icon: opts.menuIcon,

@@ -122,16 +122,43 @@ export function resolveSourceInput({ source, sourceCode, code, sourceFile, sourc
   sourceResourceUri?: string;
   fieldName: string;
 }) {
+  const selected = selectSourceInput({ source, sourceCode, code, sourceFile, sourceResourceUri, fieldName });
+  if (selected.kind === 'inline') return selected.value;
+  if (selected.kind === 'sourceFile') return readSourceArtifactFile(selected.value);
+  return readSourceArtifactResource(selected.value).text;
+}
+
+export function selectSourceInput({ source, sourceCode, code, sourceFile, sourceResourceUri, fieldName }: {
+  source?: string;
+  sourceCode?: string;
+  code?: string;
+  sourceFile?: string;
+  sourceResourceUri?: string;
+  fieldName: string;
+}) {
+  const inlineValues = [source, sourceCode, code].filter((value) => value !== undefined && value !== '');
   const normalizedSourceFile = normalizeOptionalText(sourceFile);
   const normalizedSourceResourceUri = normalizeOptionalText(sourceResourceUri);
-  const inlineSources = [source, sourceCode, code].filter((value) => value !== undefined);
-  const provided = [inlineSources.length > 0, normalizedSourceFile !== undefined, normalizedSourceResourceUri !== undefined].filter(Boolean).length;
-  if (provided !== 1 || inlineSources.length > 1) {
+  const candidates = [
+    inlineValues.length === 1 ? { kind: 'inline' as const, value: inlineValues[0] } : null,
+    normalizedSourceFile !== undefined ? { kind: 'sourceFile' as const, value: normalizedSourceFile } : null,
+    normalizedSourceResourceUri !== undefined ? { kind: 'sourceResourceUri' as const, value: normalizedSourceResourceUri } : null,
+  ].filter(Boolean);
+  if (candidates.length !== 1) {
     throw new Error(`Provide exactly one of ${fieldName}, sourceFile, or sourceResourceUri.`);
   }
-  if (inlineSources.length === 1) return inlineSources[0];
-  if (normalizedSourceFile !== undefined) return readSourceArtifactFile(normalizedSourceFile);
-  return readSourceArtifactResource(normalizedSourceResourceUri!).text;
+  return candidates[0]!;
+}
+
+export function normalizeExtensionSourceArgs(input: Record<string, any>): Record<string, any> {
+  const { code, sourceFile, sourceResourceUri, ...rest } = input;
+  const hasCandidate = [code, sourceFile, sourceResourceUri].some((value) => value !== undefined && value !== '');
+  if (!hasCandidate) return rest;
+  const selected = selectSourceInput({ code, sourceFile, sourceResourceUri, fieldName: 'code' });
+  return {
+    ...rest,
+    ...(selected.kind === 'inline' ? { code: selected.value } : selected.kind === 'sourceFile' ? { sourceFile: selected.value } : { sourceResourceUri: selected.value }),
+  };
 }
 
 export function materializeSourceInput({ source, sourceCode, code, sourceFile, sourceResourceUri, fieldName, tableName = 'mcp', id = 'input' }: {

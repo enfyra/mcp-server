@@ -16,6 +16,7 @@ import {
 import {
   normalizeEscapedVueSource
 } from './tool-input-normalization.js';
+import { normalizeExtensionSourceArgs } from './source-artifacts.js';
 import { assessPermissionExposure } from './permission-exposure.js';
 
 export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
@@ -42,14 +43,15 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
       'ensure_menu',
       'Business operation: create or update one admin menu item. Use this instead of raw enfyra_menu CRUD. A private/hidden menu must not leave matching server authority open; assess the exposure and verify route access before completion.',
       {
+        menuId: z.union([z.string(), z.number()]).optional().describe('Existing menu id. When provided, PATCH this exact menu instead of creating or matching by label/path.'),
         label: z.string().describe('Menu label.'),
         path: z.string().optional().describe('Admin app route path for leaf menu items, e.g. /reports.'),
         icon: z.string().optional().describe('Menu icon name.'),
-        type: z.enum(['Menu', 'Dropdown Menu']).optional().default('Menu').describe('Menu type.'),
-        order: z.number().optional().default(0).describe('Display order.'),
+        type: z.enum(['Menu', 'Dropdown Menu']).optional().describe('Menu type. Preserved for existing menus when omitted.'),
+        order: z.number().optional().describe('Display order. Preserved for existing menus when omitted.'),
         isPublic: z.boolean().optional().describe('Show this menu item to every role. Set false before assigning role-specific visibility with ensure_menu_access.'),
         description: z.string().optional().describe('Admin note.'),
-        isEnabled: z.boolean().optional().default(true).describe('Enable menu.'),
+        isEnabled: z.boolean().optional().describe('Enable menu. Preserved for existing menus when omitted.'),
         globalRulesAckKey: globalRulesAckParam(z),
       },
       async (input) => jsonText({
@@ -153,7 +155,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
       },
       async (input) => jsonText({
         action: 'page_extension_ensured',
-        extension: await ensureExtension(ENFYRA_API_URL, { ...input, type: 'page' }),
+        extension: await ensureExtension(ENFYRA_API_URL, { ...normalizeExtensionSourceArgs(input), type: 'page' } as any),
       }),
     );
 
@@ -173,7 +175,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
       },
       async (input) => jsonText({
         action: 'global_extension_ensured',
-        extension: await ensureExtension(ENFYRA_API_URL, { ...input, type: 'global' }),
+        extension: await ensureExtension(ENFYRA_API_URL, { ...normalizeExtensionSourceArgs(input), type: 'global' } as any),
       }),
     );
 
@@ -193,7 +195,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
       },
       async (input) => jsonText({
         action: 'widget_extension_ensured',
-        extension: await ensureExtension(ENFYRA_API_URL, { ...input, type: 'widget' }),
+        extension: await ensureExtension(ENFYRA_API_URL, { ...normalizeExtensionSourceArgs(input), type: 'widget' } as any),
       }),
     );
 }
