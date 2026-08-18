@@ -540,32 +540,28 @@ test('discovery tools report target instance and avoid unbounded broad searches'
   assert.match(entry, /For a specific match, call inspect_table, inspect_route, trace_metadata_usage, or get_script_source/);
 });
 
-test('query_table supports deep meta and aggregate query options', () => {
+test('query_table keeps row reads separate from grouped aggregate queries', () => {
   const entry = readEntrySource();
   const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
   const discovery = readSourceFiles('lib/discovery-tools.ts');
   const examples = readExamplesSource();
   assert.match(entry, /meta: z\.string\(\)\.optional\(\)/);
   assert.match(entry, /deep: jsonObjectParam\(z, 'Deep relation fetch object'\)\.optional\(\)/);
-  assert.match(entry, /aggregate: jsonObjectParam\(z, 'Aggregate object'\)\.optional\(\)/);
-  assert.match(entry, /call discover_query_capabilities before using aggregate objects/);
-  assert.match(entry, /Aggregate operations use field configs such as \{ amount: \{ sum: true \} \}, not _sum\/_count operators/);
+  assert.doesNotMatch(entry, /aggregate: jsonObjectParam\(z, 'Aggregate object'\)\.optional\(\)/);
+  assert.doesNotMatch(entry, /queryParams\.set\('aggregate', aggregateParam\)/);
+  assert.match(entry, /Grouped analytics are a separate dynamic repository aggregate/);
   assert.match(entry, /queryParams\.set\('deep', deepParam\)/);
-  assert.match(entry, /queryParams\.set\('aggregate', aggregateParam\)/);
   assert.match(entry, /function applyDeepFieldSelections/);
   assert.match(entry, /autoAddedDeepFields/);
   assert.match(entry, /query_table auto-adds missing top-level deep relation names to fields/);
   assert.match(entry, /validateQueryContract/);
   assert.match(entry, /server\.tool\(\s*['"]inspect_rest_projection['"]/);
-  assert.match(requiredKnowledge, /Explicit dotted fields and fields inside deep are recursively checked/);
-  assert.match(requiredKnowledge, /compare authenticated and anonymous response shape without returning record values/);
-  assert.match(discovery, /Scalar fields use count\/sum\/avg\/min\/max/);
-  assert.match(discovery, /relations use countRecords/);
-  assert.match(discovery, /sum and avg.*numeric live column/);
-  assert.match(discovery, /response\.meta\.aggregate/);
-  assert.match(discovery, /not a grouped rows\/GROUP BY response/);
-  assert.match(examples, /Aggregate metrics over a filtered set/);
-  assert.match(examples, /The operation condition is combined with the root filter/);
+  assert.match(requiredKnowledge, /Grouped analytics are not query_table options/);
+  assert.match(requiredKnowledge, /Repository aggregate queries use aggregate/);
+  assert.match(discovery, /Grouped analytics are available only through dynamic repository aggregate/);
+  assert.match(discovery, /computed rows under data and never returns raw records/);
+  assert.match(examples, /Grouped aggregate metrics over a filtered set/);
+  assert.match(examples, /Read computed grouped rows from result\.data/);
 });
 
 test('generic read tools reject enfyra_extension sourceCode confusion', () => {

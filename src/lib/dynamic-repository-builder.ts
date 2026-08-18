@@ -40,13 +40,11 @@ export function buildDynamicRepositoryUsage(input: {
     ? {
       deep: 'undefined',
       meta: 'undefined',
-      aggregate: 'undefined',
       debugMode: 'undefined',
     }
     : {
       deep: '@QUERY.deep',
       meta: '@QUERY.meta',
-      aggregate: '@QUERY.aggregate',
       debugMode: '@QUERY.debugMode',
     };
   const idField = requireIdentifier(input.idField || 'id', 'idField');
@@ -76,7 +74,6 @@ export function buildDynamicRepositoryUsage(input: {
   page: @QUERY.page,
   limit: Math.min(Number(@QUERY.limit) || 50, 100),
   meta: ${outputExpansion.meta},
-  aggregate: ${outputExpansion.aggregate},
   debugMode: ${outputExpansion.debugMode}
 })
 

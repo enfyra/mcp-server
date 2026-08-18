@@ -276,7 +276,7 @@ const scope = {
           '@QUERY.filter is initialized as an object for REST pre-hooks.',
           'Mutate @QUERY.filter before canonical CRUD runs.',
           'This policy affects every consumer of the canonical route, including eApp. Use a separate custom endpoint handler when the scope is third-party-only.',
-          'Do not override @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, @QUERY.aggregate, or debugMode in RLS; keep projection and pagination client-owned.',
+          'Do not override @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, or debugMode in RLS; keep projection and pagination client-owned. Grouped analytics are a separate repository.aggregate call.',
         ],
       },
       {

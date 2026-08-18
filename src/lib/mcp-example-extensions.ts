@@ -689,30 +689,19 @@ const rangeStart = computed(() => {
   return d.toISOString()
 })
 
-const flowStats = useApi('/enfyra_flow_execution', {
+const flowStats = useApi('/enfyra_flow_execution/summary', {
   query: computed(() => ({
-    fields: 'id',
-    limit: 1,
-    meta: 'filterCount',
     filter: { startedAt: { _gte: rangeStart.value } },
-    aggregate: {
-      id: { count: true },
-      status: { count: { _eq: 'failed' } }
-    }
+    dimensions: [{ field: 'status' }],
+    measures: { executions: { count: 'id' } }
   }))
 })
 
-const orderStats = useApi('/order', {
+const orderStats = useApi('/order/summary', {
   query: computed(() => ({
-    fields: 'id',
-    limit: 1,
-    meta: 'filterCount',
     filter: { createdAt: { _gte: rangeStart.value } },
-    aggregate: {
-      id: { count: true },
-      status: { count: { _eq: 'applied' } },
-      amount_usd: { sum: true }
-    }
+    dimensions: [{ field: 'status' }],
+    measures: { orders: { count: 'id' }, amountUsd: { sum: 'amount_usd' } }
   }))
 })
 
@@ -720,8 +709,8 @@ watch(range, () => Promise.all([flowStats.execute(), orderStats.execute()]))
 onMounted(() => Promise.all([flowStats.execute(), orderStats.execute()]))
 </script>`,
         notes: [
-          'Aggregate keys must be real fields or relations.',
-          'Read results from response.meta.aggregate.',
+          'Aggregate dimensions and measure fields must be real scalar fields.',
+          'Read computed grouped rows from result.data.',
           'Use top-level filter for time windows and cross-field conditions.',
           'The flow/order pair is illustrative. Choose aggregates that answer the page question, such as failed work, pending approvals, unread support, quota pressure, or revenue.',
           'Only aggregate fields and relations that the dashboard is allowed to expose; aggregate values can reveal hidden data even when rows omit that field.',

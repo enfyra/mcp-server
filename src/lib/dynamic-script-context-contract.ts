@@ -18,8 +18,8 @@ export function buildDynamicScriptContextTypeContract() {
       },
       '@QUERY': {
         type: 'QueryContext',
-        declaration: 'type QueryContext = { filter: Filter; _filter: Filter; deep?: RuntimeRecord; _deep?: RuntimeRecord; aggregate?: RuntimeRecord; fields?: string | string[]; sort?: string | string[]; page?: string | number; limit?: string | number; meta?: string | string[]; debugMode?: string | boolean; [key: string]: unknown }',
-        guarantee: 'Always an object. For a valid parsed request, filter and _filter are objects and deep/_deep/aggregate are parsed objects. Other REST query values normally arrive as strings. Do not guard the @QUERY container; reject malformed serialized query input instead of silently normalizing its framework shape.',
+        declaration: 'type QueryContext = { filter: Filter; _filter: Filter; deep?: RuntimeRecord; _deep?: RuntimeRecord; fields?: string | string[]; sort?: string | string[]; page?: string | number; limit?: string | number; meta?: string | string[]; debugMode?: string | boolean; [key: string]: unknown }',
+        guarantee: 'Always an object. For a valid parsed request, filter and _filter are objects and deep/_deep are parsed objects. Other REST query values normally arrive as strings. Do not guard the @QUERY container; reject malformed serialized query input instead of silently normalizing its framework shape.',
       },
       '@PARAMS': {
         type: 'Record<string, string>',
@@ -88,9 +88,10 @@ export function buildDynamicScriptContextTypeContract() {
     },
     repositories: {
       declaration: [
-        'type CollectionResult<T = RuntimeRecord> = { data: T[]; meta?: { totalCount?: number; filterCount?: number; aggregate?: unknown; [key: string]: unknown }; count?: number; [key: string]: unknown }',
-        'type RepositoryFindOptions = { filter?: Filter; fields?: string | string[]; limit?: number; sort?: string; meta?: string | string[]; aggregate?: RuntimeRecord; deep?: Record<string, RuntimeRecord> }',
-        'interface DynamicRepository { find(options?: RepositoryFindOptions): Promise<CollectionResult>; exists(filter?: Filter): Promise<boolean>; create(options: { data: RuntimeRecord | RuntimeRecord[]; fields?: string | string[]; batch?: boolean }): Promise<CollectionResult | { accepted: true; batch: true; count: number }>; update(options: { id: Id; data: RuntimeRecord; fields?: string | string[] }): Promise<CollectionResult>; delete(options: { id: Id }): Promise<{ message: string; statusCode: 200 }> }',
+        'type CollectionResult<T = RuntimeRecord> = { data: T[]; meta?: { totalCount?: number; filterCount?: number; [key: string]: unknown }; count?: number; [key: string]: unknown }',
+        'type RepositoryFindOptions = { filter?: Filter; fields?: string | string[]; limit?: number; sort?: string; meta?: string | string[]; deep?: Record<string, RuntimeRecord> }',
+        'type AggregateOptions = { filter?: Filter; dimensions?: Array<{ field: string; bucket?: "hour" | "day" | "week" | "month" | "year"; timezone?: string }>; measures: Record<string, Record<string, string>>; sort?: Array<{ field: string; direction: "asc" | "desc" }>; page?: number; limit?: number }',
+        'interface DynamicRepository { find(options?: RepositoryFindOptions): Promise<CollectionResult>; aggregate(options: AggregateOptions): Promise<CollectionResult>; exists(filter?: Filter): Promise<boolean>; create(options: { data: RuntimeRecord | RuntimeRecord[]; fields?: string | string[]; batch?: boolean }): Promise<CollectionResult | { accepted: true; batch: true; count: number }>; update(options: { id: Id; data: RuntimeRecord; fields?: string | string[] }): Promise<CollectionResult>; delete(options: { id: Id }): Promise<{ message: string; statusCode: 200 }> }',
       ].join('\n'),
       guarantee: 'find/create/update return CollectionResult in normal non-batch use and data is always an array. Never guard result.data with Array.isArray. Use result.data[0] after a proven match, or result.data?.[0] ?? null when zero rows is valid.',
       access: '@REPOS.main is the secure current-route repository. @REPOS.secure.<table> and #secure.<table> are secure explicit repositories. @REPOS.<table> and #<table> are trusted explicit repositories.',

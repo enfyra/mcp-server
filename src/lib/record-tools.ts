@@ -48,7 +48,7 @@ import { compactSourceFields } from './source-artifacts.js';
 const QUERY_TABLE_ALL_CAP = 1000;
 
 export function registerRecordTools(server, ENFYRA_API_URL) {
-  server.tool('query_table', 'Query any route-backed table with a recursive live metadata preflight. Explicit dotted fields and deep relation fields are validated against every target table before the REST read, and the result includes schemaReceipt. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. all=true is capped hard at ' + String(QUERY_TABLE_ALL_CAP) + ' rows and never returns an unbounded result; for more rows, narrow with a filter/range (for example a recent time window) and paginate with limit+page. OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. Use count_records or meta=filterCount/totalCount for counts; call discover_query_capabilities before using aggregate objects. Aggregate operations use field configs such as { amount: { sum: true } }, not _sum/_count operators. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
+  server.tool('query_table', 'Query any route-backed table with a recursive live metadata preflight. Explicit dotted fields and deep relation fields are validated against every target table before the REST read, and the result includes schemaReceipt. Response is minimal unless fields is explicit. Every call must pass either limit or all=true. all=true is capped hard at ' + String(QUERY_TABLE_ALL_CAP) + ' rows and never returns an unbounded result; for more rows, narrow with a filter/range (for example a recent time window) and paginate with limit+page. OAuth clientId/clientSecret are write-only and cannot be read; ask the user and use setup_oauth_provider. Use count_records or meta=filterCount/totalCount for counts. Grouped analytics are a separate dynamic repository aggregate({ filter, dimensions, measures, sort, page, limit }) call, not a query_table option. For enfyra_extension, editable extension source is `code`, not `sourceCode`; prefer search_admin_extensions and patch_extension_code/update_extension_code for admin UI.', {
     tableName: z.string().describe('Table name to query'),
     filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object to narrow the result set. Prefer a range filter (for example a record time window) over all=true so queries stay bounded. Example: {"status": {"_eq": "active"}}.'),
     sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
@@ -58,8 +58,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     fields: z.array(z.string()).optional().describe('Fields to select. If omitted, MCP selects only the table primary key to avoid oversized responses.'),
     meta: z.string().optional().describe('Optional REST meta request, e.g. "totalCount", "filterCount", or aggregate modes supported by the route. Use count_records for simple counts.'),
     deep: jsonObjectParam(z, 'Deep relation fetch object').optional().describe('Optional deep relation fetch object. Keys must be relation propertyName values.'),
-    aggregate: jsonObjectParam(z, 'Aggregate object').optional().describe('Optional aggregate object keyed by real scalar fields or relation propertyName values, e.g. { amount: { sum: true }, status: { count: { _eq: "failed" } } }. Scalar fields support count/sum/avg/min/max; relations support countRecords. Results are returned in response.meta.aggregate when supported. Call discover_query_capabilities first; do not use _sum/_count or aggregate hidden fields/private relations in user-facing APIs.'),
-  }, async ({ tableName, filter, sort, page, limit, all, fields, meta, deep, aggregate }) => {
+  }, async ({ tableName, filter, sort, page, limit, all, fields, meta, deep }) => {
     if (!all && limit === undefined) {
       throw new Error('query_table requires either limit or all=true. Do not rely on implicit default page sizes.');
     }
@@ -71,10 +70,8 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     assertRecordFieldsReadable(tableName, fields);
     const filterParam = stringifyJsonArg(filter);
     const deepParam = stringifyJsonArg(deep);
-    const aggregateParam = stringifyJsonArg(aggregate);
     validateFilter(filter);
     const parsedDeep = parseJsonArg(deep, undefined);
-    parseJsonArg(aggregate, undefined);
   
     const queryParams = new URLSearchParams();
     const table = await getTableSummary(tableName);
@@ -94,7 +91,6 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     if (page) queryParams.set('page', String(page));
     if (meta) queryParams.set('meta', meta);
     if (deepParam) queryParams.set('deep', deepParam);
-    if (aggregateParam) queryParams.set('aggregate', aggregateParam);
     const effectiveLimit = all ? QUERY_TABLE_ALL_CAP : limit;
     queryParams.set('limit', String(effectiveLimit));
     queryParams.set('fields', selectedFields.join(','));
@@ -114,7 +110,6 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
       queryOptions: {
         meta: meta || null,
         deep: parsedDeep ?? null,
-        aggregate: aggregate ? parseJsonArg(aggregate, null) : null,
       },
       minimalDefaultApplied: !(fields && fields.length > 0),
       schemaReceipt,

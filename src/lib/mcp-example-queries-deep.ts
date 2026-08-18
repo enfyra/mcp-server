@@ -144,26 +144,26 @@ query_table({
         ],
       },
       {
-        name: 'Aggregate metrics over a filtered set',
-        code: `query_table({
-  tableName: "order",
-  fields: ["id"],
+        name: 'Grouped aggregate metrics over a filtered set',
+        code: `await #order.aggregate({
   filter: { createdAt: { _gte: "<isoStart>" } },
-  limit: 1,
-  aggregate: {
-    id: { count: true },
-    amount: { sum: true, avg: true },
-    status: { count: { _eq: "failed" } },
-    customer: { countRecords: { isActive: { _eq: true } } }
-  }
+  dimensions: [
+    { field: "createdAt", bucket: "day", timezone: "Asia/Ho_Chi_Minh" }
+  ],
+  measures: {
+    requests: { count: "id" },
+    amount: { sum: "amount" },
+    averageAmount: { avg: "amount" }
+  },
+  sort: [{ field: "createdAt", direction: "asc" }],
+  limit: 100
 })`,
         notes: [
-          'Call discover_query_capabilities first and replace order, id, amount, status, customer, and isActive with live fields/relations from metadata; use the live primary key when it is not id.',
-          'Scalar fields support count, sum, avg, min, and max; sum/avg require numeric fields. Relations support countRecords only.',
-          'An operation value is true or a filter object. The operation condition is combined with the root filter for that metric.',
-          'Read values from response.meta.aggregate. This is aggregate-over-filtered-set, not a grouped rows/GROUP BY result.',
-          'For simple row counts, prefer count_records or meta=filterCount/totalCount instead of an aggregate object.',
-          'Do not aggregate unpublished fields or private relations in user-facing APIs.',
+          'Replace order, id, amount, and createdAt with live scalar fields from metadata.',
+          'Dimensions support scalar fields and date buckets hour/day/week/month/year with an IANA timezone.',
+          'Measures are named count, countDistinct, sum, avg, min, or max operations over scalar fields.',
+          'Read computed grouped rows from result.data; no raw records are returned and no meta.aggregate field is used.',
+          'Do not aggregate unpublished, encrypted, or field-permission-denied fields in user-facing APIs.',
         ],
       },
       {
