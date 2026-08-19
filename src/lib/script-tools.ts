@@ -103,13 +103,19 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       if (expectedSourceSha256 && expectedSourceSha256 !== beforeHash) {
         throw new Error(`Source hash mismatch. Current sha256 is ${beforeHash}; re-read with get_script_source before patching.`);
       }
-      if ((sourceFile || sourceResourceUri) && (oldText !== undefined || newText !== undefined)) {
-        throw new Error('When sourceFile/sourceResourceUri is provided, omit oldText and newText so the exact artifact is applied.');
+      const hasArtifact = [sourceFile, sourceResourceUri].some(
+        (value) => typeof value === 'string' && value.trim() !== '',
+      );
+      const hasReplacementText = [oldText, newText].some(
+        (value) => value !== undefined && value !== '',
+      );
+      if (hasArtifact && hasReplacementText) {
+        throw new Error('Provide either a reviewed sourceFile/sourceResourceUri artifact or exact oldText/newText replacement text, not both.');
       }
-      if (!sourceFile && !sourceResourceUri && (oldText === undefined || newText === undefined)) {
+      if (!hasArtifact && (oldText === undefined || newText === undefined)) {
         throw new Error('Provide oldText and newText, or provide sourceFile/sourceResourceUri from a reviewed patch artifact.');
       }
-      const patchResult = sourceFile || sourceResourceUri
+      const patchResult = hasArtifact
         ? { occurrences: 0, patched: resolveSourceInput({ sourceFile, sourceResourceUri, fieldName: 'sourceCode' }), replaced: false }
         : replaceOccurrence(sourceCode, oldText!, newText!, occurrence || 'all');
       const { occurrences, patched, replaced } = patchResult;

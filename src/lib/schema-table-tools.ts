@@ -159,6 +159,13 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             ],
             forbiddenGuesses: ['json', 'jsonb', 'longtext', 'decimal'].filter((type) => !liveColumnTypes.includes(type)),
             aliasNormalization: 'Schema tools normalize common aliases where possible and return schemaNormalization, but models should choose from liveTypes directly.',
+            visibilityAndMutationDefaults: {
+              normalFieldRule: 'For an ordinary application field, send only name, type, and any real nullability/constraint requirement. Omit isPublished and isUpdatable; both default to true.',
+              isPublished: 'Set false only for a field that must be private by default, such as a credential, token hash, internal audit payload, or server-only implementation detail. It changes default read/create/update field access; it is not a UI-only visibility flag. For role/user-specific access, use ensure_field_permission instead.',
+              isUpdatable: 'Set false only when a value must not change through canonical PATCH after creation, such as an immutable external identifier or server-owned lifecycle value. Canonical PATCH removes the field from update input; this is not a form-control setting.',
+              isEncrypted: 'isEncrypted=true encrypts stored values at rest. It does not imply private visibility or immutability; combine flags only when each independent requirement applies.',
+              platformOwnedFlags: 'Do not set isPrimary or isSystem for ordinary application fields. Do not declare id, _id, createdAt, or updatedAt; Enfyra manages them.',
+            },
             metadataGuidance: {
               columnField: 'metadata',
               richTextPath: 'metadata.richText for columns with type richtext.',
@@ -211,7 +218,7 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
         'Create one or more table definitions. Always pass items as a native JSON array; for one table, pass one item.',
         'The tool creates tables sequentially, creates columns with each table, then creates all requested relations after every table in the batch exists. This avoids relation target races for weak agents.',
         'Each item supports { name, description?, isSingleRecord?, columns?, relations?, indexes?, uniques? }. columns/relations/indexes/uniques may be arrays inside the item.',
-        'Column items may include metadata and placeholder. For type richtext, store editor configuration at column.metadata.richText using JSON-safe values; function callbacks are eApp source configuration, not column JSON.',
+        'Column items may include metadata and placeholder. For ordinary application fields, omit isPublished and isUpdatable because both default to true; false has API-access and canonical-PATCH consequences, not merely UI consequences. For type richtext, store editor configuration at column.metadata.richText using JSON-safe values; function callbacks are eApp source configuration, not column JSON.',
         'Do not include id, _id, createdAt, or updatedAt in columns; Enfyra manages them and create_tables strips them before save.',
         'Every field named in indexes/uniques must be a scalar column, auto-managed column, or relation propertyName in the same table item; otherwise the tool rejects the whole batch before creating tables.',
         'Use get_schema_design_context first for live column types, metadata fields, and relation rules. Do not include physical FK fields.',

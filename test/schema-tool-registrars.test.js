@@ -142,10 +142,25 @@ test('get_all_tables applies search and explicit all contract', async () => {
     assert.match(designPayload.primaryKeyContext.createTableDefault, /SQL id\/int primary key/);
     assert.match(JSON.stringify(designPayload.recommendedSequence), /Create independent lookup\/base tables first/);
     assert.match(JSON.stringify(designPayload.relationDefinitionInput.forbiddenPhysicalFields), /foreignKeyColumn/);
+    assert.match(designPayload.columnDefinitionInput.visibilityAndMutationDefaults.normalFieldRule, /omit isPublished and isUpdatable/i);
+    assert.match(designPayload.columnDefinitionInput.visibilityAndMutationDefaults.isPublished, /private by default/);
+    assert.match(designPayload.columnDefinitionInput.visibilityAndMutationDefaults.isUpdatable, /canonical PATCH/);
   } finally {
     resetTokens();
     global.fetch = originalFetch;
   }
+});
+
+test('buildColumnDefinition defaults ordinary fields to published and updatable', () => {
+  const column = buildColumnDefinition({
+    name: 'displayName',
+    type: 'varchar',
+    supportedTypes: ['varchar'],
+  });
+
+  assert.equal(column.isPublished, true);
+  assert.equal(column.isUpdatable, true);
+  assert.equal(column.isNullable, true);
 });
 
 test('update_columns persists rich-text metadata through the table cascade patch', async () => {

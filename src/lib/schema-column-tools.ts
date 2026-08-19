@@ -26,9 +26,9 @@ export function registerSchemaColumnTools(server, ENFYRA_API_URL, options: { too
   
     server.tool(
       'create_columns',
-      'Create one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue.',
+      'Create one or more columns. Always pass items as a native JSON array; for one column, pass one item. Items run sequentially through the schema queue. For ordinary app fields, omit isPublished and isUpdatable: both default to true. Set either false only for an intentional private-by-default or immutable canonical-API contract; call get_schema_design_context for exact semantics.',
       {
-        items: bulkObjectArrayParam(z, 'Column definitions').optional().describe('Native JSON array of column definitions. Each item uses create_columns fields: { tableId, name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, isPrimary?, isGenerated?, isSystem?, defaultValue?, description?, options?, placeholder?, metadata? }. For a richtext column, put the editor configuration under metadata.richText as JSON-safe data.'),
+        items: bulkObjectArrayParam(z, 'Column definitions').optional().describe('Native JSON array of column definitions. Each item uses create_columns fields: { tableId, name, type, isNullable?, isUnique?, isPublished?, isUpdatable?, isEncrypted?, isPrimary?, isGenerated?, isSystem?, defaultValue?, description?, options?, placeholder?, metadata? }. Omit isPublished/isUpdatable for normal fields: both default true. isPublished=false makes the field private by default across metadata/API; isUpdatable=false removes it from canonical PATCH input. For a richtext column, put the editor configuration under metadata.richText as JSON-safe data.'),
         columns: bulkObjectArrayParam(z, 'Column definitions').optional().describe('Alias for items when the caller naturally names the batch columns. Pass either items or columns, not both.'),
         maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
         globalRulesAckKey: globalRulesAckParam(z),

@@ -285,7 +285,7 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
         method: z.string().optional().default('GET').describe('HTTP method name. Must exist in enfyra_method.name for Enfyra route-backed calls.'),
         path: z.string().describe('Enfyra API path, e.g. /enfyra_route?limit=1'),
         query: z.string().optional().describe('Optional JSON-encoded query object string, e.g. {"limit":1,"filter":{"status":{"_eq":"ready"}}}; merged onto the path query string.'),
-        body: z.string().optional().describe('Optional JSON request body string, e.g. {"title":"Example"}.'),
+        body: z.string().optional().describe('Optional JSON request body string. Forwarded unchanged for POST, PUT, PATCH, and DELETE; it is omitted only for GET and HEAD. Example: {"title":"Example"}.'),
         headers: z.string().optional().describe('Optional JSON-encoded headers object string.'),
         useAuth: z.boolean().optional().default(true).describe('Attach MCP admin Bearer token. Set false to test public access.'),
       },
@@ -322,10 +322,11 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
         }
     
         const started = Date.now();
+        const supportsRequestBody = !['GET', 'HEAD'].includes(httpMethod);
         const response = await fetch(url, {
           method: httpMethod,
           headers: requestHeaders,
-          ...(body !== undefined && body !== null && httpMethod !== 'GET' ? { body } : {}),
+          ...(supportsRequestBody && body !== undefined && body !== null ? { body } : {}),
         });
         const contentType = response.headers.get('content-type') || '';
         const responseText = await response.text();

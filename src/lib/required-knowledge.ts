@@ -174,6 +174,7 @@ const GLOBAL_RULES_SECTIONS = [
       'Before a field-permission mutation, read get_enfyra_required_knowledge, confirm the target with get_enfyra_api_context, search_runtime_zone(zone="schema_data") for the table/field/rules, and use auth_security only to resolve the role/user scope.',
       'Use ensure_field_permission for create/update and remove_field_permission for permanent removal. Do not raw-CRUD enfyra_field_permission when a dedicated operation exists; do not use ensure_route_access, ensure_guard, or a pre-hook as a substitute for field visibility.',
       'After a write, inspect the exact field-permission row and table field exposure. For REST use inspect_rest_projection or a bounded test_rest_endpoint; for generated GraphQL use test_graphql. isPublished=false is global publication metadata and is separate from role/user field permissions.',
+      'For ordinary application columns, omit isPublished and isUpdatable: both default true. Set isPublished=false only when the field must be private by default across metadata/API, not merely hidden in UI. Set isUpdatable=false only when canonical PATCH must never change the value; it removes the field from canonical update input. isEncrypted does not imply either behavior, and role/user-specific access belongs in field permissions.',
     ],
   },
   {
