@@ -19,7 +19,7 @@ export function buildMcpServerInstructions(apiBaseUrl, options: McpInstructionOp
   return [
     '## Enfyra MCP',
     '',
-    `API base for this session: \`${base}\`.`,
+    `API: \`${base}\`.`,
     `GraphQL endpoints: \`${graphqlHttpUrl}\` and \`${graphqlSchemaUrl}\`.`,
     ...(toolsetSummary ? ['', toolsetSummary] : []),
     '',

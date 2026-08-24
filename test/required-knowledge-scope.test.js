@@ -120,6 +120,13 @@ test('globalRules sections contain expected ids', () => {
   assert.ok(ids.includes('shell-signals'));
 });
 
+test('schema knowledge keeps feature data outside system tables', () => {
+  const schema = buildRequiredKnowledgePayload('schema');
+  const section = schema.globalRules.find(rule => rule.id === 'schema-constraints');
+  assert.match(section.rules.join('\n'), /feature-owned tables/);
+  assert.match(section.rules.join('\n'), /system table/);
+});
+
 test('dynamicServerCode sections contain expected ids', () => {
   const payload = buildRequiredKnowledgePayload('dynamic-code');
   const ids = payload.dynamicServerCode.map(r => r.id);
