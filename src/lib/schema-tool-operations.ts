@@ -274,8 +274,71 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       if (!beforeIds.includes(String(relationId))) {
         throw new Error(`Relation ${relationId} was not found on table ${tableId}; refusing schema cascade patch.`);
       }
+      const target = existingRelations.find((relation) => String(getId(relation)) === String(relationId));
+      if (target?.mappedBy) {
+        const owningTableId = target.targetTable;
+        const owningTable = await fetchTableWithDetails(ENFYRA_API_URL, owningTableId);
+        if (!owningTable) {
+          throw new Error(`Owning table ${owningTableId} for inverse relation ${relationId} was not found.`);
+        }
+        const owningRelations = (owningTable.relations || []).map(
+          sanitizeExistingRelationForTablePatch,
+        );
+        const owningRelation = owningRelations.find(
+          (relation) =>
+            relation.propertyName === target.mappedBy &&
+            String(relation.targetTable) === String(tableId),
+        );
+        if (!owningRelation) {
+          throw new Error(
+            `Owning relation '${target.mappedBy}' for inverse relation ${relationId} was not found on table ${owningTableId}.`,
+          );
+        }
+        const detachedRelations = owningRelations.map((relation) => {
+          if (String(getId(relation)) !== String(getId(owningRelation))) return relation;
+          const { inversePropertyName, ...withoutInverse } = relation;
+          return withoutInverse;
+        });
+        if (!confirm) {
+          return {
+            content: [{ type: 'text', text: JSON.stringify({
+              action: 'detach_inverse_relation_preview',
+              tableId,
+              relationId,
+              targetRelation: target,
+              owningTableId,
+              owningRelationId: getId(owningRelation),
+              preservedRelationIds: beforeIds.filter((id) => id !== String(relationId)),
+              destructive: true,
+              next: 'Call delete_relations again with the same one-item array and confirm=true to remove the inverse from the owning relation snapshot.',
+            }, null, 2) }],
+          };
+        }
+        assertGlobalRulesAck(globalRulesAckKey);
+        const result = await patchTableAutoConfirm(ENFYRA_API_URL, owningTableId, {
+          relations: detachedRelations,
+        });
+        const afterRelations = await verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
+          action: 'delete',
+          relationId,
+        });
+        return jsonContent({
+          action: 'inverse_relation_detached',
+          tableId,
+          relationId,
+          owningTableId,
+          owningRelationId: getId(owningRelation),
+          result,
+          postcondition: {
+            verificationMethod: 'table_schema_relation_ids',
+            confirmedAbsent: !afterRelations.some((relation) => String(getId(relation)) === String(relationId)),
+            remainingRelationIds: afterRelations
+              .filter((relation) => String(getId(relation)) === String(relationId))
+              .map(getId),
+          },
+        });
+      }
       if (!confirm) {
-        const target = existingRelations.find((relation) => String(getId(relation)) === String(relationId));
         return {
           content: [{ type: 'text', text: JSON.stringify({
             action: 'delete_relation_preview',

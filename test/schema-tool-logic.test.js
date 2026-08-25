@@ -32,6 +32,7 @@ import {
   resolveTableFromMetadataByName,
   sanitizeExistingRelationForTablePatch,
 } from '../dist/lib/table-tools.js';
+import { createSchemaToolOperations } from '../dist/lib/schema-tool-operations.js';
 import { prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource } from '../dist/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../dist/lib/route-guards.js';
 import {
@@ -69,6 +70,85 @@ function createToolHarness() {
     },
   };
 }
+
+test('delete_relations detaches an inverse through its owning relation snapshot', async () => {
+  const originalFetch = global.fetch;
+  const patchBodies = [];
+  let detached = false;
+  const tables = [
+    { id: 1, name: 'announcements' },
+    { id: 2, name: 'enfyra_user' },
+  ];
+  global.fetch = async (url, init = {}) => {
+    const requestUrl = String(url);
+    if (requestUrl.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
+    }
+    if (requestUrl.includes('/enfyra_table?')) return jsonResponse({ data: tables });
+    if (requestUrl.endsWith('/metadata/announcements')) {
+      return jsonResponse({ data: {
+        id: 1,
+        name: 'announcements',
+        columns: [],
+        relations: [{
+          id: 700,
+          propertyName: 'forceVisibleForUsers',
+          type: 'many-to-many',
+          targetTable: 2,
+          inversePropertyName: 'forcedAnnouncements',
+        }],
+      } });
+    }
+    if (requestUrl.endsWith('/metadata/enfyra_user')) {
+      return jsonResponse({ data: {
+        id: 2,
+        name: 'enfyra_user',
+        columns: [],
+        relations: detached ? [] : [{
+          id: 801,
+          propertyName: 'forcedAnnouncements',
+          type: 'many-to-many',
+          targetTable: 1,
+          mappedBy: 'forceVisibleForUsers',
+        }],
+      } });
+    }
+    if (requestUrl.includes('/enfyra_table/1') && init.method === 'PATCH') {
+      patchBodies.push(JSON.parse(init.body));
+      if (requestUrl.includes('schemaConfirmHash=')) detached = true;
+      return jsonResponse({ data: detached ? { id: 1 } : {
+        _preview: true,
+        requiredConfirmHash: 'detach-inverse',
+      } });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    const operations = createSchemaToolOperations('https://example.test/api');
+    const result = await operations.removeRelationFromTable({
+      tableId: 2,
+      relationId: 801,
+      confirm: true,
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+
+    const payload = JSON.parse(result.content[0].text);
+    assert.equal(payload.action, 'inverse_relation_detached');
+    assert.equal(payload.owningTableId, 1);
+    assert.equal(detached, true);
+    assert.equal(patchBodies.length, 2);
+    assert.equal(
+      Object.hasOwn(patchBodies[0].relations[0], 'inversePropertyName'),
+      false,
+    );
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
 
 test('fetchTableWithDetails reads full columns from metadata instead of enfyra_table nested fields', async () => {
   const originalFetch = global.fetch;
