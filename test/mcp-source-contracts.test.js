@@ -485,6 +485,16 @@ test('OAuth provider provisioning source is treated as a script-backed identity 
 test('run_admin_test exposes the backend generic script test kind', () => {
   const entry = readEntrySource();
   assert.match(entry, /kind: z\.enum\(\['script', 'flow_step', 'websocket_event', 'websocket_connection'\]/);
+  assert.match(entry, /DEFAULT_ADMIN_TEST_TIMEOUT_MS = 60_000/);
+  assert.match(entry, /timeout: resolveAdminTestTimeout/);
+  assert.match(entry, /timeoutMs: resolveAdminTestTimeout/);
+});
+
+test('MCP test endpoints use a bounded one-minute default', () => {
+  const source = readSourceFiles('lib/route-inspection-tools.ts');
+  assert.match(source, /DEFAULT_TEST_TIMEOUT_MS = 60_000/);
+  assert.match(source, /fetchTestRequest/);
+  assert.match(source, /timeout: z\.number\(\)\.int\(\)\.positive\(\)/);
 });
 
 test('mcp log search matches dashed and dotted app log filenames', () => {

@@ -26,6 +26,16 @@ import {
 } from './required-knowledge.js';
 import { jsonContent } from './response-format.js';
 
+const DEFAULT_ADMIN_TEST_TIMEOUT_MS = 60_000;
+const TEST_RESPONSE_GRACE_MS = 5_000;
+
+function resolveAdminTestTimeout(value: unknown) {
+  const timeout = Number(value);
+  return Number.isFinite(timeout) && timeout > 0
+    ? timeout
+    : DEFAULT_ADMIN_TEST_TIMEOUT_MS;
+}
+
 export function registerMethodTools(server, ENFYRA_API_URL) {
   server.tool(
     'list_methods',
@@ -230,10 +240,11 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
     {
       kind: z.enum(['script', 'flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
       body: z.union([z.record(z.any()), z.string()]).describe('Test body as a native JSON object. A JSON string is accepted for compatibility. Include script and optional context for script; type/config plus payload for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
+      timeout: z.number().int().positive().optional().describe('Timeout (ms).'),
       sourceFile: z.string().optional().describe('Previously returned script source artifact tmpFile. Use this when the exact reviewed source is already in tmp.'),
       sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the script under test.'),
     },
-    async ({ kind, body, sourceFile, sourceResourceUri }) => {
+    async ({ kind, body, timeout, sourceFile, sourceResourceUri }) => {
       const parsed = parseJsonObjectInput(body, 'body');
       const parsedFlowConfig = kind === 'flow_step' ? parseJsonObjectInput(parsed?.config, 'body.config') : null;
       const sourceCode = kind === 'flow_step'
@@ -261,7 +272,8 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
       }
       const result = await fetchAPI(ENFYRA_API_URL, '/admin/test/run', {
         method: 'POST',
-        body: JSON.stringify({ ...parsed, kind }),
+        body: JSON.stringify({ ...parsed, kind, timeout: resolveAdminTestTimeout(timeout ?? parsed.timeoutMs ?? parsed.timeout) }),
+        timeoutMs: resolveAdminTestTimeout(timeout ?? parsed.timeoutMs ?? parsed.timeout) + TEST_RESPONSE_GRACE_MS,
       });
       return { content: [{ type: 'text', text: JSON.stringify({ ...result, ...(materialized ? { sourceArtifact: materialized.sourceArtifact } : {}) }, null, 2) }] };
     },
@@ -273,7 +285,7 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
     {
       type: z.enum(['script', 'condition', 'query', 'create', 'update', 'delete', 'http', 'trigger_flow', 'sleep', 'log']).describe('Flow step type'),
       config: z.union([z.record(z.any()), z.string()]).describe('Step config as a native JSON object. A JSON string is accepted for compatibility.'),
-      timeout: z.number().optional().describe('Timeout in ms'),
+      timeout: z.number().int().positive().optional().describe('Timeout (ms).'),
       key: z.string().optional().describe('Optional step key for mock flow context'),
       payload: z.union([z.record(z.any()), z.string()]).optional().describe('Runtime payload object exposed to the script as @FLOW_PAYLOAD. A JSON object string is accepted for compatibility.'),
       mockFlow: z.union([z.record(z.any()), z.string()]).optional().describe('Optional advanced mockFlow object for $last/$meta or other flow context. A JSON string is accepted for compatibility. Use payload for @FLOW_PAYLOAD.'),
@@ -304,7 +316,7 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
       const body = {
         type,
         config: parsedConfig,
-        ...(timeout ? { timeout } : {}),
+        timeout: resolveAdminTestTimeout(timeout),
         ...(key ? { key } : {}),
         ...(parsedPayload !== undefined ? { payload: parsedPayload } : {}),
         ...(mockFlow ? { mockFlow: parseJsonObjectInput(mockFlow, 'mockFlow') } : {}),
@@ -312,6 +324,7 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
       const result = await fetchAPI(ENFYRA_API_URL, '/admin/test/run', {
         method: 'POST',
         body: JSON.stringify({ ...body, kind: 'flow_step' }),
+        timeoutMs: resolveAdminTestTimeout(timeout) + TEST_RESPONSE_GRACE_MS,
       });
       return { content: [{ type: 'text', text: JSON.stringify({ ...result, ...(materialized ? { sourceArtifact: materialized.sourceArtifact } : {}) }, null, 2) }] };
     },

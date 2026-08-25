@@ -36,6 +36,29 @@ import {
 } from './metadata-client.js';
 import { jsonContent } from './response-format.js';
 
+const DEFAULT_TEST_TIMEOUT_MS = 60_000;
+const TEST_TIMEOUT_GRACE_MS = 5_000;
+
+function resolveTestTimeout(value: unknown) {
+  const timeout = Number(value);
+  return Number.isFinite(timeout) && timeout > 0 ? timeout : DEFAULT_TEST_TIMEOUT_MS;
+}
+
+async function fetchTestRequest(input: RequestInfo | URL, init: RequestInit, timeout: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout + TEST_TIMEOUT_GRACE_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`Test request timed out after ${timeout}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
   server.tool(
       'inspect_table',
@@ -288,8 +311,9 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
         body: z.string().optional().describe('Optional JSON request body string. Forwarded unchanged for POST, PUT, PATCH, and DELETE; it is omitted only for GET and HEAD. Example: {"title":"Example"}.'),
         headers: z.string().optional().describe('Optional JSON-encoded headers object string.'),
         useAuth: z.boolean().optional().default(true).describe('Attach MCP admin Bearer token. Set false to test public access.'),
+        timeout: z.number().int().positive().optional().describe('Timeout (ms).'),
       },
-      async ({ method, path, query, body, headers, useAuth }) => {
+      async ({ method, path, query, body, headers, useAuth, timeout }) => {
         const httpMethod = normalizeMethodNameInput(method || 'GET');
         const restPath = normalizeRestPath(path);
         const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -323,11 +347,11 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
     
         const started = Date.now();
         const supportsRequestBody = !['GET', 'HEAD'].includes(httpMethod);
-        const response = await fetch(url, {
+        const response = await fetchTestRequest(url, {
           method: httpMethod,
           headers: requestHeaders,
           ...(supportsRequestBody && body !== undefined && body !== null ? { body } : {}),
-        });
+        }, resolveTestTimeout(timeout));
         const contentType = response.headers.get('content-type') || '';
         const responseText = await response.text();
         let parsedBody = responseText;
@@ -366,12 +390,13 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
         variables: z.record(z.any()).optional().describe('GraphQL variables as a native JSON object.'),
         operationName: z.string().optional().describe('Optional operation name when the document contains multiple operations.'),
         useAuth: z.boolean().optional().default(true).describe('Attach the MCP admin Bearer token. Set false to verify anonymous GraphQL behavior.'),
+        timeout: z.number().int().positive().optional().describe('Timeout (ms).'),
       },
-      async ({ query, variables, operationName, useAuth }) => {
+      async ({ query, variables, operationName, useAuth, timeout }) => {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (useAuth) headers.Authorization = `Bearer ${await getValidToken(ENFYRA_API_URL)}`;
         const started = Date.now();
-        const response = await fetch(`${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`, {
+        const response = await fetchTestRequest(`${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -379,7 +404,7 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
             ...(variables ? { variables } : {}),
             ...(operationName ? { operationName } : {}),
           }),
-        });
+        }, resolveTestTimeout(timeout));
         const contentType = response.headers.get('content-type') || '';
         const responseText = await response.text();
         let responseBody: any = responseText;

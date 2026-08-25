@@ -17,6 +17,7 @@ const FETCH_TIMEOUT = 30000; // 30 seconds
 
 type FetchApiOptions = RequestInit & {
   headers?: Record<string, string>;
+  timeoutMs?: number;
 };
 
 export class RateLimitEncounteredError extends Error {
@@ -56,6 +57,10 @@ const MAX_RATE_LIMIT_RETRIES = 1;
 export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOptions = {}) {
   const url = `${apiUrl}${path}`;
   const method = String(options.method || 'GET').toUpperCase();
+  const { timeoutMs: requestedTimeoutMs, ...requestOptions } = options;
+  const timeoutMs = Number.isFinite(requestedTimeoutMs) && Number(requestedTimeoutMs) > 0
+    ? Number(requestedTimeoutMs)
+    : FETCH_TIMEOUT;
   const cacheable = isRuntimeCacheableGet(path, method);
   if (cacheable) {
     const cached = getRuntimeCache(path);
@@ -69,8 +74,8 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
       ['Authorization', `Bearer ${token}`],
     ];
 
-    if (options.headers) {
-      const optHeaders = options.headers;
+    if (requestOptions.headers) {
+      const optHeaders = requestOptions.headers;
       for (const key of Object.keys(optHeaders)) {
         const existingIdx = headersList.findIndex(h => h[0] === key);
         if (existingIdx >= 0) {
@@ -82,10 +87,10 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch(url, {
-        ...options,
+        ...requestOptions,
         headers: headersList,
         signal: controller.signal,
       });
@@ -94,7 +99,7 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error(`Request timeout after ${FETCH_TIMEOUT}ms`);
+        throw new Error(`Request timeout after ${timeoutMs}ms`);
       }
       throw error;
     }

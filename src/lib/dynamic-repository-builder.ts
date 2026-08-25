@@ -18,7 +18,7 @@ function fieldList(fields?: string[]) {
 
 export function buildDynamicRepositoryUsage(input: {
   access: 'secure_main' | 'secure_explicit' | 'trusted_explicit';
-  operation: 'list' | 'find_one' | 'create' | 'update' | 'delete';
+  operation: 'list' | 'find_one' | 'create' | 'create_many' | 'update' | 'update_many' | 'delete' | 'delete_many';
   tableName?: string;
   fields?: string[];
   idField?: string;
@@ -96,6 +96,16 @@ return record`;
 
 const record = result.data?.[0] ?? null
 return record`;
+  } else if (input.operation === 'create_many') {
+    code = `const rows = @BODY.records
+if (!Array.isArray(rows) || rows.length === 0) @THROW400("records must be a non-empty array")
+
+const result = await ${repository}.createMany({
+  data: rows,
+  fields: ${fields}
+})
+
+return { data: result.data, count: result.count }`;
   } else if (input.operation === 'update') {
     code = `const result = await ${repository}.update({
   id: ${idExpression},
@@ -105,13 +115,31 @@ return record`;
 
 const record = result.data?.[0] ?? null
 return record`;
+  } else if (input.operation === 'update_many') {
+    code = `const ids = @BODY.ids
+if (!Array.isArray(ids) || ids.length === 0) @THROW400("ids must be a non-empty array")
+if (!@BODY.data || typeof @BODY.data !== "object" || Array.isArray(@BODY.data)) @THROW400("data must be an object")
+
+const result = await ${repository}.updateMany({
+  ids,
+  data: @BODY.data,
+  fields: ${fields}
+})
+
+return { data: result.data, count: result.count }`;
+  } else if (input.operation === 'delete_many') {
+    code = `const ids = @BODY.ids
+if (!Array.isArray(ids) || ids.length === 0) @THROW400("ids must be a non-empty array")
+
+const result = await ${repository}.deleteMany({ ids })
+return { ok: true, count: result.count }`;
   } else {
     code = `await ${repository}.delete({ id: ${idExpression} })
 return { ok: true, id: ${idExpression} }`;
   }
 
   const fieldPermissionsEnforced = input.access !== 'trusted_explicit';
-  const typeOrmPartialBody = input.operation === 'create' || input.operation === 'update';
+  const typeOrmPartialBody = input.operation === 'create' || input.operation === 'create_many' || input.operation === 'update' || input.operation === 'update_many';
   return {
     access: input.access,
     operation: input.operation,
@@ -137,12 +165,12 @@ export function registerDynamicRepositoryBuilder(server: any) {
   server.tool(
     'build_dynamic_repository_usage',
     [
-      'Generate validated Enfyra dynamic repository code for list, find-one, create, update, or delete.',
+      'Generate validated Enfyra dynamic repository code for list, find-one, single or batch create/update/delete.',
       'Use secure_main for a canonical route main table, secure_explicit for user-facing explicit-table access, and trusted_explicit only for intentional internal field-permission bypass.',
     ].join(' '),
     {
       access: z.enum(['secure_main', 'secure_explicit', 'trusted_explicit']).describe('Repository security class. Prefer secure_main or secure_explicit for user-facing code.'),
-      operation: z.enum(['list', 'find_one', 'create', 'update', 'delete']).describe('Repository operation pattern to generate.'),
+      operation: z.enum(['list', 'find_one', 'create', 'create_many', 'update', 'update_many', 'delete', 'delete_many']).describe('Repository operation. Batch payloads use records, ids plus data, or ids.'),
       tableName: z.string().optional().describe('Required for explicit access. Omit for secure_main when the route main table is already known.'),
       fields: z.array(z.string()).optional().describe('Exact metadata-backed fields to select or return. Defaults to id.'),
       idField: z.string().optional().default('id').describe('Primary key field used by find_one. Defaults to id; use _id for Mongo metadata when applicable.'),

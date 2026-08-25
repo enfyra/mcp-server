@@ -98,3 +98,31 @@ test('dynamic repository builder keeps TypeORM-style @BODY mutations and returns
   assert.match(updated.adaptationRecipes.nonUpdatableServerAction, /Do not change canonical metadata isUpdatable/);
   assert.match(updated.adaptationRecipes.nonUpdatableServerAction, /trusted explicit repository/);
 });
+
+test('dynamic repository builder generates explicit batch mutation contracts', () => {
+  const created = buildDynamicRepositoryUsage({
+    access: 'secure_explicit',
+    operation: 'create_many',
+    tableName: 'orders',
+    fields: ['id', 'status'],
+  });
+  const updated = buildDynamicRepositoryUsage({
+    access: 'secure_explicit',
+    operation: 'update_many',
+    tableName: 'orders',
+    fields: ['id', 'status'],
+  });
+  const deleted = buildDynamicRepositoryUsage({
+    access: 'secure_explicit',
+    operation: 'delete_many',
+    tableName: 'orders',
+  });
+
+  assert.match(created.code, /@BODY\.records/);
+  assert.match(created.code, /createMany/);
+  assert.match(updated.code, /@BODY\.ids/);
+  assert.match(updated.code, /@BODY\.data/);
+  assert.match(updated.code, /updateMany/);
+  assert.match(deleted.code, /deleteMany/);
+  assert.match(deleted.code, /count: result\.count/);
+});
