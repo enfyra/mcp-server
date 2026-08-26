@@ -111,8 +111,7 @@ npx @enfyra/mcp-server@latest config [options]
 | `--api-token`, `-t` | Set `ENFYRA_API_TOKEN` |
 | `--yes` | Run non-interactively |
 | `--reconfig` | Select clients again and replace the existing `enfyra` entry |
-| `--compact-tools` | Use guided dynamic packs to minimize the initial tool manifest |
-| `--static-tools` | Use the guided static manifest instead of dynamic packs |
+| `--static-tools` | Use the guided static compatibility manifest instead of dynamic packs |
 | `--codex` | Write Codex config |
 | `--claude-code`, `--claude` | Write Claude Code config |
 | `--cursor` | Write Cursor config |
@@ -128,7 +127,7 @@ npx @enfyra/mcp-server@latest config [options]
 | `ENFYRA_API_URL` | Runtime API base written into MCP config | Required |
 | `ENFYRA_API_TOKEN` | Programmatic token from the Enfyra admin UI `/me` | Required |
 
-The MCP server always uses the guided surface; low-level tools remain hidden. Re-running `config` preserves existing `ENFYRA_MCP_DYNAMIC_TOOLS` and `ENFYRA_MCP_PROFILE` values. Pass `--compact-tools` or `--static-tools` only when intentionally changing the tool-loading mode.
+The MCP server starts with a compact guided routing surface and expands it only for the selected workflow; low-level tools remain hidden. No tool-loading configuration is needed. Re-running `config` preserves existing `ENFYRA_MCP_DYNAMIC_TOOLS` and `ENFYRA_MCP_PROFILE` values. Use `--static-tools` only for a compatibility client that cannot refresh `tools/list_changed`.
 
 The API token is exchanged for a short-lived access token at runtime. It is not sent directly as a Bearer token.
 

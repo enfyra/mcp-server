@@ -53,7 +53,7 @@ export function registerWorkflowToolPack(server: any, state: ToolsetRegistration
             ]
           : [
               'Dynamic packs are disabled for this static profile/toolset; the configured profile remains visible.',
-              'Use ENFYRA_MCP_DYNAMIC_TOOLS=on with guided/all on hosts that support tools/list_changed.',
+              'Restart without the static compatibility override to return to compact workflow packs.',
             ],
       });
     },

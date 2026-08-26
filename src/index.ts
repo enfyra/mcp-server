@@ -22,8 +22,7 @@ Common config flags:
   --antigravity       Write ./.agents/mcp_config.json
   --zcode             Write ./.zcode/config.json
   --reconfig          Prompt for host and credentials again, replacing the enfyra entry
-  --compact-tools     Use guided dynamic packs to minimize initial tool context
-  --static-tools      Use the guided static tool manifest
+  --static-tools      Use the guided static compatibility manifest
   --yes               Non-interactive
   --app-url           ENFYRA_APP_URL
   -t, --api-token     ENFYRA_API_TOKEN

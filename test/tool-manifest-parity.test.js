@@ -13,9 +13,9 @@ const BASELINES = [
       ENFYRA_MCP_PROFILE: 'all',
     },
     unsetDynamic: true,
-    count: 105,
-    hash: 'b30a2c1d952f6eb82a3cab03a915f6f01ff6374a44b875379d7dc510edee88ea',
-    maxTokens: 40100,
+    count: 14,
+    hash: 'f41073d5d1f040c1ddf9c1d08bc34599ce940f985f4be88e237a7ffa545b935e',
+    maxTokens: 5000,
   },
   {
     name: 'guided-dynamic',
@@ -85,3 +85,40 @@ for (const baseline of BASELINES) {
     );
   });
 }
+
+test('dynamic workflow packs keep every one- or two-surface manifest below the tool cap', async () => {
+  const env = {
+    ...process.env,
+    ENFYRA_MCP_PROFILE: 'all',
+    ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
+  };
+  const transport = new StdioClientTransport({
+    command: 'node',
+    args: ['dist/index.js'],
+    env,
+    stderr: 'pipe',
+  });
+  const client = new Client({ name: 'dynamic-tool-cap', version: '1.0.0' });
+  await client.connect(transport);
+  try {
+    const { WORKFLOW_SURFACES } = await import('../dist/lib/tool-routing.js');
+    for (const surface of WORKFLOW_SURFACES) {
+      await client.callTool({ name: 'select_enfyra_workflow', arguments: { surface, mode: 'replace' } });
+      const oneSurface = await client.listTools();
+      assert.ok(oneSurface.tools.length < 64, `${surface} exposes ${oneSurface.tools.length} tools`);
+
+      for (const additionalSurface of WORKFLOW_SURFACES) {
+        if (additionalSurface === surface) continue;
+        await client.callTool({ name: 'select_enfyra_workflow', arguments: { surface: additionalSurface, mode: 'add' } });
+        const twoSurfaces = await client.listTools();
+        assert.ok(
+          twoSurfaces.tools.length < 64,
+          `${surface} + ${additionalSurface} exposes ${twoSurfaces.tools.length} tools`,
+        );
+        await client.callTool({ name: 'select_enfyra_workflow', arguments: { surface, mode: 'replace' } });
+      }
+    }
+  } finally {
+    await client.close();
+  }
+});

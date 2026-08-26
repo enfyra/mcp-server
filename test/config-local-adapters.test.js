@@ -43,7 +43,7 @@ test('all supported clients are selected equally by default and explicit selecto
   }
 });
 
-test('compact and static tool loading modes are explicit mutually exclusive config choices', () => {
+test('static compatibility mode is explicit and the legacy compact alias remains accepted', () => {
   assert.equal(parseArgs([]).toolMode, 'preserve');
   assert.equal(parseArgs(['--compact-tools']).toolMode, 'compact');
   assert.equal(parseArgs(['--static-tools']).toolMode, 'static');
@@ -214,13 +214,14 @@ test('VS Code MCP config keeps the same two-setting Enfyra boundary', async (t) 
   });
 });
 
-test('manual Codex configuration documents optional compact tool mode', async () => {
+test('manual Codex configuration documents compact mode as the default', async () => {
   const readmePath = fileURLToPath(new URL('../README.md', import.meta.url));
   const readme = await readFile(readmePath, 'utf8');
   assert.match(readme, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_URL/);
   assert.match(readme, /\[mcp_servers\.enfyra\.env\][\s\S]*ENFYRA_API_TOKEN/);
-  assert.match(readme, /--compact-tools/);
+  assert.doesNotMatch(readme, /--compact-tools/);
   assert.match(readme, /--static-tools/);
+  assert.match(readme, /No tool-loading configuration is needed/);
 });
 
 test('ZCode config uses nested mcp.servers and preserves existing settings', async (t) => {

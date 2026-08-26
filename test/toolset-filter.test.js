@@ -39,9 +39,9 @@ test('normalizes MCP domain profile to all by default', () => {
   assert.equal(normalizeMcpProfile('operations'), 'operations');
 });
 
-test('dynamic tool packs are explicit opt-in and keep profile fallback', () => {
-  assert.equal(normalizeDynamicToolPacks(undefined, 'all'), false);
-  assert.equal(normalizeDynamicToolPacks('', 'all'), false);
+test('dynamic tool packs are the default and keep profile fallback', () => {
+  assert.equal(normalizeDynamicToolPacks(undefined, 'all'), true);
+  assert.equal(normalizeDynamicToolPacks('', 'all'), true);
   assert.equal(normalizeDynamicToolPacks('off', 'all'), false);
   assert.equal(normalizeDynamicToolPacks('on', 'all'), true);
   assert.equal(normalizeDynamicToolPacks(undefined, 'extension'), false);

@@ -84,8 +84,7 @@ ${style.bold('Options')}
   --api-token, -t <secret>  ENFYRA_API_TOKEN
   --reconfig              Always choose target again in interactive mode and replace the old enfyra config for that target
   --yes                   Non-interactive: no prompts (CI / scripts); use CLI, env, existing file, then defaults
-  --compact-tools         Use guided dynamic packs to minimize the initial tool manifest
-  --static-tools          Use the guided static manifest; cannot be combined with --compact-tools
+  --static-tools          Use the guided static compatibility manifest
 
 ${style.bold('Client selection')}
   Non-interactive default is all supported clients. In a TTY with no target flags, choose with ↑/↓.

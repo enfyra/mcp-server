@@ -178,8 +178,7 @@ export function normalizeDynamicToolPacks(value: unknown, profile: McpProfile) {
   if (profile !== 'all') return false;
   const raw = String(value ?? '').trim().toLowerCase();
   if (['0', 'false', 'off', 'no'].includes(raw)) return false;
-  if (['1', 'true', 'on', 'yes'].includes(raw)) return true;
-  return false;
+  return true;
 }
 
 export function isToolVisibleInToolset(toolName: string, toolset: McpToolset, profile: McpProfile = 'all'): boolean {
@@ -260,9 +259,9 @@ export function summarizeToolsetForInstructions(toolset: McpToolset, profile: Mc
   }
   if (!dynamic) {
     return [
-      'Toolset mode: guided, domain profile: all. The complete curated guided surface is visible.',
+      'Toolset mode: guided, domain profile: all, static compatibility mode. The complete curated guided surface is visible.',
       'Use discover_enfyra_workflows for routing and search_enfyra_tools for hidden long-tail read-only tools.',
-      'Set ENFYRA_MCP_DYNAMIC_TOOLS=on to start with a compact routing surface on hosts that refresh tools/list_changed.',
+      'Restart without the static compatibility override to return to the compact routing surface.',
       'Low-level escape hatches stay hidden from the MCP surface.',
     ].join(' ');
   }
@@ -270,6 +269,6 @@ export function summarizeToolsetForInstructions(toolset: McpToolset, profile: Mc
     'Toolset mode: guided, domain profile: all. Dynamic workflow packs start with a compact routing surface.',
     'Call select_enfyra_workflow with the task surface to expose the exact direct workflow tools for this session.',
     'Use search_enfyra_tools for hidden long-tail read-only tools. Hidden guided mutations route through their owning workflow; low-level escape hatches stay hidden.',
-    'Set ENFYRA_MCP_DYNAMIC_TOOLS=off or use ENFYRA_MCP_PROFILE=extension, schema, runtime, or operations as a static fallback for hosts that do not refresh tools/list_changed.',
+    'A static compatibility override or a focused domain profile remains available for clients that do not refresh tools/list_changed.',
   ].join(' ');
 }
