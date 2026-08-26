@@ -76,6 +76,7 @@ test('extension and schema profiles isolate normal domain tools', () => {
 
 test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('discover_enfyra_workflows', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('select_enfyra_workflow', 'guided'), false);
   assert.equal(isToolVisibleInToolset('confirm_schema_mutation', 'guided'), true);
   assert.equal(isToolVisibleInToolset('confirm_schema_mutation', 'guided', 'schema'), true);
   assert.equal(isToolVisibleInToolset('search_admin_extensions', 'guided'), true);
@@ -189,18 +190,15 @@ test('guided workflow primary paths never direct callers to hidden tools', () =>
   }
 });
 
-test('dynamic workflow discovery returns an executable selection before domain tools', () => {
+test('dynamic workflow discovery routes hidden domain tools through the schema-validating catalog gateway', () => {
   const result = discoverWorkflowRoutes({
     intent: 'create a temporary widget extension',
     detail: 'plan',
     limit: 1,
   }, 'all', true);
-  assert.deepEqual(result.nextSelection, {
-    tool: 'select_enfyra_workflow',
-    input: { surface: 'extension', mode: 'replace' },
-  });
-  assert.match(result.guidance[0], /Call select_enfyra_workflow.*before.*primaryPath/i);
-  assert.match(result.guidance[0], /do not use search_enfyra_tools/i);
+  assert.equal(result.nextSelection, undefined);
+  assert.match(result.guidance[0], /search_enfyra_tools.*exact name.*execute_enfyra_tool/i);
+  assert.match(result.guidance[0], /Do not rely on tools\/list_changed refreshes/i);
   assert.match(JSON.stringify(result.workflows[0].primaryPath), /already return valid saved-state verification/i);
 });
 
@@ -213,10 +211,7 @@ test('OAuth provider setup intents route to the dedicated OAuth workflow', () =>
   ]) {
     const result = discoverWorkflowRoutes({ intent, risk: 'write', detail: 'plan', limit: 1 }, 'all', true);
     assert.equal(result.workflows[0].key, 'oauth', intent);
-    assert.deepEqual(result.nextSelection, {
-      tool: 'select_enfyra_workflow',
-      input: { surface: 'oauth', mode: 'replace' },
-    });
+    assert.equal(result.nextSelection, undefined);
     assert.match(JSON.stringify(result.workflows[0].primaryPath), /setup_oauth_provider/);
     const primaryPath = result.workflows[0].primaryPath;
     assert.equal(primaryPath[1].tool, 'get_enfyra_examples');
@@ -253,6 +248,7 @@ test('every guided mutation belongs to at least one dynamic workflow pack', () =
   const orphanMutations = [...registeredToolNames()]
     .filter((toolName) => isToolVisibleInToolset(toolName, 'guided'))
     .filter(isMutationTool)
+    .filter((toolName) => toolName !== 'execute_enfyra_tool')
     .filter((toolName) => !packedTools.has(toolName));
 
   assert.deepEqual(orphanMutations, []);

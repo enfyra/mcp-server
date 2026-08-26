@@ -4,8 +4,6 @@ import { paginateResults } from './pagination.js';
 import { formatToolResult, jsonContent } from './response-format.js';
 import { afterMcpToolExecution, beforeMcpToolExecution } from './session-safety.js';
 import { getToolContract, isCatalogExecutable } from './tool-contracts.js';
-import { workflowSurfaceForTool } from './tool-routing.js';
-import { isToolVisibleInToolset } from './toolset-filter.js';
 import type { RegisteredToolDefinition, ToolAvailability, ToolsetRegistrationState } from './types.js';
 
 type ToolAvailabilityResolver = (toolNames: string[]) => Promise<Record<string, ToolAvailability>>;
@@ -56,16 +54,6 @@ function riskMatches(tool: RegisteredToolDefinition, risk: string) {
 function invocationFor(tool: RegisteredToolDefinition, state: ToolsetRegistrationState) {
   if (tool.visible) return { mode: 'direct', tool: tool.name };
   if (isCatalogExecutable(tool.name)) return { mode: 'catalog', tool: 'execute_enfyra_tool', name: tool.name };
-  if (state.dynamic && isToolVisibleInToolset(tool.name, state.toolset as any, state.profile as any)) {
-    const surface = workflowSurfaceForTool(tool.name);
-    if (surface) {
-      return {
-        mode: 'workflow_selection_required',
-        tool: 'select_enfyra_workflow',
-        input: { surface, mode: 'replace' },
-      };
-    }
-  }
   return { mode: 'hidden', reason: 'This low-level tool is intentionally hidden; use its owning guided workflow.' };
 }
 
@@ -82,7 +70,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
     [
       'Search the live Enfyra MCP tool registry when a specialized tool is not visible in the current guided profile.',
       'Returns exact input schemas, standard annotations, PAT capability status when statically knowable, and the supported invocation path.',
-      'Hidden read-only builders, validators, and inspectors may run through execute_enfyra_tool. Hidden guided mutations return their owning workflow selection; low-level escape hatches remain hidden.',
+      'Every hidden guided tool may run through execute_enfyra_tool with its returned exact input schema. Low-level escape hatches remain hidden.',
     ].join(' '),
     {
       query: z.string().optional().describe('Tool name, task phrase, domain term, or contract keyword. Omit to list the first bounded page.'),
@@ -131,7 +119,6 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
         guidance: [
           'Call visible tools directly.',
           'Use execute_enfyra_tool only when invocation.mode is catalog.',
-          'For invocation.mode=workflow_selection_required, call select_enfyra_workflow for the owning surface.',
           'Low-level escape hatches remain hidden and are not invocable through the MCP catalog.',
           'A denied status is an optimization hint from the current PAT profile. Enfyra backend authorization remains the security boundary.',
         ],
@@ -141,8 +128,8 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
   server.tool(
     'execute_enfyra_tool',
     [
-      'Execute one hidden long-tail tool returned by search_enfyra_tools with invocation.mode=catalog.',
-      'This gateway accepts read-only, non-destructive tools only. Call visible tools directly or select the owning workflow for guided mutations; low-level escape hatches remain hidden.',
+      'Execute one hidden guided tool returned by search_enfyra_tools with invocation.mode=catalog.',
+      'The gateway validates the returned exact input schema and applies the selected tool\'s target, acknowledgement, and destructive-preview safety gates. Low-level escape hatches remain hidden.',
     ].join(' '),
     {
       name: z.string().describe('Exact hidden tool name returned by search_enfyra_tools.'),
@@ -153,10 +140,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
       if (!tool) throw new Error(`Unknown Enfyra tool "${name}". Call search_enfyra_tools first.`);
       if (tool.visible) throw new Error(`${name} is already visible. Call it directly so the host retains its exact schema and annotations.`);
       if (!isCatalogExecutable(name)) {
-        const guidance = state.dynamic && isToolVisibleInToolset(name, state.toolset as any, state.profile as any)
-          ? 'Call select_enfyra_workflow for the owning surface to expose its exact safety contract.'
-          : 'This low-level tool is intentionally hidden from the MCP surface.';
-        throw new Error(`${name} is a mutation or destructive tool and cannot run through execute_enfyra_tool. ${guidance}`);
+        throw new Error(`${name} is a low-level escape hatch and cannot run through execute_enfyra_tool. Use its owning guided workflow instead.`);
       }
       if (resolveAvailability) {
         const availability = (await resolveAvailability([name]))[name];

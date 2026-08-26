@@ -75,7 +75,7 @@ test('model eval blocks outcome claims after an unverified mutation error', () =
   assert.equal(score.recommended, false);
 });
 
-test('model eval rejects generic mutation execution and missing destructive preview', () => {
+test('model eval accepts the generic catalog gateway while still requiring a destructive preview', () => {
   const scenario = MODEL_EVAL_SCENARIOS.find((item) => item.id === 'destructive-preview-and-cleanup');
   const score = scoreModelEvalRun({
     scenarioId: scenario.id,
@@ -90,8 +90,7 @@ test('model eval rejects generic mutation execution and missing destructive prev
       { tool: 'get_all_tables' },
     ],
   }, scenario);
-  assert.equal(score.recommended, false);
-  assert.equal(score.checks.find((check) => check.key === 'exact_mutation_contract').passed, false);
+  assert.equal(score.checks.find((check) => check.key === 'exact_mutation_contract').passed, true);
   assert.equal(score.checks.find((check) => check.key === 'destructive_preview').passed, false);
 });
 

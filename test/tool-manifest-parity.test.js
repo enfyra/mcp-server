@@ -13,8 +13,8 @@ const BASELINES = [
       ENFYRA_MCP_PROFILE: 'all',
     },
     unsetDynamic: true,
-    count: 14,
-    hash: 'f41073d5d1f040c1ddf9c1d08bc34599ce940f985f4be88e237a7ffa545b935e',
+    count: 13,
+    hash: '881ade4f211f9132cf1e4cd85d86337d9dd305a60fd775cec58f5b6fbf0396cb',
     maxTokens: 5000,
   },
   {
@@ -23,8 +23,8 @@ const BASELINES = [
       ENFYRA_MCP_PROFILE: 'all',
       ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
     },
-    count: 14,
-    hash: 'f41073d5d1f040c1ddf9c1d08bc34599ce940f985f4be88e237a7ffa545b935e',
+    count: 13,
+    hash: '881ade4f211f9132cf1e4cd85d86337d9dd305a60fd775cec58f5b6fbf0396cb',
     maxTokens: 5000,
   },
   {
@@ -33,8 +33,8 @@ const BASELINES = [
       ENFYRA_MCP_PROFILE: 'all',
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
-    count: 105,
-    hash: 'b30a2c1d952f6eb82a3cab03a915f6f01ff6374a44b875379d7dc510edee88ea',
+    count: 104,
+    hash: '0de382248a7cce2f20204a7854d4a07d2cc28f899fa398dd371b5d4f2f75be58',
     maxTokens: 40100,
   },
 ];
@@ -86,39 +86,8 @@ for (const baseline of BASELINES) {
   });
 }
 
-test('dynamic workflow packs keep every one- or two-surface manifest below the tool cap', async () => {
-  const env = {
-    ...process.env,
-    ENFYRA_MCP_PROFILE: 'all',
-    ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
-  };
-  const transport = new StdioClientTransport({
-    command: 'node',
-    args: ['dist/index.js'],
-    env,
-    stderr: 'pipe',
-  });
-  const client = new Client({ name: 'dynamic-tool-cap', version: '1.0.0' });
-  await client.connect(transport);
-  try {
-    const { WORKFLOW_SURFACES } = await import('../dist/lib/tool-routing.js');
-    for (const surface of WORKFLOW_SURFACES) {
-      await client.callTool({ name: 'select_enfyra_workflow', arguments: { surface, mode: 'replace' } });
-      const oneSurface = await client.listTools();
-      assert.ok(oneSurface.tools.length < 64, `${surface} exposes ${oneSurface.tools.length} tools`);
-
-      for (const additionalSurface of WORKFLOW_SURFACES) {
-        if (additionalSurface === surface) continue;
-        await client.callTool({ name: 'select_enfyra_workflow', arguments: { surface: additionalSurface, mode: 'add' } });
-        const twoSurfaces = await client.listTools();
-        assert.ok(
-          twoSurfaces.tools.length < 64,
-          `${surface} + ${additionalSurface} exposes ${twoSurfaces.tools.length} tools`,
-        );
-        await client.callTool({ name: 'select_enfyra_workflow', arguments: { surface, mode: 'replace' } });
-      }
-    }
-  } finally {
-    await client.close();
-  }
+test('the default compact catalog manifest remains safely below the host tool cap', async () => {
+  const manifest = await readManifest(BASELINES[0]);
+  assert.ok(manifest.count < 64, `default manifest exposes ${manifest.count} tools`);
+  assert.ok(manifest.tokenizerTokens < 5000, `default manifest uses ${manifest.tokenizerTokens} tokens`);
 });

@@ -29,12 +29,16 @@ test('tool contracts distinguish reads, mutations, destructive operations, and l
   assert.equal(getToolContract('validate_extension_code').annotations.openWorldHint, true);
 });
 
-test('only hidden read-only non-destructive tools can execute through the catalog gateway', () => {
-  assert.equal(isCatalogExecutable('build_extension_drawer'), true);
-  assert.equal(isCatalogExecutable('review_extension_ui_contract'), true);
+test('the catalog gateway executes curated guided tools but keeps low-level escape hatches hidden', () => {
+  assert.equal(isCatalogExecutable('create_tables'), true);
+  assert.equal(isCatalogExecutable('delete_tables'), true);
+  assert.equal(isCatalogExecutable('query_table'), true);
+  assert.equal(isCatalogExecutable('build_extension_drawer'), false);
+  assert.equal(isCatalogExecutable('review_extension_ui_contract'), false);
   assert.equal(isCatalogExecutable('create_route'), false);
   assert.equal(isCatalogExecutable('reload_all'), false);
-  assert.equal(isCatalogExecutable('delete_route'), false);
+  assert.equal(getToolContract('execute_enfyra_tool').annotations.readOnlyHint, false);
+  assert.equal(getToolContract('execute_enfyra_tool').annotations.destructiveHint, true);
 });
 
 test('annotation installer adds a complete annotation contract to legacy tool registrations', () => {

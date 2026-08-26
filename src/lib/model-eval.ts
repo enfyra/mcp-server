@@ -103,11 +103,11 @@ function eventIndex(events: ModelEvalTraceEvent[], tools: string[], after = -1) 
   return events.findIndex((event, index) => index > after && tools.includes(event.tool) && !event.isError);
 }
 
-function expandCatalogReadEvents(events: ModelEvalTraceEvent[]) {
+function expandCatalogToolEvents(events: ModelEvalTraceEvent[]) {
   return events.flatMap((event) => {
     if (event.tool !== 'execute_enfyra_tool' || event.isError) return [event];
     const tool = typeof event.arguments?.name === 'string' ? event.arguments.name : '';
-    if (!tool || isMutationTool(tool) || isDestructiveTool(tool) || !isRecord(event.result)) return [event];
+    if (!tool || !isRecord(event.result)) return [event];
     const nestedResult = event.result.result;
     if (event.result.action !== 'enfyra_catalog_tool_executed' || event.result.tool !== tool || nestedResult === undefined) return [event];
     return [event, {
@@ -151,37 +151,29 @@ function workflowSelectionCheck(scenario: ModelEvalScenario, events: ModelEvalTr
     const selectedSurface = event.arguments?.surface;
     return typeof selectedSurface !== 'string' || selectedSurface === scenario.surface;
   });
-  const catalogRead = scenario.mutationExpected ? -1 : events.findIndex((event) => (
+  const catalogExecution = events.findIndex((event) => (
     event.tool === 'execute_enfyra_tool'
       && !event.isError
       && typeof event.arguments?.name === 'string'
-      && scenario.verificationTools.includes(event.arguments.name)
-      && !isMutationTool(event.arguments.name)
-      && !isDestructiveTool(event.arguments.name)
+      && [...scenario.requiredToolGroups.flat(), ...scenario.verificationTools].includes(event.arguments.name)
   ));
-  const passed = boundary >= 0 && (selection >= 0 || catalogRead >= 0);
+  const passed = boundary >= 0 && (selection >= 0 || catalogExecution >= 0);
   return {
     key: 'workflow_selection',
     passed,
     detail: passed
       ? selection >= 0
         ? `Selected the ${scenario.surface} workflow before execution.`
-        : 'Used the guarded catalog executor for a hidden read-only verification tool.'
-      : `The ${scenario.surface} workflow was not selected before execution.`,
+        : 'Used the guarded catalog executor for a hidden guided workflow tool.'
+      : `The ${scenario.surface} workflow was not selected or executed through the catalog before completion.`,
   };
 }
 
 function mutationGatewayCheck(events: ModelEvalTraceEvent[]): ModelEvalCheck {
-  const invalid = events.find((event) => event.tool === 'execute_enfyra_tool'
-    && !event.isError
-    && typeof event.arguments?.name === 'string'
-    && isMutationTool(event.arguments.name));
   return {
     key: 'exact_mutation_contract',
-    passed: !invalid,
-    detail: invalid
-      ? `Mutation ${String(invalid.arguments?.name)} was routed through the generic catalog executor.`
-      : 'All mutations used their exact direct tool contracts.',
+    passed: true,
+    detail: 'Direct tools and the catalog gateway both validate the selected tool\'s exact input contract.',
   };
 }
 
@@ -374,16 +366,16 @@ function toolErrorCheck(events: ModelEvalTraceEvent[]): ModelEvalCheck {
 }
 
 export function scoreModelEvalRun(run: ModelEvalRun, scenario: ModelEvalScenario): ModelEvalScore {
-  const semanticEvents = expandCatalogReadEvents(run.events);
+  const semanticEvents = expandCatalogToolEvents(run.events);
   const blockingChecks = [
     requiredSequenceCheck(scenario, semanticEvents),
-    targetCheck(scenario, run.events),
-    mutationGatewayCheck(run.events),
-    destructiveCheck(scenario, run.events),
+    targetCheck(scenario, semanticEvents),
+    mutationGatewayCheck(semanticEvents),
+    destructiveCheck(scenario, semanticEvents),
     failedMutationVerificationCheck(scenario, semanticEvents),
-    creationVerificationCheck(scenario, run.events),
+    creationVerificationCheck(scenario, semanticEvents),
     verificationCheck(scenario, semanticEvents),
-    cleanupAbsenceCheck(scenario, run.events),
+    cleanupAbsenceCheck(scenario, semanticEvents),
     schemaPreflightCheck(scenario, semanticEvents),
   ].map((check) => ({ ...check, blocking: true }));
   const advisoryChecks = [

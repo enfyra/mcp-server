@@ -19,7 +19,6 @@ export const CORE_TOOL_NAMES = [
   'report_mcp_errors',
   'search_enfyra_tools',
   'execute_enfyra_tool',
-  'select_enfyra_workflow',
 ] as const;
 
 const CORE_TOOL_SET = new Set<string>(CORE_TOOL_NAMES);
@@ -266,9 +265,9 @@ export function summarizeToolsetForInstructions(toolset: McpToolset, profile: Mc
     ].join(' ');
   }
   return [
-    'Toolset mode: guided, domain profile: all. Dynamic workflow packs start with a compact routing surface.',
-    'Call select_enfyra_workflow with the task surface to expose the exact direct workflow tools for this session.',
-    'Use search_enfyra_tools for hidden long-tail read-only tools. Hidden guided mutations route through their owning workflow; low-level escape hatches stay hidden.',
-    'A static compatibility override or a focused domain profile remains available for clients that do not refresh tools/list_changed.',
+    'Toolset mode: guided, domain profile: all. The compact catalog starts with a bounded routing surface.',
+    'Use search_enfyra_tools to load an exact hidden guided-tool schema, then execute_enfyra_tool to run it.',
+    'The catalog gateway applies the selected tool\'s target, acknowledgement, and destructive-preview safety gates; low-level escape hatches stay hidden.',
+    'A static compatibility override or a focused domain profile remains available when a complete direct manifest is required.',
   ].join(' ');
 }

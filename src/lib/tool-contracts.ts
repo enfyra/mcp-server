@@ -1,4 +1,5 @@
 import type { McpToolAnnotations, McpToolContract } from './types.js';
+import { isToolVisibleInToolset } from './toolset-filter.js';
 
 const DESTRUCTIVE_TOOLS = new Set([
   'delete_records',
@@ -13,6 +14,7 @@ const DESTRUCTIVE_TOOLS = new Set([
   'delete_menu',
   'remove_field_permission',
   'uninstall_package',
+  'execute_enfyra_tool',
 ]);
 
 const MUTATION_TOOL_PATTERN = /^(?:create|update|delete|ensure|patch|install|uninstall|enable|disable|reorder|reload|trigger|set|add|remove)_/;
@@ -31,6 +33,7 @@ const MUTATION_TOOLS = new Set([
   'setup_oauth_provider',
   'login',
   'report_mcp_errors',
+  'execute_enfyra_tool',
 ]);
 
 const LOCAL_TOOL_PATTERN = /^(?:build|validate|review|plan)_/;
@@ -39,7 +42,6 @@ const LOCAL_TOOLS = new Set([
   'get_enfyra_examples',
   'discover_enfyra_workflows',
   'search_enfyra_tools',
-  'execute_enfyra_tool',
   'select_enfyra_workflow',
   'get_extension_theme_contract',
   'get_theme_class_reference',
@@ -95,7 +97,7 @@ export function getToolContract(toolName: string): McpToolContract {
   return {
     name: toolName,
     annotations,
-    catalogExecutable: annotations.readOnlyHint && !annotations.destructiveHint,
+    catalogExecutable: isToolVisibleInToolset(toolName, 'guided', 'all'),
   };
 }
 

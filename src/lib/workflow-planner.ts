@@ -349,15 +349,9 @@ export function discoverWorkflowRoutes({
       score: item.score,
       ...formatter(item.workflow),
     })),
-    nextSelection: dynamicToolPacks && selected[0]
-      ? {
-          tool: 'select_enfyra_workflow',
-          input: { surface: selected[0].workflow.key, mode: 'replace' },
-        }
-      : undefined,
     surfaces: normalizedDetail === 'summary' ? availableSurfaces : undefined,
     guidance: [
-      ...(dynamicToolPacks ? ['Call select_enfyra_workflow with nextSelection.input before using primaryPath domain tools; do not use search_enfyra_tools for tools already named by the selected workflow.'] : []),
+      ...(dynamicToolPacks ? ['For each hidden primaryPath tool, call search_enfyra_tools with its exact name, then call execute_enfyra_tool using the returned schema. Do not rely on tools/list_changed refreshes.'] : []),
       'Use this as progressive disclosure: pick the closest workflow and follow primaryPath in order instead of choosing from the flat MCP tool list.',
       'For writes, call get_enfyra_required_knowledge and pass the returned acknowledgement keys into write tools.',
       'Treat avoidTools as negative routing boundaries; they prevent near-correct tool choices from crossing the wrong platform contract.',
