@@ -19,7 +19,7 @@ import {
   bulkObjectArrayParam,
   computeBatchCleanupOrder,
   getId,
-  getSupportedColumnTypesFromMetadata,
+  getSupportedColumnTypes,
   metadataColumnNames,
   metadataColumnOptions,
   normalizeCreateTableDefinitions,
@@ -29,6 +29,21 @@ import {
   resolveTableIdentifierFromMetadata,
   withSchemaQueue,
 } from './table-tool-logic.js';
+
+const COLUMN_SCHEMA_ATTRIBUTES = [
+  'name',
+  'type',
+  'isNullable',
+  'isUnique',
+  'isPublished',
+  'isUpdatable',
+  'isEncrypted',
+  'defaultValue',
+  'description',
+  'options',
+  'placeholder',
+  'metadata',
+];
 
 export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { toolset?: string } = {}) {
   const toolset = options.toolset || 'guided';
@@ -96,29 +111,28 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
       [
         'Step-zero schema design guide for Enfyra table creation.',
         'Call this before creating a new app schema or multiple tables.',
-        'It returns live column types, supported metadata attributes, relation types, constraint shape, and the exact creation sequence so the model does not guess SQL types or physical FK fields.',
+        'It returns supported column types, metadata attributes, relation types, constraint shape, and the exact creation sequence so the model does not guess SQL types or physical FK fields.',
       ].join(' '),
       {},
       async () => {
-        const [metadataContext, tableMetadata, columnMetadata, relationMetadata] = await Promise.all([
+        const [metadataContext, tableMetadata, relationMetadata] = await Promise.all([
           fetchMetadataContext(ENFYRA_API_URL),
           fetchTableMetadata(ENFYRA_API_URL, 'enfyra_table'),
-          fetchTableMetadata(ENFYRA_API_URL, 'enfyra_column'),
           fetchTableMetadata(ENFYRA_API_URL, 'enfyra_relation'),
         ]);
-        const liveColumnTypes = getSupportedColumnTypesFromMetadata(columnMetadata);
+        const supportedColumnTypes = getSupportedColumnTypes();
         const relationTypes = metadataColumnOptions(relationMetadata, 'enfyra_relation', 'type');
         const onDeleteOptions = metadataColumnOptions(relationMetadata, 'enfyra_relation', 'onDelete');
         const tableAttributes = metadataColumnNames(tableMetadata, 'enfyra_table');
-        const columnAttributes = metadataColumnNames(columnMetadata, 'enfyra_column');
+        const columnAttributes = COLUMN_SCHEMA_ATTRIBUTES;
         const relationAttributes = metadataColumnNames(relationMetadata, 'enfyra_relation');
         const primaryColumnNames = [metadataContext.dbType === 'mongodb' ? '_id' : 'id'];
         const primaryColumnTypes = [metadataContext.dbType === 'mongodb' ? 'ObjectId' : 'int'];
   
         return jsonContent({
           action: 'schema_design_context',
-          stepZero: 'Read this response before create_tables/create_columns/create_relations. Use these live attributes and types, not SQL dialect guesses.',
-          liveColumnTypes,
+          stepZero: 'Read this response before create_tables/create_columns/create_relations. Use these supported attributes and types, not SQL dialect guesses.',
+          supportedColumnTypes,
           primaryKeyContext: {
             observedPrimaryColumnNames: primaryColumnNames,
             observedPrimaryColumnTypes: primaryColumnTypes,
@@ -145,20 +159,20 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
           },
           columnDefinitionInput: {
             allowedFields: ['name', 'type', 'isNullable', 'isUnique', 'isPublished', 'isUpdatable', 'isEncrypted', 'defaultValue', 'description', 'options', 'placeholder', 'metadata'],
-            liveTypes: liveColumnTypes,
+            supportedTypes: supportedColumnTypes,
             typeSelection: [
               'varchar: short text, labels, slugs, status strings.',
               'text/richtext: long prose.',
-              'float: prices, amounts, ratings, percentages, decimal-like numbers unless liveTypes contains decimal.',
+              'float: prices, amounts, ratings, percentages, decimal-like numbers unless supportedTypes contains decimal.',
               'int/bigint: counts, ordering, integer quantities.',
               'boolean: true/false flags.',
               'date/datetime/timestamp: temporal fields.',
               'enum: constrained option strings when options are provided.',
-              'simple-json: structured snapshots/arrays only when liveTypes contains simple-json.',
+              'simple-json: structured snapshots/arrays only when supportedTypes contains simple-json.',
               'code: source-code fields.',
             ],
-            forbiddenGuesses: ['json', 'jsonb', 'longtext', 'decimal'].filter((type) => !liveColumnTypes.includes(type)),
-            aliasNormalization: 'Schema tools normalize common aliases where possible and return schemaNormalization, but models should choose from liveTypes directly.',
+            forbiddenGuesses: ['json', 'jsonb', 'longtext', 'decimal'].filter((type) => !supportedColumnTypes.includes(type)),
+            aliasNormalization: 'Schema tools normalize common aliases where possible and return schemaNormalization, but models should choose from supportedTypes directly.',
             visibilityAndMutationDefaults: {
               normalFieldRule: 'For an ordinary application field, send only name, type, and any real nullability/constraint requirement. Omit isPublished and isUpdatable; both default to true.',
               isPublished: 'Set false only for a field that must be private by default, such as a credential, token hash, internal audit payload, or server-only implementation detail. It changes default read/create/update field access; it is not a UI-only visibility flag. For role/user-specific access, use ensure_field_permission instead.',
@@ -201,10 +215,10 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             '7. Insert records using column names and relation propertyName values, never hidden FK columns.',
             '8. Re-inspect each table with inspect_table before writing records or adding query examples.',
           ],
-          liveMetadataAttributes: {
-            enfyra_table: tableAttributes,
-            enfyra_column: columnAttributes,
-            enfyra_relation: relationAttributes,
+          schemaContractAttributes: {
+            table: tableAttributes,
+            column: columnAttributes,
+            relation: relationAttributes,
           },
         });
       },

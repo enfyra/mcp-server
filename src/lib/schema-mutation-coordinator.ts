@@ -46,7 +46,7 @@ export const FORBIDDEN_RELATION_KEYS = [
   'junctionTargetColumn',
 ];
 
-export const FALLBACK_COLUMN_TYPES = [
+export const ENFYRA_COLUMN_TYPES = [
   'int',
   'varchar',
   'text',
@@ -63,7 +63,7 @@ export const FALLBACK_COLUMN_TYPES = [
   'array-select',
   'richtext',
   'float',
-];
+] as const;
 
 export const RELATION_TYPE_ALIASES: Record<string, string> = {
   many_to_one: 'many-to-one',

@@ -20,7 +20,7 @@ import {
   buildPrimaryColumnForDbType,
   computeBatchCleanupOrder,
   fetchTableWithDetails,
-  getSupportedColumnTypesFromMetadata,
+  getSupportedColumnTypes,
   normalizeColumnsForLiveMetadata,
   normalizeColumnTypeForLiveMetadata,
   normalizeRelationForTablePatch,
@@ -94,12 +94,6 @@ test('get_all_tables applies search and explicit all contract', async () => {
         ],
       });
     }
-    if (String(url).endsWith('/metadata/enfyra_column')) return jsonResponse({ data: {
-      id: 10,
-      name: 'enfyra_column',
-      columns: [{ name: 'type', type: 'enum', options: '{"int","varchar","text","boolean","simple-json","float"}' }],
-      relations: [],
-    } });
     if (String(url).endsWith('/metadata/enfyra_relation')) return jsonResponse({ data: {
       id: 11,
       name: 'enfyra_relation',
@@ -138,7 +132,7 @@ test('get_all_tables applies search and explicit all contract', async () => {
 
     const designResult = await server.get('get_schema_design_context').handler({});
     const designPayload = JSON.parse(designResult.content[0].text);
-    assert.deepEqual(designPayload.liveColumnTypes, ['int', 'varchar', 'text', 'boolean', 'simple-json', 'float']);
+    assert.deepEqual(designPayload.supportedColumnTypes, ['int', 'varchar', 'text', 'boolean', 'uuid', 'ObjectId', 'bigint', 'date', 'datetime', 'timestamp', 'enum', 'simple-json', 'code', 'array-select', 'richtext', 'float']);
     assert.match(designPayload.primaryKeyContext.createTableDefault, /SQL id\/int primary key/);
     assert.match(JSON.stringify(designPayload.recommendedSequence), /Create independent lookup\/base tables first/);
     assert.match(JSON.stringify(designPayload.relationDefinitionInput.forbiddenPhysicalFields), /foreignKeyColumn/);
@@ -585,14 +579,6 @@ test('create_tables accepts tables alias and defers relation constraints until F
     }
     if (urlText.endsWith('/metadata')) {
       return jsonResponse({ dbType: 'postgres', enfyraVersion: '2.2.11' });
-    }
-    if (urlText.endsWith('/metadata/enfyra_column')) {
-      return jsonResponse({ data: {
-        id: 1,
-        name: 'enfyra_column',
-        columns: [{ name: 'type', options: JSON.stringify(['int', 'varchar', 'date']) }],
-        relations: [],
-      } });
     }
     if (urlText.includes('/metadata/event_registration')) {
       return jsonResponse({ data: createdTables.get(99) });

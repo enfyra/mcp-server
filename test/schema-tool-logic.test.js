@@ -20,7 +20,7 @@ import {
   buildPrimaryColumnForDbType,
   computeBatchCleanupOrder,
   fetchTableWithDetails,
-  getSupportedColumnTypesFromMetadata,
+  getSupportedColumnTypes,
   normalizeColumnsForLiveMetadata,
   normalizeColumnTypeForLiveMetadata,
   normalizeRelationForTablePatch,
@@ -216,15 +216,15 @@ test('fetchTableWithDetails falls back to metadata table name when metadata id i
       return jsonResponse({
         data: [{
           id: 1,
-          name: 'enfyra_column',
+          name: 'mcp_project',
         }],
       });
     }
-    if (String(url).endsWith('/metadata/enfyra_column')) {
+    if (String(url).endsWith('/metadata/mcp_project')) {
       return jsonResponse({
         data: {
           id: true,
-          name: 'enfyra_column',
+          name: 'mcp_project',
           columns: [{ id: 3, name: 'type', type: 'enum' }],
           relations: [],
         },
@@ -238,7 +238,7 @@ test('fetchTableWithDetails falls back to metadata table name when metadata id i
     initAuth('https://example.test/api', 'api-token');
     const table = await fetchTableWithDetails('https://example.test/api', 1);
 
-    assert.equal(table.name, 'enfyra_column');
+    assert.equal(table.name, 'mcp_project');
     assert.equal(table.columns[0].name, 'type');
   } finally {
     resetTokens();
@@ -290,18 +290,10 @@ test('schema constraint validation rejects indexes that include unique fields', 
   );
 });
 
-test('column type guidance uses live metadata and normalizes common SQL aliases', () => {
-  const metadata = {
-    data: {
-      tables: [{
-        name: 'enfyra_column',
-        columns: [{ name: 'type', type: 'enum', options: '{"int","varchar","text","boolean","datetime","simple-json","float"}' }],
-      }],
-    },
-  };
-  const supportedTypes = getSupportedColumnTypesFromMetadata(metadata);
+test('column type guidance uses the Enfyra schema contract and normalizes common SQL aliases', () => {
+  const supportedTypes = getSupportedColumnTypes();
 
-  assert.deepEqual(supportedTypes, ['int', 'varchar', 'text', 'boolean', 'datetime', 'simple-json', 'float']);
+  assert.deepEqual(supportedTypes, ['int', 'varchar', 'text', 'boolean', 'uuid', 'ObjectId', 'bigint', 'date', 'datetime', 'timestamp', 'enum', 'simple-json', 'code', 'array-select', 'richtext', 'float']);
   assert.deepEqual(
     normalizeColumnTypeForLiveMetadata('decimal', supportedTypes),
     { type: 'float', changed: true, originalType: 'decimal' },
@@ -332,8 +324,16 @@ test('column type guidance uses live metadata and normalizes common SQL aliases'
   );
   assert.throws(
     () => normalizeColumnTypeForLiveMetadata('geometry', supportedTypes),
-    /Valid live types: int, varchar, text, boolean, datetime, simple-json, float/,
+    /Valid Enfyra types: int, varchar, text, boolean, uuid, ObjectId, bigint, date, datetime, timestamp, enum, simple-json, code, array-select, richtext, float/,
   );
+});
+
+test('MCP column types stay aligned with the ESV snapshot contract', () => {
+  const source = readFileSync(new URL('../../server/src/engines/bootstrap/types/snapshot-definition.types.ts', import.meta.url), 'utf8');
+  const definition = source.match(/export type SnapshotColumnType =([\s\S]*?);\n\nexport type SnapshotRelationType/u)?.[1] || '';
+  const serverTypes = [...definition.matchAll(/'([^']+)'/gu)].map((match) => match[1]);
+
+  assert.deepEqual(getSupportedColumnTypes(), serverTypes);
 });
 
 test('resolveRelationTargetsFromMetadata converts table names to ids before schema mutation', () => {

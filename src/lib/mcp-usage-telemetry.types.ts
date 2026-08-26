@@ -5,4 +5,6 @@ export interface McpErrorReportFlushResult {
   errorCount: number;
   sourceLineCount: number;
   statusCode?: number;
+  errorMessage?: string;
+  retryRecommended: boolean;
 }

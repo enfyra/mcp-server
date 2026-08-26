@@ -34,7 +34,7 @@ import {
   buildRequiredKnowledgePayload
 } from './required-knowledge.js';
 import { jsonContent } from './response-format.js';
-import { getSupportedColumnTypesFromMetadata } from './table-tools.js';
+import { getSupportedColumnTypes } from './table-tools.js';
 import { WORKFLOW_SURFACES, discoverWorkflowRoutes } from './tool-routing.js';
 
 export function registerDiscoveryTools(server, ENFYRA_API_URL) {
@@ -162,7 +162,6 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
       const tableCatalogResult = await discoveryFetch('/enfyra_table?fields=id,name,alias,description,isSingleRecord&limit=0&sort=name');
       const routesResult = await discoveryFetch('/enfyra_route?fields=path,mainTable.name,availableMethods.*,publicMethods.*&limit=1000');
       const methodsResult = await discoveryFetch('/enfyra_method?limit=100');
-      const columnMetadata = await discoveryFetch('/metadata/enfyra_column', { fallbackData: null });
       const relationMetadata = await discoveryFetch('/metadata/enfyra_relation', { fallbackData: null });
       const tableMetadata = await discoveryFetch('/metadata/enfyra_table', { fallbackData: null });
       const graphqlMetadata = await discoveryFetch('/metadata/enfyra_graphql', { fallbackData: null });
@@ -187,7 +186,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
       const payload = {
         targetInstance: targetInstance(),
         apiBase: ENFYRA_API_URL.replace(/\/$/, ''),
-        partialErrors: collectPartialErrors({ metadata, tableCatalogResult, routesResult, methodsResult, columnMetadata, relationMetadata, tableMetadata, graphqlMetadata }),
+        partialErrors: collectPartialErrors({ metadata, tableCatalogResult, routesResult, methodsResult, relationMetadata, tableMetadata, graphqlMetadata }),
         counts: {
           tables: tableNames.length,
           routes: routes.length,
@@ -213,8 +212,8 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
         schemaManagement: {
           createTable: 'POST /enfyra_table supports isSingleRecord at create time. MCP create_tables accepts a native array, creates tables/columns sequentially, then creates requested relations after all tables in the batch exist. It does not accept alias at create time; table name drives the default route/schema behavior.',
           updateTable: 'PATCH /enfyra_table/:id is the canonical path for table property changes and column/relation schema changes.',
-          columns: 'enfyra_column has no REST route; use create_tables/create_columns/update_columns/delete_columns. Use liveColumnTypes below; do not invent SQL dialect names.',
-          liveColumnTypes: getSupportedColumnTypesFromMetadata(columnMetadata),
+          columns: 'Column schema is nested under enfyra_table; use create_tables/create_columns/update_columns/delete_columns. Use supportedColumnTypes below; do not invent SQL dialect names.',
+          supportedColumnTypes: getSupportedColumnTypes(),
           columnTypeGuidance: 'Use varchar for short strings, text/richtext for long prose, float for price/amount/rating/decimal-like values unless decimal is listed, simple-json for structured objects/arrays only when listed, and relations instead of *_id columns for links. For richtext, configure the eApp editor through column.metadata.richText with JSON-safe toolbar/customButtons/formats values.',
           relations: routeTables.has('enfyra_relation')
             ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relations/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'

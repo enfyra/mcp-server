@@ -529,18 +529,18 @@ async function flushUsage(
   toolset: string,
   { bypassSchedule = false, requireErrors = false } = {},
 ): Promise<McpErrorReportFlushResult> {
-  if (isTelemetryDisabled()) return { status: 'disabled', errorCount: 0, sourceLineCount: 0 };
-  if (flushing) return { status: 'in_progress', errorCount: 0, sourceLineCount: 0 };
-  if (!bypassSchedule && !canFlushByLocalState()) return { status: 'scheduled', errorCount: 0, sourceLineCount: 0 };
+  if (isTelemetryDisabled()) return { status: 'disabled', errorCount: 0, sourceLineCount: 0, retryRecommended: false };
+  if (flushing) return { status: 'in_progress', errorCount: 0, sourceLineCount: 0, retryRecommended: false };
+  if (!bypassSchedule && !canFlushByLocalState()) return { status: 'scheduled', errorCount: 0, sourceLineCount: 0, retryRecommended: false };
   flushing = true;
   try {
     cleanupOldUsageFiles();
     rotateCurrentFileForUpload();
     const files = usageSpoolFiles().filter((file) => file !== currentFile());
     const lines = readUsageLinesFromFiles(files);
-    if (lines.length === 0) return { status: 'empty', errorCount: 0, sourceLineCount: 0 };
+    if (lines.length === 0) return { status: 'empty', errorCount: 0, sourceLineCount: 0, retryRecommended: false };
     const reportLines = requireErrors ? lines.filter((line) => line.status === 'error') : lines;
-    if (reportLines.length === 0) return { status: 'empty', errorCount: 0, sourceLineCount: 0 };
+    if (reportLines.length === 0) return { status: 'empty', errorCount: 0, sourceLineCount: 0, retryRecommended: false };
     const report = summarizeUsage(reportLines, apiUrl, toolset);
     const errorCount = Number(report.failed_call_count || 0);
     const response = await fetch(REPORT_URL, {
@@ -552,14 +552,34 @@ async function flushUsage(
       markUploadSuccess();
       if (requireErrors) removeErrorUsageLines(files);
       else for (const file of files) rmSync(file, { force: true });
-      return { status: 'sent', errorCount, sourceLineCount: reportLines.length, statusCode: response.status };
+      return {
+        status: 'sent',
+        errorCount,
+        sourceLineCount: reportLines.length,
+        statusCode: response.status,
+        retryRecommended: false,
+      };
     } else if (response.status === 429 || response.status === 409) {
       markRetryAfter(response);
     }
-    return { status: 'rejected', errorCount, sourceLineCount: reportLines.length, statusCode: response.status };
-  } catch {
+    const errorMessage = safeErrorDetails(new Error(await response.text())).errorMessage;
+    return {
+      status: 'rejected',
+      errorCount,
+      sourceLineCount: reportLines.length,
+      statusCode: response.status,
+      errorMessage,
+      retryRecommended: false,
+    };
+  } catch (error) {
     // Telemetry must never affect MCP behavior.
-    return { status: 'failed', errorCount: 0, sourceLineCount: 0 };
+    return {
+      status: 'failed',
+      errorCount: 0,
+      sourceLineCount: 0,
+      errorMessage: safeErrorDetails(error).errorMessage,
+      retryRecommended: false,
+    };
   } finally {
     flushing = false;
   }

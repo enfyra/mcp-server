@@ -106,6 +106,7 @@ test('mcp usage telemetry sends a pending error report immediately despite the s
   const originalReportUrl = process.env.ENFYRA_MCP_USAGE_REPORT_URL;
   const originalFetch = globalThis.fetch;
   const reports = [];
+  let responseStatus = 202;
 
   process.env.ENFYRA_MCP_USAGE_DIR = usageDir;
   process.env.ENFYRA_MCP_USAGE_REPORT_URL = 'https://telemetry.example.test/reports';
@@ -114,7 +115,10 @@ test('mcp usage telemetry sends a pending error report immediately despite the s
   }));
   globalThis.fetch = async (url, options) => {
     reports.push({ url, body: JSON.parse(options.body) });
-    return new Response(null, { status: 202 });
+    return new Response(
+      responseStatus === 202 ? null : JSON.stringify({ message: 'duplicate telemetry bucket' }),
+      { status: responseStatus },
+    );
   };
 
   try {
@@ -130,6 +134,14 @@ test('mcp usage telemetry sends a pending error report immediately despite the s
     assert.equal(reports[0].url, 'https://telemetry.example.test/reports');
     assert.equal(reports[0].body.tool_call_count, 1);
     assert.equal(reports[0].body.failed_call_count, 1);
+
+    telemetry.recordMcpToolUsage('query_table', Date.now() - 4, [{}], undefined, new Error('duplicate report test'));
+    responseStatus = 400;
+    const rejected = await telemetry.flushMcpErrorReportsNow('https://local.enfyra.test/api', 'guided:all');
+
+    assert.equal(rejected.status, 'rejected');
+    assert.equal(rejected.retryRecommended, false);
+    assert.match(rejected.errorMessage, /duplicate telemetry bucket/i);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalUsageDir === undefined) delete process.env.ENFYRA_MCP_USAGE_DIR;

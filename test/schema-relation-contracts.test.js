@@ -20,7 +20,7 @@ import {
   buildPrimaryColumnForDbType,
   computeBatchCleanupOrder,
   fetchTableWithDetails,
-  getSupportedColumnTypesFromMetadata,
+  getSupportedColumnTypes,
   normalizeColumnsForLiveMetadata,
   normalizeColumnTypeForLiveMetadata,
   normalizeRelationForTablePatch,

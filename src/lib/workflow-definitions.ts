@@ -189,7 +189,7 @@ export const TOOL_WORKFLOWS = [
     requiredAck: ['globalRulesAckKey'],
     exampleCategories: ['schema-relations'],
     nextStepTemplate: [
-      'Call get_schema_design_context and read liveColumnTypes plus metadata input attributes before choosing column/table/relation shapes.',
+      'Call get_schema_design_context and read supportedColumnTypes plus metadata input attributes before choosing column/table/relation shapes.',
       'Inspect the existing table and relations.',
       'Decide owner relation and whether an inverse is actually needed.',
       'Apply schema tool changes with globalRulesAckKey.',

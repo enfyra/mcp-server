@@ -26,7 +26,6 @@ const cacheStats = {
 const PATH_DOMAIN_PREFIXES: Array<[string, RuntimeCacheDomain]> = [
   ['/metadata', 'metadata'],
   ['/enfyra_table', 'metadata'],
-  ['/enfyra_column', 'metadata'],
   ['/enfyra_relation', 'metadata'],
   ['/enfyra_route_handler', 'route'],
   ['/enfyra_pre_hook', 'route'],

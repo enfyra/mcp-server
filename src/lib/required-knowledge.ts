@@ -197,7 +197,7 @@ const GLOBAL_RULES_SECTIONS = [
   {
     id: 'schema-constraints',
     rules: [
-      'Before creating a multi-table app, call get_schema_design_context first. Use its liveColumnTypes, createTableInput, columnDefinitionInput, relationDefinitionInput, and recommendedSequence instead of guessing metadata attributes.',
+      'Before creating a multi-table app, call get_schema_design_context first. Use its supportedColumnTypes, createTableInput, columnDefinitionInput, relationDefinitionInput, and recommendedSequence instead of guessing metadata attributes.',
       'Then call get_enfyra_examples with category=schema-relations only for reasoning patterns, not for domain-specific table names.',
       'Keep feature-specific data in feature-owned tables. Prefer a new table with a relation to the needed system entity over adding columns or relations to a system table. Modify a system table only when the behavior is a true system contract and the user explicitly approves that system-schema change.',
       'Use plural mutation tools for writes: create_tables/update_tables/delete_tables, create_columns/update_columns/delete_columns, create_relations/update_relation_constraints/delete_relations, and create_records/update_records/delete_records. Pass native JSON arrays; use one item in the array for a single mutation.',

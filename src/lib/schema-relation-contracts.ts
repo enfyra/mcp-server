@@ -6,13 +6,12 @@ import {
   COLUMN_TYPE_ALIAS_HINTS,
   ColumnPatch,
   ConstraintGroup,
-  FALLBACK_COLUMN_TYPES,
+  ENFYRA_COLUMN_TYPES,
   FORBIDDEN_RELATION_KEYS,
   RELATION_TYPE_ALIASES,
   RelationConstraintUpdate,
   RelationPatch,
   VALID_RELATION_TYPES,
-  normalizeTablesFromMetadata,
   resolveTableFromMetadataByName,
 } from './schema-mutation-coordinator.js';
 
@@ -262,21 +261,18 @@ export function normalizeColumnOptionsValue(options: unknown) {
   return typeof options === 'string' ? JSON.parse(options) : options;
 }
 
-export function getSupportedColumnTypesFromMetadata(metadata: AnyRecord): string[] {
-  const columnTable = normalizeTablesFromMetadata(metadata).find((table) => table?.name === 'enfyra_column');
-  const typeColumn = columnTable?.columns?.find((column) => column?.name === 'type');
-  const options = parseColumnTypeOptions(typeColumn?.options);
-  return options.length ? options : FALLBACK_COLUMN_TYPES;
+export function getSupportedColumnTypes(): string[] {
+  return [...ENFYRA_COLUMN_TYPES];
 }
 
 function chooseFirstSupported(supported: Set<string>, candidates: string[]) {
   return candidates.find((candidate) => supported.has(candidate));
 }
 
-export function normalizeColumnTypeForLiveMetadata(type: unknown, supportedTypes: string[] = FALLBACK_COLUMN_TYPES) {
+export function normalizeColumnTypeForLiveMetadata(type: unknown, supportedTypes: string[] = [...ENFYRA_COLUMN_TYPES]) {
   const raw = String(type ?? '').trim();
   if (!raw) {
-    throw new Error(`Column type is required. Valid live types: ${supportedTypes.join(', ')}.`);
+    throw new Error(`Column type is required. Valid Enfyra types: ${supportedTypes.join(', ')}.`);
   }
   const supported = new Set(supportedTypes);
   if (supported.has(raw)) return { type: raw, changed: false, originalType: raw };
@@ -301,7 +297,7 @@ export function normalizeColumnTypeForLiveMetadata(type: unknown, supportedTypes
 
   if (!alias) {
     throw new Error(
-      `Unsupported column type "${raw}" for this live Enfyra instance. Valid live types: ${supportedTypes.join(', ')}. ` +
+      `Unsupported column type "${raw}" for this Enfyra schema contract. Valid Enfyra types: ${supportedTypes.join(', ')}. ` +
       `Guidance: ${COLUMN_TYPE_ALIAS_HINTS.join(' ')}`,
     );
   }

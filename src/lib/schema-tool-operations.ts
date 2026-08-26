@@ -4,8 +4,7 @@
 import { fetchAPI } from './fetch.js';
 import {
   fetchMetadataContext,
-  fetchTableCatalog,
-  fetchTableMetadata
+  fetchTableCatalog
 } from './metadata-client.js';
 import { assertGlobalRulesAck } from './required-knowledge.js';
 import { jsonContent } from './response-format.js';
@@ -22,7 +21,7 @@ import {
   fetchTableWithDetails,
   getId,
   getPatchableColumns,
-  getSupportedColumnTypesFromMetadata,
+  getSupportedColumnTypes,
   mergeConstraintGroups,
   normalizeColumnForTablePatch,
   normalizeColumnOptionsValue,
@@ -52,14 +51,11 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
   async function appendColumnToTable(args) {
       assertGlobalRulesAck(args.globalRulesAckKey);
       return withSchemaQueue(async () => {
-      const [tableData, columnMetadata] = await Promise.all([
-        fetchTableWithDetails(ENFYRA_API_URL, args.tableId),
-        fetchTableMetadata(ENFYRA_API_URL, 'enfyra_column'),
-      ]);
+      const tableData = await fetchTableWithDetails(ENFYRA_API_URL, args.tableId);
       if (!tableData) {
         throw new Error(`Table with ID ${args.tableId} not found.`);
       }
-      const supportedTypes = getSupportedColumnTypesFromMetadata(columnMetadata);
+      const supportedTypes = getSupportedColumnTypes();
       const normalized = normalizeColumnTypeForLiveMetadata(args.type, supportedTypes);
       assertColumnNameCanBeCreated(args.name, 'create_columns');
   
@@ -385,11 +381,8 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
 
   async function createOneTable(args, batchTableNames: Set<string> = new Set(), createdTableIds: Map<string, number | string> = new Map()) {
       const userColumns = arrayValue('columns', args.columns);
-  	    const [metadataContext, columnMetadata] = await Promise.all([
-        fetchMetadataContext(ENFYRA_API_URL),
-        fetchTableMetadata(ENFYRA_API_URL, 'enfyra_column'),
-      ]);
-  	    const supportedTypes = getSupportedColumnTypesFromMetadata(columnMetadata);
+      const metadataContext = await fetchMetadataContext(ENFYRA_API_URL);
+      const supportedTypes = getSupportedColumnTypes();
       const idColumn = buildPrimaryColumnForDbType(metadataContext.dbType);
   	    const { columns: userColumnsWithoutAuto, skippedAutoColumns } = stripAutoManagedColumns(userColumns);
   	    const { columns: normalizedUserColumns, normalizations } = normalizeColumnsForLiveMetadata(userColumnsWithoutAuto, supportedTypes);
