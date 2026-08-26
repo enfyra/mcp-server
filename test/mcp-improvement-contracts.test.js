@@ -273,6 +273,8 @@ test('startup instructions remain a compact router because hosts may repeat them
   assert.match(instructions, /get_enfyra_api_context/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
   assert.match(instructions, /discover_enfyra_workflows/);
+  assert.match(instructions, /Capability index/);
+  assert.match(instructions, /schema\/data/);
   assert.match(instructions, /install @enfyra\/sdk-\*/);
   assert.match(instructions, /OAuth: connect first/);
   assert.match(instructions, /ask only for credentials/);
