@@ -3,6 +3,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renam
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { getRuntimeCacheTelemetry } from './runtime-cache.js';
+import type { McpErrorReportFlushResult } from './mcp-usage-telemetry.types.js';
 
 type UnknownRecord = Record<string, any>;
 
@@ -502,17 +503,46 @@ function readUsageLinesFromFiles(files: string[]) {
     .filter(Boolean);
 }
 
-async function flushUsage(apiUrl: string, toolset: string) {
-  if (isTelemetryDisabled() || flushing) return;
-  if (!canFlushByLocalState()) return;
+function removeErrorUsageLines(files: string[]) {
+  for (const file of files) {
+    try {
+      const remainingLines = readFileSync(file, 'utf8')
+        .split('\n')
+        .filter(Boolean)
+        .filter((line) => {
+          try {
+            return JSON.parse(line)?.status !== 'error';
+          } catch {
+            return true;
+          }
+        });
+      if (remainingLines.length === 0) rmSync(file, { force: true });
+      else writeFileSync(file, `${remainingLines.join('\n')}\n`, 'utf8');
+    } catch {
+      // Keep an unreadable spool file for the normal retention cleanup path.
+    }
+  }
+}
+
+async function flushUsage(
+  apiUrl: string,
+  toolset: string,
+  { bypassSchedule = false, requireErrors = false } = {},
+): Promise<McpErrorReportFlushResult> {
+  if (isTelemetryDisabled()) return { status: 'disabled', errorCount: 0, sourceLineCount: 0 };
+  if (flushing) return { status: 'in_progress', errorCount: 0, sourceLineCount: 0 };
+  if (!bypassSchedule && !canFlushByLocalState()) return { status: 'scheduled', errorCount: 0, sourceLineCount: 0 };
   flushing = true;
   try {
     cleanupOldUsageFiles();
     rotateCurrentFileForUpload();
-    const files = usageSpoolFiles();
+    const files = usageSpoolFiles().filter((file) => file !== currentFile());
     const lines = readUsageLinesFromFiles(files);
-    if (lines.length === 0) return;
-    const report = summarizeUsage(lines, apiUrl, toolset);
+    if (lines.length === 0) return { status: 'empty', errorCount: 0, sourceLineCount: 0 };
+    const reportLines = requireErrors ? lines.filter((line) => line.status === 'error') : lines;
+    if (reportLines.length === 0) return { status: 'empty', errorCount: 0, sourceLineCount: 0 };
+    const report = summarizeUsage(reportLines, apiUrl, toolset);
+    const errorCount = Number(report.failed_call_count || 0);
     const response = await fetch(REPORT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -520,15 +550,23 @@ async function flushUsage(apiUrl: string, toolset: string) {
     });
     if (response.ok) {
       markUploadSuccess();
-      for (const file of files) rmSync(file, { force: true });
+      if (requireErrors) removeErrorUsageLines(files);
+      else for (const file of files) rmSync(file, { force: true });
+      return { status: 'sent', errorCount, sourceLineCount: reportLines.length, statusCode: response.status };
     } else if (response.status === 429 || response.status === 409) {
       markRetryAfter(response);
     }
+    return { status: 'rejected', errorCount, sourceLineCount: reportLines.length, statusCode: response.status };
   } catch {
     // Telemetry must never affect MCP behavior.
+    return { status: 'failed', errorCount: 0, sourceLineCount: 0 };
   } finally {
     flushing = false;
   }
+}
+
+export async function flushMcpErrorReportsNow(apiUrl: string, toolset: string): Promise<McpErrorReportFlushResult> {
+  return flushUsage(apiUrl, toolset, { bypassSchedule: true, requireErrors: true });
 }
 
 function installExitFlush(apiUrl: string, toolset: string) {

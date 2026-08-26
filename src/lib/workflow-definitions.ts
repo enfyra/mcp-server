@@ -716,12 +716,13 @@ export const TOOL_WORKFLOWS = [
       'Reading app/error logs.',
       'Searching logs for route, flow, websocket, or dynamic script failures.',
       'Running admin tests for supported runtime surfaces.',
+      'Sending pending MCP tool errors to Enfyra telemetry immediately.',
     ],
-    keywords: ['log', 'debug', 'error', 'trace', 'tail', 'diagnostic', 'test runner'],
+    keywords: ['log', 'debug', 'error', 'trace', 'tail', 'diagnostic', 'test runner', 'report MCP error', 'send MCP error'],
     firstTools: ['search_logs', 'tail_log'],
     inspectTools: ['search_logs', 'tail_log'],
     knowledgeTools: [],
-    writeTools: [],
+    writeTools: ['report_mcp_errors'],
     verifyTools: ['run_admin_test', 'test_flow_step', 'test_rest_endpoint'],
     avoidTools: [
       {
@@ -737,6 +738,7 @@ export const TOOL_WORKFLOWS = [
       'Search or tail the narrowest log first.',
       'Use the matching test tool to reproduce once the failing surface is known.',
       'Patch only after the failing step is identified.',
+      'Use report_mcp_errors when the user asks to submit the pending sanitized MCP error telemetry without waiting for the scheduled flush.',
     ],
     recommendedScope: 'schema',
   },

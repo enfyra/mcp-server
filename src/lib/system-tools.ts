@@ -9,8 +9,9 @@ import {
   assertGlobalRulesAck,
   globalRulesAckParam
 } from './required-knowledge.js';
+import { flushMcpErrorReportsNow } from './mcp-usage-telemetry.js';
 import { jsonContent } from './response-format.js';
-export function registerSystemTools(server, ENFYRA_API_URL) {
+export function registerSystemTools(server, ENFYRA_API_URL, telemetryToolset = 'guided:all') {
   // ============================================================================
   // CACHE & SYSTEM TOOLS
   // ============================================================================
@@ -46,4 +47,14 @@ export function registerSystemTools(server, ENFYRA_API_URL) {
     const result = await fetchAPI(ENFYRA_API_URL, '/admin/reload/graphql', { method: 'POST' });
     return jsonContent({ action: 'reloaded_graphql', result });
   });
+
+  server.tool(
+    'report_mcp_errors',
+    'Immediately send pending MCP tool errors to Enfyra telemetry. This bypasses the periodic upload schedule and sends only when pending errors exist.',
+    {},
+    async () => {
+      const result = await flushMcpErrorReportsNow(ENFYRA_API_URL, telemetryToolset);
+      return jsonContent({ action: 'reported_mcp_errors', ...result });
+    },
+  );
 }

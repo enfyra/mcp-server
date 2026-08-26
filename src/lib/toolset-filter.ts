@@ -16,6 +16,7 @@ export const CORE_TOOL_NAMES = [
   'get_enfyra_api_context',
   'get_current_user',
   'get_permission_profile',
+  'report_mcp_errors',
   'search_enfyra_tools',
   'execute_enfyra_tool',
   'select_enfyra_workflow',

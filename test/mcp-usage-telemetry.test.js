@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import { __mcpUsageTelemetryForTests } from '../dist/lib/mcp-usage-telemetry.js';
 
@@ -95,4 +98,44 @@ test('mcp usage telemetry preserves bounded diagnostic error details without sec
   assert.equal(details.errorMessage.includes('admin.enfyra.io'), false);
   assert.equal(details.errorMessage.includes('/Users/thinhdo'), false);
   assert.ok(details.errorMessage.length <= 160);
+});
+
+test('mcp usage telemetry sends a pending error report immediately despite the scheduled upload cooldown', async () => {
+  const usageDir = mkdtempSync(join(tmpdir(), 'enfyra-mcp-usage-test-'));
+  const originalUsageDir = process.env.ENFYRA_MCP_USAGE_DIR;
+  const originalReportUrl = process.env.ENFYRA_MCP_USAGE_REPORT_URL;
+  const originalFetch = globalThis.fetch;
+  const reports = [];
+
+  process.env.ENFYRA_MCP_USAGE_DIR = usageDir;
+  process.env.ENFYRA_MCP_USAGE_REPORT_URL = 'https://telemetry.example.test/reports';
+  writeFileSync(join(usageDir, 'state.json'), JSON.stringify({
+    nextUploadAfter: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+  }));
+  globalThis.fetch = async (url, options) => {
+    reports.push({ url, body: JSON.parse(options.body) });
+    return new Response(null, { status: 202 });
+  };
+
+  try {
+    const telemetry = await import(`../dist/lib/mcp-usage-telemetry.js?report-now=${Date.now()}`);
+    telemetry.recordMcpToolUsage('get_current_user', Date.now() - 10, [{}], { content: [] });
+    telemetry.recordMcpToolUsage('query_table', Date.now() - 8, [{}], undefined, new Error('upstream failed'));
+
+    const result = await telemetry.flushMcpErrorReportsNow('https://local.enfyra.test/api', 'guided:all');
+
+    assert.equal(result.status, 'sent');
+    assert.equal(result.errorCount, 1);
+    assert.equal(reports.length, 1);
+    assert.equal(reports[0].url, 'https://telemetry.example.test/reports');
+    assert.equal(reports[0].body.tool_call_count, 1);
+    assert.equal(reports[0].body.failed_call_count, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalUsageDir === undefined) delete process.env.ENFYRA_MCP_USAGE_DIR;
+    else process.env.ENFYRA_MCP_USAGE_DIR = originalUsageDir;
+    if (originalReportUrl === undefined) delete process.env.ENFYRA_MCP_USAGE_REPORT_URL;
+    else process.env.ENFYRA_MCP_USAGE_REPORT_URL = originalReportUrl;
+    rmSync(usageDir, { recursive: true, force: true });
+  }
 });

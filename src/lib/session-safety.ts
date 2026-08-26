@@ -19,6 +19,7 @@ const PREVIEW_IGNORED_KEYS = new Set([
   'skipNotFound',
 ]);
 const ID_KEYS = new Set(['id', '_id', 'columnId', 'extensionId', 'menuId', 'flowId', 'relationId', 'routeId', 'tableId']);
+const TARGET_CONFIRMATION_EXEMPT_MUTATIONS = new Set(['report_mcp_errors']);
 
 let targetConfirmed = false;
 const destructivePreviews = new Set<string>();
@@ -72,7 +73,7 @@ export function getMcpSafetySessionState() {
 }
 
 export function beforeMcpToolExecution(toolName: string, input: ToolInput = {}) {
-  if (isMutationTool(toolName) && !targetConfirmed) {
+  if (isMutationTool(toolName) && !TARGET_CONFIRMATION_EXEMPT_MUTATIONS.has(toolName) && !targetConfirmed) {
     throw new Error(`Target is not confirmed for this MCP process session. Call get_enfyra_api_context before ${toolName}, verify the API base, then retry.`);
   }
   if (isDestructiveTool(toolName) && input.confirm === true) {

@@ -91,7 +91,7 @@ export function createEnfyraMcpServer() {
   registerRuntimeZoneTools(server, ENFYRA_API_URL);
   registerOAuthProviderTools(server, ENFYRA_API_URL);
   registerDynamicRepositoryBuilder(server);
-  registerSystemTools(server, ENFYRA_API_URL);
+  registerSystemTools(server, ENFYRA_API_URL, `${MCP_TOOLSET}:${MCP_PROFILE}`);
   registerRedisInspectionTools(server, ENFYRA_API_URL);
   registerLogTools(server, ENFYRA_API_URL);
   registerIdentityTools(server, ENFYRA_API_URL);

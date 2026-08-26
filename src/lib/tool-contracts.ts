@@ -30,6 +30,7 @@ const MUTATION_TOOLS = new Set([
   'test_rest_endpoint',
   'setup_oauth_provider',
   'login',
+  'report_mcp_errors',
 ]);
 
 const LOCAL_TOOL_PATTERN = /^(?:build|validate|review|plan)_/;
