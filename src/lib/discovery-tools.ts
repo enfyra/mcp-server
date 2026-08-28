@@ -451,7 +451,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
         targetInstance: targetInstance(),
         transformer: {
           rule: 'Dynamic server scripts are transformed before sandbox execution. Macros expand to $ctx paths; comments are not transformed.',
-          preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use macros such as @BODY/@QUERY/@PARAMS/@USER/@REQ/@RES/@REPOS/@CACHE/@HELPERS/@FETCH/@STORAGE/@UPLOADED_FILE/@SOCKET/@TRIGGER/@DATA/@ERROR/@STATUS/@ENV/@PKGS/@LOGS/@SHARE/@API/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
+          preferredSyntax: 'Prefer template macros in generated Enfyra scripts. Use macros such as @BODY/@QUERY/@PARAMS/@USER/@REQ/@RES/@REPOS/@CACHE/@HELPERS/@FETCH/@STORAGE/@UPLOADED_FILE/@SOCKET/@TRIGGER/@TRANSACTION/@DATA/@ERROR/@STATUS/@ENV/@PKGS/@LOGS/@SHARE/@API/@THROW* instead of raw $ctx access whenever a macro exists. Use raw $ctx only for fields without a macro.',
           coreMacros: {
             '@CACHE': '$ctx.$cache',
             '@REPOS': '$ctx.$repos',
@@ -473,6 +473,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
             '@PKGS': '$ctx.$pkgs',
             '@SOCKET': '$ctx.$socket',
             '@TRIGGER': '$ctx.$trigger',
+            '@TRANSACTION': '$ctx.$transaction',
             '@FLOW': '$ctx.$flow',
             '@FLOW_PAYLOAD': '$ctx.$flow.$payload',
             '@FLOW_LAST': '$ctx.$flow.$last',
