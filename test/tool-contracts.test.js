@@ -20,6 +20,8 @@ test('tool contracts distinguish reads, mutations, destructive operations, and l
   assert.equal(getToolContract('delete_records').annotations.destructiveHint, true);
   assert.equal(getToolContract('delete_flow').annotations.destructiveHint, true);
   assert.equal(getToolContract('delete_flow_step').annotations.destructiveHint, true);
+  assert.equal(getToolContract('delete_route_hook').annotations.destructiveHint, true);
+  assert.equal(getToolContract('delete_route_permission').annotations.destructiveHint, true);
   assert.equal(getToolContract('delete_extension').annotations.destructiveHint, true);
   assert.equal(getToolContract('delete_menu').annotations.destructiveHint, true);
   assert.equal(getToolContract('create_handler').annotations.idempotentHint, false);

@@ -56,22 +56,22 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
   enfyra_route_handler: {
     create: 'create_handler or api_endpoint_workflow',
     update: 'patch_script_source / update_script_source for source edits, or api_endpoint_workflow(overwrite=true) for full handler replacement',
-    delete: 'delete_route (cascades all handlers) — individual handler removal is not exposed',
+    delete: 'delete_route_handler (preview first), or delete_route to cascade all handlers',
   },
   enfyra_pre_hook: {
     create: 'create_pre_hook',
     update: 'patch_script_source / update_script_source for source edits',
-    delete: 'delete_route (cascades all hooks) — individual hook removal is not exposed',
+    delete: 'delete_route_hook(hookType=pre; preview first), or delete_route to cascade all hooks',
   },
   enfyra_post_hook: {
     create: 'create_post_hook',
     update: 'patch_script_source / update_script_source for source edits',
-    delete: 'delete_route (cascades all hooks) — individual hook removal is not exposed',
+    delete: 'delete_route_hook(hookType=post; preview first), or delete_route to cascade all hooks',
   },
   enfyra_route_permission: {
     create: 'ensure_route_access',
     update: 'ensure_route_access (mode=merge or mode=replace)',
-    delete: 'ensure_route_access(mode=replace, methods=[]) to revoke, or delete_route to cascade — individual permission removal is not exposed',
+    delete: 'delete_route_permission (preview first), or delete_route to cascade',
   },
   enfyra_method: {
     create: 'create_method',

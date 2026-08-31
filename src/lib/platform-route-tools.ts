@@ -12,6 +12,7 @@ import {
   HandlerBody,
   RouteHandlerBody,
   createOrPatch,
+  deleteRouteChild,
   deleteRoute,
   fetchAll,
   findHandler,
@@ -45,6 +46,53 @@ import {
 import { materializeSourceInput } from './source-artifacts.js';
 
 export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
+  const registerRouteChildDeleteTool = ({ name, kind, childLabel, expectedIdLabel }) => {
+    server.tool(
+      name,
+      `Business operation: preview-first physical deletion of one route ${childLabel}. It rejects system-owned records/routes, reloads routes, and verifies the child is absent by id.`,
+      {
+        id: z.union([z.string(), z.number()]).describe(`Exact ${childLabel} record id.`),
+        ...(kind === 'hook' ? {
+          hookType: z.enum(['pre', 'post']).describe('Whether this is an enfyra_pre_hook or enfyra_post_hook record.'),
+        } : {}),
+        expectedId: z.union([z.string(), z.number()]).optional().describe(`Required when confirm=true. Pass the exact ${expectedIdLabel} id returned by the preview.`),
+        confirm: z.boolean().optional().default(false).describe('false returns a dependency preview only; true applies the deletion.'),
+        globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      },
+      async (input) => {
+        const result = await deleteRouteChild(ENFYRA_API_URL, {
+          kind: kind === 'hook' ? `${input.hookType}_hook` : kind,
+          id: input.id,
+          expectedId: input.expectedId,
+          confirm: input.confirm,
+          globalRulesAckKey: input.globalRulesAckKey,
+        });
+        if (!input.confirm) return destructivePreviewContent(name, result, 1);
+        const content = jsonText(result);
+        return result.postcondition?.confirmedAbsent === true ? content : { ...content, isError: true };
+      },
+    );
+  };
+
+  registerRouteChildDeleteTool({
+    name: 'delete_route_handler',
+    kind: 'handler',
+    childLabel: 'handler',
+    expectedIdLabel: 'handler',
+  });
+  registerRouteChildDeleteTool({
+    name: 'delete_route_hook',
+    kind: 'hook',
+    childLabel: 'pre-hook or post-hook',
+    expectedIdLabel: 'hook',
+  });
+  registerRouteChildDeleteTool({
+    name: 'delete_route_permission',
+    kind: 'permission',
+    childLabel: 'route permission',
+    expectedIdLabel: 'route permission',
+  });
+
   server.tool(
       'set_table_graphql',
       'Business operation: enable or disable GraphQL for one table through enfyra_graphql, then reload GraphQL. REST route methods do not control GraphQL.',

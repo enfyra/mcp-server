@@ -121,6 +121,9 @@ test('guided toolset exposes front-door tools and hides escape hatches', () => {
   assert.equal(isToolVisibleInToolset('build_dynamic_repository_usage', 'guided'), true);
   assert.equal(isToolVisibleInToolset('create_handler', 'guided'), true);
   assert.equal(isToolVisibleInToolset('create_post_hook', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('delete_route_handler', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('delete_route_hook', 'guided'), true);
+  assert.equal(isToolVisibleInToolset('delete_route_permission', 'guided'), true);
   assert.equal(isToolVisibleInToolset('ensure_auth_header', 'guided'), true);
   assert.equal(isToolVisibleInToolset('reorder_auth_headers', 'guided'), true);
   assert.equal(isToolVisibleInToolset('ensure_auth_header', 'guided', 'operations'), true);
@@ -253,6 +256,7 @@ test('every guided mutation belongs to at least one dynamic workflow pack', () =
 
   assert.deepEqual(orphanMutations, []);
   assert.equal(workflowSurfaceForTool('delete_route'), 'api-endpoint');
+  assert.equal(workflowSurfaceForTool('delete_route_hook'), 'api-endpoint');
   assert.equal(workflowSurfaceForTool('delete_method'), 'api-endpoint');
   assert.equal(workflowSurfaceForTool('confirm_schema_mutation'), 'schema');
 });

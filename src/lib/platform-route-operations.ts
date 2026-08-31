@@ -387,6 +387,128 @@ export async function deleteRoute(apiUrl, { path, routeId, expectedRouteId, expe
   };
 }
 
+const ROUTE_CHILD_DELETE_CONFIG = {
+  handler: {
+    tableName: 'enfyra_route_handler',
+    fields: 'id,_id,route.id,routeId,method.id,method.name,isSystem',
+  },
+  pre_hook: {
+    tableName: 'enfyra_pre_hook',
+    fields: 'id,_id,route.id,routeId,name,isEnabled,isGlobal,isSystem',
+  },
+  post_hook: {
+    tableName: 'enfyra_post_hook',
+    fields: 'id,_id,route.id,routeId,name,isEnabled,isGlobal,isSystem',
+  },
+  permission: {
+    tableName: 'enfyra_route_permission',
+    fields: 'id,_id,route.id,routeId,role.id,role.name,allowedUsers.id,methods.id,methods.name,isEnabled,isSystem',
+  },
+} as const;
+
+type RouteChildDeleteKind = keyof typeof ROUTE_CHILD_DELETE_CONFIG;
+
+function routeIdFromChild(record) {
+  return refId(record?.route) ?? record?.routeId ?? null;
+}
+
+function summarizeRouteChild(kind: RouteChildDeleteKind, record) {
+  const routeId = routeIdFromChild(record);
+  const base = {
+    id: getId(record),
+    tableName: ROUTE_CHILD_DELETE_CONFIG[kind].tableName,
+    routeId,
+  };
+  if (kind === 'handler') {
+    return {
+      ...base,
+      method: record?.method?.name || null,
+    };
+  }
+  if (kind === 'permission') {
+    return {
+      ...base,
+      role: record?.role ? { id: getId(record.role), name: record.role.name || null } : null,
+      allowedUserIds: (record?.allowedUsers || []).map((user) => getId(user)).filter((id) => id !== null),
+      methods: (record?.methods || []).map((method) => method?.name || getId(method)).filter(Boolean),
+      isEnabled: record?.isEnabled !== false,
+    };
+  }
+  return {
+    ...base,
+    name: record?.name || null,
+    isGlobal: record?.isGlobal === true,
+    isEnabled: record?.isEnabled !== false,
+    isSystem: record?.isSystem === true,
+  };
+}
+
+async function findRouteChild(apiUrl, kind: RouteChildDeleteKind, id) {
+  const config = ROUTE_CHILD_DELETE_CONFIG[kind];
+  const records = await fetchAll(apiUrl, `/${config.tableName}?limit=1000&fields=${config.fields}`);
+  return records.find((record) => sameId(getId(record), id)) || null;
+}
+
+export async function deleteRouteChild(apiUrl, { kind, id, expectedId, confirm, globalRulesAckKey }) {
+  const config = ROUTE_CHILD_DELETE_CONFIG[kind as RouteChildDeleteKind];
+  if (!config) throw new Error(`Unsupported route child kind: ${kind}`);
+  const child = await findRouteChild(apiUrl, kind, id);
+  if (!child) throw new Error(`${config.tableName} id ${id} was not found.`);
+  const routeId = routeIdFromChild(child);
+  const route = routeId === null ? null : (await resolveRoute(apiUrl, { path: undefined, routeId })).route;
+  const childSummary = summarizeRouteChild(kind, child);
+  const preview = {
+    action: `delete_route_${kind}_preview`,
+    child: childSummary,
+    route: route ? { id: getId(route), path: route.path, isSystem: route.isSystem === true } : null,
+    postcondition: {
+      verificationMethod: 'not_run_preview',
+      confirmedAbsent: false,
+      remainingChildren: [childSummary],
+    },
+    next: `Call the same delete tool with id=${String(getId(child))}, expectedId=${String(getId(child))}, and confirm=true.`,
+  };
+  if (!confirm) return preview;
+
+  assertGlobalRulesAck(globalRulesAckKey);
+  if (expectedId === undefined || expectedId === null) {
+    throw new Error('expectedId is required when confirm=true. Pass the exact child id returned by the preview.');
+  }
+  if (!sameId(getId(child), expectedId)) {
+    throw new Error(`Route child id mismatch: resolved ${getId(child)}, expected ${expectedId}.`);
+  }
+  if (child.isSystem === true || route?.isSystem === true) {
+    throw new Error(`${config.tableName} ${getId(child)} is system-owned and cannot be deleted.`);
+  }
+
+  const result = await fetchAPI(apiUrl, `/${config.tableName}/${encodeURIComponent(String(getId(child)))}`, { method: 'DELETE' });
+  let postcondition;
+  try {
+    const remaining = await findRouteChild(apiUrl, kind, getId(child));
+    postcondition = {
+      verificationMethod: 'route_child_read_by_id',
+      confirmedAbsent: remaining === null,
+      remainingChildren: remaining ? [summarizeRouteChild(kind, remaining)] : [],
+    };
+  } catch (error) {
+    postcondition = {
+      verificationMethod: 'route_child_read_by_id',
+      confirmedAbsent: false,
+      remainingChildren: [],
+      verificationError: String(error?.message || error),
+    };
+  }
+  const routeReload = await reloadRoutes(apiUrl);
+  return {
+    action: postcondition.confirmedAbsent ? `route_${kind}_deleted` : `delete_route_${kind}_unverified`,
+    child: childSummary,
+    route: route ? { id: getId(route), path: route.path } : null,
+    result: { statusCode: result?.statusCode, success: result?.success },
+    postcondition,
+    routeReload,
+  };
+}
+
 export async function findHandler(apiUrl, routeId, methodId) {
   const filter = encodeURIComponent(JSON.stringify({
     route: { id: { _eq: routeId } },

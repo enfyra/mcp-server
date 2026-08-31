@@ -195,7 +195,7 @@ export const MCP_PERMISSION_REQUIREMENTS = [
   },
   {
     area: 'route cache reload',
-    tools: ['reload_routes', 'enable_route', 'disable_route', 'delete_route', 'public_route_methods', 'private_route_methods', 'add_route_methods', 'replace_route_methods', 'remove_route_methods', 'ensure_route_access'],
+    tools: ['reload_routes', 'enable_route', 'disable_route', 'delete_route', 'delete_route_handler', 'delete_route_hook', 'delete_route_permission', 'public_route_methods', 'private_route_methods', 'add_route_methods', 'replace_route_methods', 'remove_route_methods', 'ensure_route_access'],
     route: '/admin/reload/routes',
     methods: ['POST'],
   },

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { initAuth, resetTokens } from '../dist/lib/auth.js';
-import { deleteRoute } from '../dist/lib/platform-route-operations.js';
+import { deleteRoute, deleteRouteChild } from '../dist/lib/platform-route-operations.js';
 import { GLOBAL_RULES_ACK_KEY } from '../dist/lib/required-knowledge.js';
 
 function jsonResponse(body, status = 200) {
@@ -134,6 +134,75 @@ test('delete_route rejects system routes before deleting dependencies', async ()
       /system-owned/,
     );
     assert.deepEqual(fixture.deletes, []);
+  } finally {
+    resetTokens();
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('delete_route_child previews, deletes one pre-hook, reloads routes, and verifies absence', async () => {
+  const originalFetch = globalThis.fetch;
+  const deletes = [];
+  let hookDeleted = false;
+  globalThis.fetch = async (url, options = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    }
+    if (urlText.includes('/enfyra_pre_hook?')) {
+      return jsonResponse({ data: hookDeleted ? [] : [{
+        id: 21,
+        name: 'tenant-filter',
+        route: { id: 7 },
+        isEnabled: true,
+        isGlobal: false,
+        isSystem: false,
+      }] });
+    }
+    if (urlText.includes('/enfyra_route?limit=1000')) {
+      return jsonResponse({ data: [{
+        id: 7,
+        path: '/temporary',
+        isEnabled: true,
+        isSystem: false,
+        availableMethods: [],
+        publicMethods: [],
+      }] });
+    }
+    if (urlText.endsWith('/enfyra_pre_hook/21') && options.method === 'DELETE') {
+      deletes.push(urlText);
+      hookDeleted = true;
+      return jsonResponse({ success: true, statusCode: 200 });
+    }
+    if (urlText.endsWith('/admin/reload/routes') && options.method === 'POST') {
+      return jsonResponse({ success: true });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+  resetTokens();
+  initAuth('https://example.test/api', 'api-token');
+
+  try {
+    const preview = await deleteRouteChild('https://example.test/api', {
+      kind: 'pre_hook',
+      id: 21,
+      confirm: false,
+    });
+    assert.equal(preview.action, 'delete_route_pre_hook_preview');
+    assert.equal(preview.child.name, 'tenant-filter');
+    assert.deepEqual(deletes, []);
+
+    const result = await deleteRouteChild('https://example.test/api', {
+      kind: 'pre_hook',
+      id: 21,
+      expectedId: 21,
+      confirm: true,
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+    assert.equal(result.action, 'route_pre_hook_deleted');
+    assert.deepEqual(deletes, ['https://example.test/api/enfyra_pre_hook/21']);
+    assert.equal(result.postcondition.confirmedAbsent, true);
+    assert.equal(result.routeReload.succeeded, true);
   } finally {
     resetTokens();
     globalThis.fetch = originalFetch;

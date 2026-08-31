@@ -51,7 +51,9 @@ export const readRuntimeZoneSource = () => readLibModules((name) => name.startsW
 
 export function registeredToolNamesFromSource() {
   return new Set(
-    [...readSourceTree().matchAll(/server\.tool\(\s*['"]([a-z0-9_]+)['"]/g)]
-      .map((match) => match[1]),
+    [
+      ...readSourceTree().matchAll(/server\.tool\(\s*['"]([a-z0-9_]+)['"]/g),
+      ...readSourceTree().matchAll(/registerRouteChildDeleteTool\(\{\s*name:\s*['"]([a-z0-9_]+)['"]/g),
+    ].map((match) => match[1]),
   );
 }

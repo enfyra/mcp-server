@@ -234,6 +234,9 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /server\.tool\(\s*['"]enable_route['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]disable_route['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]delete_route['"]/);
+  assert.match(platformTools, /name: 'delete_route_handler'/);
+  assert.match(platformTools, /name: 'delete_route_hook'/);
+  assert.match(platformTools, /name: 'delete_route_permission'/);
   assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]set_route_public_methods['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]public_route_methods['"]/);
   assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]set_public_route_methods['"]/);
