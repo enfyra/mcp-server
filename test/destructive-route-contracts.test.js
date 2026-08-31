@@ -208,3 +208,62 @@ test('delete_route_child previews, deletes one pre-hook, reloads routes, and ver
     globalThis.fetch = originalFetch;
   }
 });
+
+test('delete_route_child permits a non-system hook on a system route', async () => {
+  const originalFetch = globalThis.fetch;
+  const deletes = [];
+  let hookDeleted = false;
+  globalThis.fetch = async (url, options = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    }
+    if (urlText.includes('/enfyra_pre_hook?')) {
+      return jsonResponse({ data: hookDeleted ? [] : [{
+        id: 22,
+        name: 'obsolete-normalization',
+        route: { id: 8 },
+        isEnabled: true,
+        isGlobal: false,
+        isSystem: false,
+      }] });
+    }
+    if (urlText.includes('/enfyra_route?limit=1000')) {
+      return jsonResponse({ data: [{
+        id: 8,
+        path: '/enfyra_user',
+        isEnabled: true,
+        isSystem: true,
+        availableMethods: [],
+        publicMethods: [],
+      }] });
+    }
+    if (urlText.endsWith('/enfyra_pre_hook/22') && options.method === 'DELETE') {
+      deletes.push(urlText);
+      hookDeleted = true;
+      return jsonResponse({ success: true, statusCode: 200 });
+    }
+    if (urlText.endsWith('/admin/reload/routes') && options.method === 'POST') {
+      return jsonResponse({ success: true });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+  resetTokens();
+  initAuth('https://example.test/api', 'api-token');
+
+  try {
+    const result = await deleteRouteChild('https://example.test/api', {
+      kind: 'pre_hook',
+      id: 22,
+      expectedId: 22,
+      confirm: true,
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+    assert.equal(result.action, 'route_pre_hook_deleted');
+    assert.deepEqual(deletes, ['https://example.test/api/enfyra_pre_hook/22']);
+    assert.equal(result.postcondition.confirmedAbsent, true);
+  } finally {
+    resetTokens();
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -15,7 +15,7 @@ const SOURCE_FIELD_NAMES = new Set([
   'connectionHandlerScript',
 ]);
 const SOURCE_ARTIFACTS = new Map<string, { path: string; mimeType: string }>();
-export const SOURCE_ARTIFACT_DIR = join(tmpdir(), 'enfyra-mcp-sources');
+export const SOURCE_ARTIFACT_DIR = join(tmpdir(), 'enfyra-mcp-sources', String(process.pid));
 
 type SourceArtifactInput = {
   tableName?: string;

@@ -477,7 +477,7 @@ export async function deleteRouteChild(apiUrl, { kind, id, expectedId, confirm, 
   if (!sameId(getId(child), expectedId)) {
     throw new Error(`Route child id mismatch: resolved ${getId(child)}, expected ${expectedId}.`);
   }
-  if (child.isSystem === true || route?.isSystem === true) {
+  if (child.isSystem === true) {
     throw new Error(`${config.tableName} ${getId(child)} is system-owned and cannot be deleted.`);
   }
 

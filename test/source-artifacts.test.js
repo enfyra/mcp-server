@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import {
+  SOURCE_ARTIFACT_DIR,
   compactSourceFields,
   materializeSourceInput,
   normalizeExtensionSourceArgs,
@@ -22,6 +23,7 @@ test('writeSourceArtifact stores full source in tmp and returns compact metadata
   });
 
   assert.match(artifact.tmpFile, /enfyra-mcp-sources/);
+  assert.match(SOURCE_ARTIFACT_DIR, new RegExp(`enfyra-mcp-sources[/\\\\]${process.pid}$`));
   assert.match(artifact.tmpFile, /\.vue$/);
   assert.match(artifact.resourceUri, /^enfyra-source:\/\/artifact\//);
   assert.equal(artifact.length, source.length);
