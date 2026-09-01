@@ -272,6 +272,88 @@ test('update_columns rejects a successful response when enum options were not pe
   }
 });
 
+test('update_columns replaces enum options canonically and verifies the saved array', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let currentMetadata = {
+    id: 10,
+    name: 'ai_payment_order',
+    columns: [{
+      id: 100,
+      name: 'paymentProvider',
+      type: 'enum',
+      options: '{"sepay","paypal"}',
+    }],
+    relations: [],
+  };
+  const patchBodies = [];
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    }
+    if (urlText.includes('/enfyra_table?')) {
+      return jsonResponse({ data: [{ id: 10, name: 'ai_payment_order' }] });
+    }
+    if (urlText.endsWith('/metadata/ai_payment_order')) {
+      return jsonResponse({ data: currentMetadata });
+    }
+    if (urlText.includes('/enfyra_table/10') && init.method === 'PATCH') {
+      const body = JSON.parse(init.body);
+      patchBodies.push(body);
+      if (!urlText.includes('schemaConfirmHash=')) {
+        return jsonResponse({ data: { _preview: true, requiredConfirmHash: 'confirm-enum' } });
+      }
+      currentMetadata = { ...currentMetadata, columns: body.columns };
+      return jsonResponse({ data: [{ id: 10, name: 'ai_payment_order' }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await server.get('update_columns').handler({
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      items: [{
+        tableId: 10,
+        columnId: 100,
+        options: ['sepay', 'paypal', 'apipay', 'apipay'],
+      }],
+    });
+
+    assert.equal(patchBodies.length, 2);
+    assert.deepEqual(patchBodies[1].columns[0].options, [
+      'sepay',
+      'paypal',
+      'apipay',
+    ]);
+    assert.deepEqual(currentMetadata.columns[0].options, [
+      'sepay',
+      'paypal',
+      'apipay',
+    ]);
+
+    await server.get('update_columns').handler({
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      items: [{
+        tableId: 10,
+        columnId: 100,
+        type: 'varchar',
+      }],
+    });
+
+    assert.equal(patchBodies.length, 4);
+    assert.deepEqual(patchBodies[3].columns[0].options, []);
+    assert.deepEqual(currentMetadata.columns[0].options, []);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
 test('update_columns permits isUpdatable broadening through the acknowledged schema cascade', async () => {
   const originalFetch = global.fetch;
   const server = createToolHarness();

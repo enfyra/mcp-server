@@ -258,7 +258,21 @@ export function parseColumnTypeOptions(options: unknown): string[] {
 
 export function normalizeColumnOptionsValue(options: unknown) {
   if (options === undefined) return undefined;
-  return typeof options === 'string' ? JSON.parse(options) : options;
+  const parsed = parseColumnTypeOptions(options);
+  if (
+    !Array.isArray(options) &&
+    typeof options !== 'string' &&
+    options !== null
+  ) {
+    throw new Error('Column options must be an array of strings.');
+  }
+  if (typeof options === 'string' && parsed.length === 0) {
+    const trimmed = options.trim();
+    if (trimmed !== '[]' && trimmed !== '{}') {
+      throw new Error('Column options must be a JSON or PostgreSQL-style string array.');
+    }
+  }
+  return [...new Set(parsed.map((option) => option.trim()).filter(Boolean))];
 }
 
 export function getSupportedColumnTypes(): string[] {

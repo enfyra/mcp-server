@@ -26,6 +26,7 @@ import {
   mergeConstraintGroups,
   normalizeColumnForTablePatch,
   normalizeColumnOptionsValue,
+  parseColumnTypeOptions,
   normalizeColumnTypeForLiveMetadata,
   normalizeColumnsForLiveMetadata,
   normalizeConstraintGroupsValue,
@@ -639,6 +640,16 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         throw new Error(`Column ${columnId} was not found on table ${tableId}; refusing schema cascade patch.`);
       }
       const existingColumn = existingColumns.find((column) => String(getId(column)) === String(columnId));
+      const effectiveType = type ?? existingColumn?.type;
+      const normalizedOptions = options !== undefined
+        ? normalizeColumnOptionsValue(options)
+        : parseColumnTypeOptions(existingColumn?.options);
+      if (['enum', 'array-select'].includes(String(effectiveType)) && normalizedOptions.length === 0) {
+        throw new Error(`${String(effectiveType)} column options must contain at least one non-empty value.`);
+      }
+      const clearsOptions = type !== undefined
+        && !['enum', 'array-select'].includes(String(type))
+        && options === undefined;
       const contractBroadening = getColumnContractBroadening(existingColumn || {}, {
         isPublished,
         isUpdatable,
@@ -651,7 +662,8 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       if (isUpdatable !== undefined) expectedColumn.isUpdatable = isUpdatable;
       if (defaultValue !== undefined) expectedColumn.defaultValue = defaultValue;
       if (description !== undefined) expectedColumn.description = description;
-      if (options !== undefined) expectedColumn.options = normalizeColumnOptionsValue(options);
+      if (options !== undefined) expectedColumn.options = normalizedOptions;
+      if (clearsOptions) expectedColumn.options = [];
       if (metadata !== undefined) expectedColumn.metadata = metadata;
       if (placeholder !== undefined) expectedColumn.placeholder = placeholder;
   
@@ -665,7 +677,8 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
           if (isUpdatable !== undefined) rest.isUpdatable = isUpdatable;
           if (defaultValue !== undefined) rest.defaultValue = defaultValue;
           if (description !== undefined) rest.description = description;
-          if (options !== undefined) rest.options = normalizeColumnOptionsValue(options);
+          if (options !== undefined) rest.options = normalizedOptions;
+          if (clearsOptions) rest.options = [];
           if (metadata !== undefined) rest.metadata = metadata;
           if (placeholder !== undefined) rest.placeholder = placeholder;
         }
