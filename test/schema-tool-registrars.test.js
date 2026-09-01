@@ -219,6 +219,59 @@ test('update_columns persists rich-text metadata through the table cascade patch
   }
 });
 
+test('update_columns rejects a successful response when enum options were not persisted', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  const currentMetadata = {
+    id: 10,
+    name: 'ai_payment_order',
+    columns: [{
+      id: 100,
+      name: 'paymentProvider',
+      type: 'enum',
+      options: ['sepay', 'paypal'],
+    }],
+    relations: [],
+  };
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) {
+      return jsonResponse({ accessToken: 'access-token', expiresIn: 3600 });
+    }
+    if (urlText.includes('/enfyra_table?')) {
+      return jsonResponse({ data: [{ id: 10, name: 'ai_payment_order' }] });
+    }
+    if (urlText.endsWith('/metadata/ai_payment_order')) {
+      return jsonResponse({ data: currentMetadata });
+    }
+    if (urlText.includes('/enfyra_table/10') && init.method === 'PATCH') {
+      return jsonResponse({ data: [{ id: 10, name: 'ai_payment_order' }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await assert.rejects(
+      server.get('update_columns').handler({
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+        items: [{
+          tableId: 10,
+          columnId: 100,
+          options: ['sepay', 'paypal', 'apipay'],
+        }],
+      }),
+      /did not persist fields: options/,
+    );
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
 test('update_columns permits isUpdatable broadening through the acknowledged schema cascade', async () => {
   const originalFetch = global.fetch;
   const server = createToolHarness();

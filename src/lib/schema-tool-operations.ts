@@ -9,8 +9,9 @@ import {
 import { assertGlobalRulesAck } from './required-knowledge.js';
 import { jsonContent } from './response-format.js';
 import {
-  AnyRecord,
-  RelationPatch,
+  type AnyRecord,
+  type ColumnPatch,
+  type RelationPatch,
   getColumnContractBroadening,
   assertColumnNameCanBeCreated,
   assertIndexesDoNotReferenceUniqueFields,
@@ -642,6 +643,17 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         isPublished,
         isUpdatable,
       });
+      const expectedColumn: ColumnPatch = {};
+      if (name !== undefined) expectedColumn.name = name;
+      if (type !== undefined) expectedColumn.type = type;
+      if (isNullable !== undefined) expectedColumn.isNullable = isNullable;
+      if (isPublished !== undefined) expectedColumn.isPublished = isPublished;
+      if (isUpdatable !== undefined) expectedColumn.isUpdatable = isUpdatable;
+      if (defaultValue !== undefined) expectedColumn.defaultValue = defaultValue;
+      if (description !== undefined) expectedColumn.description = description;
+      if (options !== undefined) expectedColumn.options = normalizeColumnOptionsValue(options);
+      if (metadata !== undefined) expectedColumn.metadata = metadata;
+      if (placeholder !== undefined) expectedColumn.placeholder = placeholder;
   
       const columns = existingColumns.map(col => {
         const rest = normalizeColumnForTablePatch(col);
@@ -664,6 +676,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       await verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
         action: 'update',
         columnId,
+        expectedColumn,
       });
   
       return {

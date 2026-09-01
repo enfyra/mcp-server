@@ -1,12 +1,13 @@
 /**
  * Table & Column tools for Enfyra MCP Server
  */
+import { isDeepStrictEqual } from 'node:util';
 import {
-  AnyRecord,
-  CascadeVerifyOptions,
-  ColumnPatch,
   fetchTableWithDetails,
   normalizeTablesFromMetadata,
+  type AnyRecord,
+  type CascadeVerifyOptions,
+  type ColumnPatch,
 } from './schema-mutation-coordinator.js';
 import {
   getId,
@@ -64,10 +65,21 @@ function getMissingIds(beforeIds: unknown[], afterIds: unknown[], excludedIds: u
     .filter((id) => !excludedSet.has(id) && !afterSet.has(id));
 }
 
+function normalizeColumnVerificationValue(field: string, value: unknown): unknown {
+  if (field === 'options') return parseColumnTypeOptions(value);
+  if (field !== 'metadata' || typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
 export async function verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
   action,
   columnId,
   columnName,
+  expectedColumn,
 }: CascadeVerifyOptions) {
   const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
   const afterColumns = getPatchableColumns(tableData.columns);
@@ -84,8 +96,25 @@ export async function verifyColumnCascade(ENFYRA_API_URL, tableId, beforeIds, {
   if (action === 'delete' && afterIds.includes(String(columnId))) {
     throw new Error(`Schema cascade verification failed: column ${columnId} still exists after delete.`);
   }
-  if (action === 'update' && !afterIds.includes(String(columnId))) {
-    throw new Error(`Schema cascade verification failed: column ${columnId} was not found after update.`);
+  if (action === 'update') {
+    const updatedColumn = afterColumns.find(
+      (column) => String(getId(column)) === String(columnId),
+    );
+    if (!updatedColumn) {
+      throw new Error(`Schema cascade verification failed: column ${columnId} was not found after update.`);
+    }
+    const mismatchedFields = Object.entries(expectedColumn ?? {})
+      .filter(([, expected]) => expected !== undefined)
+      .filter(([field, expected]) => !isDeepStrictEqual(
+        normalizeColumnVerificationValue(field, updatedColumn[field]),
+        normalizeColumnVerificationValue(field, expected),
+      ))
+      .map(([field]) => field);
+    if (mismatchedFields.length > 0) {
+      throw new Error(
+        `Schema cascade verification failed: column ${columnId} did not persist fields: ${mismatchedFields.join(', ')}`,
+      );
+    }
   }
 
   return afterColumns;

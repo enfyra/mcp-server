@@ -46,6 +46,7 @@ export type CascadeVerifyOptions = {
   action: 'create' | 'update' | 'delete';
   columnId?: unknown;
   columnName?: string;
+  expectedColumn?: ColumnPatch;
   relationId?: unknown;
   propertyName?: string;
 };
