@@ -201,7 +201,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
         })),
         rest: {
           routePattern: 'Dynamic REST routes expose GET/POST at /<route-path> and PATCH/DELETE at /<route-path>/:id; there is no GET /<route-path>/:id.',
-          publicAccess: 'publicMethods controls anonymous REST access per route/method; otherwise Bearer JWT + routePermissions apply.',
+          publicAccess: 'publicMethods controls anonymous REST access per route/method; otherwise authenticated JWT or PAT credentials + routePermissions apply.',
           routeTables: sample(routeTableList),
           noRouteTables: sample(noRouteTableList),
           canonicalCrudTools: 'query_table reads route-backed tables. create_records/update_records/delete_records are the only generic write tools; pass native arrays even for one item. They preflight arrays and run sequentially.',
@@ -231,7 +231,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
           endpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`,
           schemaEndpoint: `${ENFYRA_API_URL.replace(/\/$/, '')}/graphql-schema`,
           enablement: 'A table appears in GraphQL when enfyra_graphql has an enabled row for that table. REST route availableMethods does not enable GraphQL.',
-          auth: 'GraphQL table data requires Authorization: Bearer <accessToken>; REST publicMethods do not make GraphQL table data anonymous. Anonymous root/schema probes may still return 200.',
+          auth: 'GraphQL table data requires authenticated JWT or PAT credentials; REST publicMethods do not make GraphQL table data anonymous. Anonymous root/schema probes may still return 200.',
           management: routeTables.has('enfyra_graphql')
             ? 'Use update_tables graphqlEnabled or create_records/update_records on enfyra_graphql, then reload_graphql if needed.'
             : 'Use update_tables graphqlEnabled, then reload_graphql if needed.',
@@ -410,7 +410,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
             : 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
           relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
           relationCascadeFkContract: 'When creating relations through create_tables/create_relations/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms. Add inversePropertyName only for a concrete reverse traversal such as parent deep child lists, response fields, UI sections, or aggregate sort/count.',
-          graphql: 'GraphQL query args also accept filter/sort/page/limit. Table data requires Bearer auth and table enablement via enfyra_graphql; anonymous root/schema probes may still return 200.',
+          graphql: 'GraphQL query args also accept filter/sort/page/limit. Table data requires authenticated JWT or PAT credentials and table enablement via enfyra_graphql; anonymous root/schema probes may still return 200.',
         },
         table: tableName
           ? {
@@ -561,7 +561,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
           },
           graphqlResolver: {
             runs: 'Generated GraphQL resolver delegates to dynamic repo/query services.',
-            data: ['GraphQL request context', 'Bearer auth user', 'dynamic repositories'],
+            data: ['GraphQL request context', 'authenticated user', 'dynamic repositories'],
             caveat: 'REST publicMethods do not make GraphQL table data anonymous.',
           },
           extensionVueSfc: {
@@ -606,10 +606,10 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
       'Returns the resolved API base URL for this MCP session (env ENFYRA_API_URL).',
       'Use this as the cheap first target sanity check before broad discovery or mutations.',
       'Use when the user asks which HTTP endpoint or full URL applies: combine enfyraApiUrl with paths from server instructions (GET/POST /{table}, PATCH/DELETE /{table}/{id}, no GET /{table}/{id}).',
-      'Auth: publicMethods on a route can allow a method without Bearer; otherwise JWT + routePermissions — see server instructions.',
+      'Auth: publicMethods on a route can allow a method anonymously; otherwise authenticated JWT or PAT credentials + routePermissions apply — see server instructions.',
       'If path might differ from table name, use get_all_routes before asserting a URL.',
       'Same mapping as MCP tool → HTTP: query_table=GET /table?..., create_records=sequential POST /table, update_records=sequential PATCH /table/id, delete_records=sequential DELETE /table/id.',
-      'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via enfyra_graphql/update_tables graphqlEnabled and send Bearer auth for table data queries. Anonymous root/schema probes may still return 200.',
+      'GraphQL: see graphqlHttpUrl / graphqlSchemaUrl in response; enable per table via enfyra_graphql/update_tables graphqlEnabled and send authenticated JWT or PAT credentials for table data queries. Anonymous root/schema probes may still return 200.',
     ].join(' '),
     {},
     async () => {
@@ -626,8 +626,8 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
           oneRowById: `${base}/<table_name>?filter={"<primaryKeyFromMetadata>":{"_eq":"<id>"}}&limit=1`,
         },
         auth: {
-          publicMethods: 'If the HTTP method is public for that route, no Bearer required; else Bearer JWT and routePermissions apply.',
-          graphql: 'GraphQL table data requires Bearer auth; route publicMethods do not make GraphQL table data anonymous. Anonymous root/schema probes may still return 200.',
+          publicMethods: 'If the HTTP method is public for that route, no credential is required; otherwise authenticated JWT or PAT credentials and routePermissions apply.',
+          graphql: 'GraphQL table data requires authenticated JWT or PAT credentials; route publicMethods do not make GraphQL table data anonymous. Anonymous root/schema probes may still return 200.',
           mcp: 'This server uses admin credentials from env for tools (fetchAPI).',
         },
         pathResolution: 'Confirm route path with get_all_routes or metadata — path may not equal table name.',

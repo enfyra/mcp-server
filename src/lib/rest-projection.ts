@@ -1,4 +1,4 @@
-import { getValidToken } from './auth.js';
+import { getApiTokenHeaders } from './auth.js';
 import { fetchTableMetadata } from './metadata-client.js';
 import { validateQueryContract } from './query-contract.js';
 import type { QueryContractPathReceipt } from './query-contract-types.js';
@@ -81,7 +81,7 @@ function summarizeResponse(response: RestProjectionHttpResponse, paths: QueryCon
 
 async function defaultRequest(apiUrl: string, url: string, authenticated: boolean): Promise<RestProjectionHttpResponse> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (authenticated) headers.Authorization = `Bearer ${await getValidToken(apiUrl)}`;
+  if (authenticated) Object.assign(headers, getApiTokenHeaders());
   const response = await fetch(url, { method: 'GET', headers });
   const text = await response.text();
   let body: unknown = text;

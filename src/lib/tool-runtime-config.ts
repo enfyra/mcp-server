@@ -86,7 +86,7 @@ export const CAPABILITY_AREAS = [
   {
     area: 'Auth, roles, sessions, OAuth',
     tables: ['enfyra_user', 'enfyra_role', 'enfyra_api_token', 'enfyra_session', 'enfyra_auth_header', 'enfyra_oauth_config', 'enfyra_oauth_account'],
-    workflow: 'MCP auth exchanges ENFYRA_API_TOKEN through /auth/token/exchange, then sends runtime requests as Authorization: Bearer <accessToken>. Manage coding-tool header mappings through ensure_auth_header and reorder_auth_headers.',
+    workflow: 'MCP sends ENFYRA_API_TOKEN directly through the native x-enfyra-pat header. Manage additional coding-tool header mappings through ensure_auth_header and reorder_auth_headers.',
   },
   {
     area: 'Guards and permissions',

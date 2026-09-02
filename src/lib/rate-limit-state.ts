@@ -123,9 +123,16 @@ export async function waitForRateLimitBudget(
   path: string,
   options: RateLimitDelayOptions = {},
 ): Promise<number> {
-  const delayMs = getRateLimitDelayMs(apiUrl, path, options);
-  if (delayMs > 0) {
+  let totalDelayMs = 0;
+  while (true) {
+    const delayMs = getRateLimitDelayMs(apiUrl, path, {
+      ...options,
+      nowMs: options.nowMs ?? Date.now(),
+    });
+    if (delayMs <= 0) break;
     await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    totalDelayMs += delayMs;
+    if (options.nowMs !== undefined) break;
   }
 
   const key = stateKey(apiUrl, path);
@@ -135,7 +142,7 @@ export async function waitForRateLimitBudget(
     if (typeof state.used === 'number') state.used += 1;
     states.set(key, state);
   }
-  return delayMs;
+  return totalDelayMs;
 }
 
 export function clearRateLimitState(): void {

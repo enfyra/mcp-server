@@ -129,7 +129,7 @@ npx @enfyra/mcp-server@latest config [options]
 
 The MCP server starts with a compact guided catalog. For a hidden guided operation, call `search_enfyra_tools` to load its exact schema, then call `execute_enfyra_tool`; low-level tools remain hidden. No tool-loading configuration is needed. Re-running `config` preserves existing `ENFYRA_MCP_DYNAMIC_TOOLS` and `ENFYRA_MCP_PROFILE` values. Use `--static-tools` only for a compatibility client that needs the complete direct manifest.
 
-The API token is exchanged for a short-lived access token at runtime. It is not sent directly as a Bearer token.
+The MCP sends this PAT directly through Enfyra Server's native `x-enfyra-pat` header. It does not exchange the PAT for a short-lived access token or send it as a Bearer token.
 
 ## Verify the Connection
 

@@ -12,7 +12,6 @@ import {
   applyRuntimeCacheSocketToken,
   isRuntimeCacheSocketAuthError,
   runtimeCacheSocketConnection,
-  runtimeCacheSocketReauthDelay,
 } from '../dist/lib/runtime-cache-socket.js';
 
 test('runtime cache reports hit rate and timestamped reload recovery without recording paths', () => {
@@ -45,23 +44,23 @@ test('runtime cache socket uses the authenticated Nuxt bridge namespace', () => 
   assert.equal(connection.url, 'http://localhost:3000/ws/enfyra-admin');
   assert.equal(connection.options.path, '/ws/socket.io');
   assert.equal(connection.options.reconnection, false);
-  assert.deepEqual(connection.options.auth, { token: 'access-token' });
+  assert.deepEqual(connection.options.auth, {});
   assert.deepEqual(connection.options.extraHeaders, {
-    Authorization: 'Bearer access-token',
+    'x-enfyra-pat': 'access-token',
   });
 });
 
 test('runtime cache socket replaces both handshake credentials before a manual reconnect', () => {
   const socket = {
     auth: { token: 'expired-token' },
-    io: { opts: { extraHeaders: { Authorization: 'Bearer expired-token' } } },
+    io: { opts: { extraHeaders: { 'x-enfyra-pat': 'expired-token' } } },
   };
 
   applyRuntimeCacheSocketToken(socket, 'fresh-token');
 
-  assert.deepEqual(socket.auth, { token: 'fresh-token' });
+  assert.deepEqual(socket.auth, {});
   assert.deepEqual(socket.io.opts.extraHeaders, {
-    Authorization: 'Bearer fresh-token',
+    'x-enfyra-pat': 'fresh-token',
   });
 });
 
@@ -89,13 +88,4 @@ test('runtime cache socket recognizes bridge and backend authentication failures
     true,
   );
   assert.equal(isRuntimeCacheSocketAuthError(new Error('timeout')), false);
-});
-
-test('runtime cache socket schedules credential rotation before finite token expiry', () => {
-  const now = 1_000_000;
-
-  assert.equal(runtimeCacheSocketReauthDelay(now + 60_000, now), 55_000);
-  assert.equal(runtimeCacheSocketReauthDelay(now + 4_000, now), 0);
-  assert.equal(runtimeCacheSocketReauthDelay(Infinity, now), null);
-  assert.equal(runtimeCacheSocketReauthDelay(null, now), null);
 });

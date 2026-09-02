@@ -3,7 +3,6 @@
  */
 
 // Import modules
-import { getValidToken } from './auth.js';
 import { fetchAPI } from './fetch.js';
 import {
   fetchMetadataTables
@@ -71,7 +70,6 @@ function withMethodNames(records, methodIdNameMap, field = 'methods') {
 }
 
 export async function collectRestDefinitionState(tableRef?: unknown) {
-  await getValidToken(ENFYRA_API_URL);
   const [
     metadataContext,
     routes,

@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 // Import modules
-import { getValidToken } from './auth.js';
+import { getApiTokenHeaders } from './auth.js';
 import {
   AnyRecord,
   SCRIPT_BACKED_TABLES,
@@ -310,7 +310,7 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
         query: z.string().optional().describe('Optional JSON-encoded query object string, e.g. {"limit":1,"filter":{"status":{"_eq":"ready"}}}; merged onto the path query string.'),
         body: z.string().optional().describe('Optional JSON request body string. Forwarded unchanged for POST, PUT, PATCH, and DELETE; it is omitted only for GET and HEAD. Example: {"title":"Example"}.'),
         headers: z.string().optional().describe('Optional JSON-encoded headers object string.'),
-        useAuth: z.boolean().optional().default(true).describe('Attach MCP admin Bearer token. Set false to test public access.'),
+        useAuth: z.boolean().optional().default(true).describe('Attach the MCP API token. Set false to test public access.'),
         timeout: z.number().int().positive().optional().describe('Timeout (ms).'),
       },
       async ({ method, path, query, body, headers, useAuth, timeout }) => {
@@ -342,7 +342,7 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
           ...(parseJsonArg(headers, {}) || {}),
         };
         if (useAuth) {
-          requestHeaders.Authorization = `Bearer ${await getValidToken(ENFYRA_API_URL)}`;
+          Object.assign(requestHeaders, getApiTokenHeaders());
         }
     
         const started = Date.now();
@@ -389,12 +389,12 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
         query: z.string().describe('GraphQL query or mutation document.'),
         variables: z.record(z.any()).optional().describe('GraphQL variables as a native JSON object.'),
         operationName: z.string().optional().describe('Optional operation name when the document contains multiple operations.'),
-        useAuth: z.boolean().optional().default(true).describe('Attach the MCP admin Bearer token. Set false to verify anonymous GraphQL behavior.'),
+        useAuth: z.boolean().optional().default(true).describe('Attach the MCP API token. Set false to verify anonymous GraphQL behavior.'),
         timeout: z.number().int().positive().optional().describe('Timeout (ms).'),
       },
       async ({ query, variables, operationName, useAuth, timeout }) => {
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (useAuth) headers.Authorization = `Bearer ${await getValidToken(ENFYRA_API_URL)}`;
+        if (useAuth) Object.assign(headers, getApiTokenHeaders());
         const started = Date.now();
         const response = await fetchTestRequest(`${ENFYRA_API_URL.replace(/\/$/, '')}/graphql`, {
           method: 'POST',

@@ -107,6 +107,49 @@ test('rate-limit state returns bounded jittered delay when remaining quota is ze
   );
 });
 
+test('rate-limit wait repeats bounded sleeps until the advertised retry window has elapsed', async () => {
+  clearRateLimitState();
+  const originalNow = Date.now;
+  const originalSetTimeout = globalThis.setTimeout;
+  let nowMs = 1_785_690_473_000;
+  const sleeps = [];
+
+  Date.now = () => nowMs;
+  globalThis.setTimeout = (callback, delay) => {
+    sleeps.push(delay);
+    nowMs += delay;
+    callback();
+    return 0;
+  };
+
+  try {
+    observeRateLimitHeaders(
+      'https://example.test/api',
+      '/orders',
+      429,
+      new Headers({
+        'Retry-After': '12',
+        'X-RateLimit-Remaining': '0',
+        'X-RateLimit-Reset': String(nowMs + 12_000),
+      }),
+      nowMs,
+    );
+
+    const waitedMs = await waitForRateLimitBudget(
+      'https://example.test/api',
+      '/orders',
+      { maxDelayMs: 5_000, jitterMs: 0 },
+    );
+
+    assert.deepEqual(sleeps, [5_000, 5_000, 2_000]);
+    assert.equal(waitedMs, 12_000);
+  } finally {
+    Date.now = originalNow;
+    globalThis.setTimeout = originalSetTimeout;
+    clearRateLimitState();
+  }
+});
+
 test('fetchAPI reads 429 headers, retries once, and updates cached quota from success', async () => {
   const originalFetch = globalThis.fetch;
   let routeCalls = 0;

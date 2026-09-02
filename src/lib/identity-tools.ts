@@ -4,7 +4,7 @@
 
 import { z } from 'zod';
 // Import modules
-import { exchangeApiToken, getTokenExpiry, initAuth } from './auth.js';
+import { initAuth } from './auth.js';
 import {
   DEFAULT_ME_PERMISSION_FIELDS,
   ENFYRA_API_TOKEN,
@@ -71,16 +71,14 @@ export function registerIdentityTools(server, ENFYRA_API_URL) {
     return jsonContent({ action: alreadyAssigned ? 'unchanged' : 'user_role_ensured', user: { id: getId(verified), email: verified?.email ?? null }, addedRole: { id: resolvedRoleId, name: role.name ?? null }, roles: Array.isArray(verified?.roles) ? verified.roles.map((item) => ({ id: getId(item), name: item?.name ?? null })) : [] });
   });
 
-  server.tool('login', 'Force authentication to Enfyra and get a new access token', {
+  server.tool('login', 'Configure and verify the Enfyra API token used by this MCP process', {
     apiToken: z.string().optional().describe('API token for MCP and automation'),
   }, async ({ apiToken }) => {
     const token = apiToken || ENFYRA_API_TOKEN;
     if (token) {
       initAuth(ENFYRA_API_URL, token);
-      await exchangeApiToken(ENFYRA_API_URL, token);
-      const expiry = getTokenExpiry();
-      const expiryLabel = expiry === Infinity ? 'no expiration' : new Date(expiry).toISOString();
-      return { content: [{ type: 'text', text: `Authenticated with API token.\nToken expires: ${expiryLabel}` }] };
+      await fetchAPI(ENFYRA_API_URL, '/me?fields=id');
+      return { content: [{ type: 'text', text: 'Authenticated with API token.' }] };
     }
     throw new Error('ENFYRA_API_TOKEN required');
   });

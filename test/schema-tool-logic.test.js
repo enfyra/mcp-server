@@ -463,22 +463,17 @@ test('primary column definition follows metadata dbType without pkField', () => 
   });
 });
 
-test('fetchAPI exchanges ENFYRA_API_TOKEN before authenticated requests', async () => {
+test('fetchAPI sends ENFYRA_API_TOKEN directly through the native ESV PAT header', async () => {
   const originalFetch = global.fetch;
   const calls = [];
 
   global.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), headers: init.headers || [] });
-    if (String(url).endsWith('/auth/token/exchange')) {
-      assert.equal(JSON.parse(init.body).apiToken, 'efy_pat_test');
-      return jsonResponse({ accessToken: 'jwt-access-token', expTime: Date.now() + 60_000 });
-    }
     if (String(url).endsWith('/me')) {
-      const authHeader = Array.isArray(init.headers)
-        ? init.headers.find(([key]) => key === 'Authorization')?.[1]
-        : init.headers?.Authorization;
-      assert.equal(authHeader, 'Bearer jwt-access-token');
-      assert.notEqual(authHeader, 'Bearer efy_pat_test');
+      const patHeader = Array.isArray(init.headers)
+        ? init.headers.find(([key]) => key.toLowerCase() === 'x-enfyra-pat')?.[1]
+        : init.headers?.['x-enfyra-pat'];
+      assert.equal(patHeader, 'efy_pat_test');
       return jsonResponse({ data: [{ id: 1 }] });
     }
     return jsonResponse({ message: 'not found' }, 404);
@@ -490,8 +485,8 @@ test('fetchAPI exchanges ENFYRA_API_TOKEN before authenticated requests', async 
     const result = await fetchAPI('https://example.test/api', '/me');
 
     assert.deepEqual(result, { data: [{ id: 1 }] });
-    assert.equal(calls[0].url, 'https://example.test/api/auth/token/exchange');
-    assert.equal(calls[1].url, 'https://example.test/api/me');
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://example.test/api/me');
   } finally {
     resetTokens();
     global.fetch = originalFetch;
@@ -534,26 +529,14 @@ test('fetchAPI caches reloadable control-plane GET responses and clears their do
   }
 });
 
-test('fetchAPI retries once after stale exchanged token is rejected', async () => {
+test('fetchAPI does not replay a rejected request with the same PAT', async () => {
   const originalFetch = global.fetch;
   const calls = [];
-  let exchangeCount = 0;
 
   global.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), headers: init.headers || [] });
-    if (String(url).endsWith('/auth/token/exchange')) {
-      exchangeCount += 1;
-      return jsonResponse({ accessToken: `jwt-${exchangeCount}`, expTime: Date.now() + 60_000 });
-    }
     if (String(url).endsWith('/me')) {
-      const authHeader = Array.isArray(init.headers)
-        ? init.headers.find(([key]) => key === 'Authorization')?.[1]
-        : init.headers?.Authorization;
-      if (authHeader === 'Bearer jwt-1') {
-        return jsonResponse({ message: 'expired' }, 401);
-      }
-      assert.equal(authHeader, 'Bearer jwt-2');
-      return jsonResponse({ data: [{ id: 1 }] });
+      return jsonResponse({ message: 'invalid token' }, 401);
     }
     return jsonResponse({ message: 'not found' }, 404);
   };
@@ -561,36 +544,28 @@ test('fetchAPI retries once after stale exchanged token is rejected', async () =
   try {
     resetTokens();
     initAuth('https://example.test/api', 'efy_pat_test');
-    const result = await fetchAPI('https://example.test/api', '/me');
-
-    assert.deepEqual(result, { data: [{ id: 1 }] });
-    assert.equal(exchangeCount, 2);
-    assert.equal(calls.filter((call) => call.url.endsWith('/me')).length, 2);
+    await assert.rejects(
+      () => fetchAPI('https://example.test/api', '/me'),
+      /API error \(401\):/,
+    );
+    assert.equal(calls.filter((call) => call.url.endsWith('/me')).length, 1);
   } finally {
     resetTokens();
     global.fetch = originalFetch;
   }
 });
 
-test('fetchAPI refreshes short-lived exchanged tokens before expiry', async () => {
+test('fetchAPI reuses the configured PAT without exchange or refresh requests', async () => {
   const originalFetch = global.fetch;
-  const originalNow = Date.now;
   const calls = [];
-  let now = Date.parse('2026-06-22T12:00:00.000Z');
-  let exchangeCount = 0;
 
-  Date.now = () => now;
   global.fetch = async (url, init = {}) => {
     calls.push({ url: String(url), headers: init.headers || [] });
-    if (String(url).endsWith('/auth/token/exchange')) {
-      exchangeCount += 1;
-      return jsonResponse({ accessToken: `jwt-${exchangeCount}`, expTime: now + 60_000 });
-    }
     if (String(url).endsWith('/me')) {
-      const authHeader = Array.isArray(init.headers)
-        ? init.headers.find(([key]) => key === 'Authorization')?.[1]
-        : init.headers?.Authorization;
-      return jsonResponse({ authHeader });
+      const patHeader = Array.isArray(init.headers)
+        ? init.headers.find(([key]) => key.toLowerCase() === 'x-enfyra-pat')?.[1]
+        : init.headers?.['x-enfyra-pat'];
+      return jsonResponse({ patHeader });
     }
     return jsonResponse({ message: 'not found' }, 404);
   };
@@ -599,17 +574,11 @@ test('fetchAPI refreshes short-lived exchanged tokens before expiry', async () =
     resetTokens();
     initAuth('https://example.test/api', 'efy_pat_test');
 
-    assert.deepEqual(await fetchAPI('https://example.test/api', '/me'), { authHeader: 'Bearer jwt-1' });
-    now = Date.parse('2026-06-22T12:00:39.000Z');
-    assert.deepEqual(await fetchAPI('https://example.test/api', '/me'), { authHeader: 'Bearer jwt-1' });
-    now = Date.parse('2026-06-22T12:00:41.000Z');
-    assert.deepEqual(await fetchAPI('https://example.test/api', '/me'), { authHeader: 'Bearer jwt-2' });
-
-    assert.equal(exchangeCount, 2);
-    assert.equal(calls.filter((call) => call.url.endsWith('/auth/token/exchange')).length, 2);
+    assert.deepEqual(await fetchAPI('https://example.test/api', '/me'), { patHeader: 'efy_pat_test' });
+    assert.deepEqual(await fetchAPI('https://example.test/api', '/me'), { patHeader: 'efy_pat_test' });
+    assert.equal(calls.length, 2);
   } finally {
     resetTokens();
-    Date.now = originalNow;
     global.fetch = originalFetch;
   }
 });

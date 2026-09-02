@@ -3,14 +3,14 @@
  * Handles API requests with auth, timeout, and error handling
  */
 
-import { getValidToken, hasApiToken, resetTokens } from './auth.js';
+import { getApiTokenHeaders } from './auth.js';
 import {
   getRateLimitState,
   observeRateLimitHeaders,
   waitForRateLimitBudget,
   type RateLimitState,
 } from './rate-limit-state.js';
-import { clearRuntimeCache, clearRuntimeCacheDomains, getRuntimeCache, isRuntimeCacheableGet, runtimeCacheDomainsForMutationPath, setRuntimeCache } from './runtime-cache.js';
+import { clearRuntimeCacheDomains, getRuntimeCache, isRuntimeCacheableGet, runtimeCacheDomainsForMutationPath, setRuntimeCache } from './runtime-cache.js';
 
 // Timeout configuration
 const FETCH_TIMEOUT = 30000; // 30 seconds
@@ -68,10 +68,9 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
   }
 
   async function requestWithCurrentToken() {
-    const token = await getValidToken(apiUrl);
     const headersList: [string, string][] = [
       ['Content-Type', 'application/json'],
-      ['Authorization', `Bearer ${token}`],
+      ...Object.entries(getApiTokenHeaders()),
     ];
 
     if (requestOptions.headers) {
@@ -108,12 +107,6 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
   await waitForRateLimitBudget(apiUrl, path);
 
   let res = await requestWithCurrentToken();
-  if (res.status === 401 && hasApiToken()) {
-    clearRuntimeCache('auth');
-    resetTokens();
-    res = await requestWithCurrentToken();
-  }
-
   let rateLimitState = observeRateLimitHeaders(apiUrl, path, res.status, res.headers);
   for (
     let retryCount = 0;
