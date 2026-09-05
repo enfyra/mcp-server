@@ -501,10 +501,10 @@ test('MCP test endpoints use a bounded one-minute default', () => {
   assert.match(source, /timeout: z\.number\(\)\.int\(\)\.positive\(\)/);
 });
 
-test('mcp log search matches dashed and dotted app log filenames', () => {
+test('mcp log search uses database tables', () => {
   const entry = readEntrySource();
-  assert.match(entry, /\^app\[\.-\]/);
-  assert.match(entry, /\^error\[\.-\]/);
+  assert.match(entry, /enfyra_system_error/);
+  assert.match(entry, /enfyra_user_log/);
 });
 
 test('server instructions stay compact and route details to tools', () => {

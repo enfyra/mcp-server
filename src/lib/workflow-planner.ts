@@ -161,8 +161,8 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
       ];
     case 'logs-debug':
       return [
-        step(1, 'search_logs', 'Search the narrow log pattern/time clue.'),
-        step(2, 'tail_log', 'Tail only the relevant log when live reproduction is needed.'),
+        step(1, 'search_system_errors', 'Read structured executor crashes or search the narrow log pattern/time clue.'),
+        step(2, 'search_user_logs', 'Read @LOGS entries using the same correlation ID.'),
       ];
     case 'auth-context':
       return [
