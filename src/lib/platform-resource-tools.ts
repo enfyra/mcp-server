@@ -140,7 +140,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_page_extension',
-      'Business operation: create or update one page extension attached to an existing menu. Validates before save, then re-reads and verifies the exact saved source and menu wiring. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work.',
+      'Business operation: create or update one page extension attached to an existing menu. Validates before save, then re-reads and verifies the exact saved source and menu wiring. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work. Keep shell, routing, and top-level coordination here; move independent feature sections or repeated panels into focused widget extensions with explicit props/events.',
       {
         name: z.string().describe('Extension unique name.'),
         code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC extension code. Raw source is preferred; use sourceFile/sourceResourceUri for a previously inspected artifact.'),
@@ -161,7 +161,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_global_extension',
-      'Business operation: create or update one global shell extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work.',
+      'Business operation: create or update one global shell extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work. Keep one cohesive shell-wide registration or related registration group per global extension; split unrelated global behaviors into separate records.',
       {
         name: z.string().describe('Extension unique name.'),
         code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC extension code. Raw source is preferred; use sourceFile/sourceResourceUri for a previously inspected artifact.'),
@@ -181,7 +181,7 @@ export function registerPlatformResourceTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_widget_extension',
-      'Business operation: create or update one widget extension. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work.',
+      'Business operation: create or update one focused widget extension with one clear UI/data/interaction contract. Validates before save, rejects menu coupling, then re-reads and verifies the exact saved source. Pass sourceFile/sourceResourceUri from an inspected artifact to avoid sending the full SFC through the model call. Call get_extension_theme_contract first for UI work. Compose it from a page through a numeric Widget id and explicit props/events.',
       {
         name: z.string().describe('Extension unique name.'),
         code: z.preprocess(normalizeEscapedVueSource, z.string()).optional().describe('Vue SFC extension code. Raw source is preferred; use sourceFile/sourceResourceUri for a previously inspected artifact.'),

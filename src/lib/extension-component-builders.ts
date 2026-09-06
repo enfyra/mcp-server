@@ -468,6 +468,7 @@ export function buildExtensionWidgetSnippet(input) {
     warnings: typeof input.id === 'number' ? [] : ['Widget ids should be numeric enfyra_extension ids; do not pass extension name or extensionId string.'],
     contract: [
       'Widget :id is the numeric enfyra_extension id, not name or extensionId.',
+      'Use a widget extension as the decomposition boundary for an independent page section or repeated panel that should be reviewed, enabled, and maintained separately.',
       'Pass safe props/events; keep page-level mutation and modal ownership in the page unless the widget intentionally owns the full workflow.',
     ],
   };

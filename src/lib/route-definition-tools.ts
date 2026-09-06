@@ -154,6 +154,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         'Call discover_script_contexts first. For explicit user-facing table repos use #secure.table_name or @REPOS.secure.table_name; use #table_name/@REPOS.table_name only for intentional trusted internal access.',
         'Or use $ctx directly: $ctx.$body, $ctx.$repos.main.find(), $ctx.$helpers.$bcrypt.hash(), etc.',
         'require("pkg") works for installed Server packages. console.log() writes to $share.$logs.',
+        'When the source mixes lifecycle responsibilities or becomes difficult to review, keep cohesive endpoint-specific logic and small local helpers here, but decompose shared gating/normalization into named pre-hooks, response or best-effort work into named post-hooks, and durable work into flows.',
       ].join(' '),
       {
         routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
@@ -236,6 +237,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         'Macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503.',
         'For canonical table reads, merge security filters into @QUERY.filter and preserve @QUERY.fields/deep/sort/limit/page/meta/aggregate.',
         'If the hook returns a value, that value becomes the response (handler is skipped).',
+        'Keep one responsibility per pre-hook. Split unrelated shared policies into separate named hooks with explicit methods and priorities instead of growing one god hook; keep endpoint-specific business orchestration in the handler.',
       ].join(' '),
       {
         routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),
@@ -299,6 +301,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         'Use `routeId` from `create_route` or `get_all_routes` — do not create a new table just to get a route id.',
         'Macros: @DATA, @STATUS, @ERROR, @BODY, @QUERY, @USER, @SHARE, @API (post-hooks always run; on error path @ERROR is set, @DATA is null).',
         'Mutate @DATA / $ctx.$data in place, or return a value: if the hook returns anything other than undefined, that value replaces $ctx.$data as the response payload.',
+        'Keep one responsibility per post-hook. Split unrelated response, audit, or best-effort concerns into separate named hooks with explicit methods and priorities; move required durable side effects to flows.',
       ].join(' '),
       {
         routeId: z.union([z.string(), z.number()]).describe('Route definition ID'),

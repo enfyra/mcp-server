@@ -219,6 +219,8 @@ export async function runExtensionWorkflow(apiUrl, opts) {
       'Call get_extension_theme_contract before generating or reviewing extension UI.',
       'For high-contract UI/runtime code, call build_extension_ui after extension acknowledgement before patching raw Vue: drawer, modal, page shell, permission gate, empty state, resource list, form editor, widget, menu notification, account panel item, tabs, upload modal, api usage, notify, runtime review, theme classes, theme review, or full review.',
       'Use build_extension_ui kind=api_usage, notify, theme_classes, runtime_review, theme_review, or review instead of hand-writing those contracts from memory.',
+      'Assess SFC cohesion before saving. Keep page shell, routing, and top-level coordination in the page; split independent feature sections, repeated panels, or unrelated API/state domains into focused widget extensions composed by numeric id with explicit props/events.',
+      'Keep each widget focused on one UI/data/interaction contract, and split unrelated shell-wide registrations into separate global extension records. Do not split tightly coupled modal/form state merely to reduce file length.',
       'Extension validation rejects common field controls without class="w-full" unless intentionally marked data-compact or data-inline.',
       'PermissionGate renders the permitted slot directly and is UX-only; backend permissions and owner checks remain authoritative.',
       'For menu/account-panel notifications, use counts only when the signal source already owns an exact count; otherwise use a dot/chip for new attention.',

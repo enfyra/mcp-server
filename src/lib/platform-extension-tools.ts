@@ -148,6 +148,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         'When only isEnabled changes, it performs a lightweight metadata PATCH without source validation or runtime verification.',
         'Use this instead of validate_extension_code followed by update_record when editing an existing page/widget/global extension.',
         'Call get_extension_theme_contract first when generating or reviewing UI.',
+        'If a page or global SFC contains independent feature areas or unrelated API/state domains, split them into focused widget extensions or global extension records before replacing the full source; keep tightly coupled modal/form state in its owner.',
       ].join(' '),
       {
         id: z.union([z.string(), z.number()]).optional().describe('Existing extension id. Provide id or name.'),
@@ -228,6 +229,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         'Lazy gateway for Enfyra admin extension UI builders.',
         'Use this after get_enfyra_required_knowledge(scope="extension") when a high-contract extension UI snippet is needed.',
         'It keeps guided startup small by dispatching drawer, modal, page_shell, permission_gate, empty_state, resource_list, resource_grid, form_editor, widget, menu_notification, account_panel_item, tabs, upload_modal, api_usage, notify, confirm, runtime_review, theme_classes, theme_review, or review internally instead of exposing every builder tool up front.',
+        'For a large page, decompose independent feature sections into widget extension records and embed them with kind=widget; use explicit props/events and keep page shell, routing, and top-level coordination in the page extension.',
       ].join(' '),
       {
         kind: z.enum([
@@ -521,6 +523,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
       [
         'Generate a Widget snippet for reusing a widget extension inside an Enfyra page extension.',
         'Use this so agents pass numeric widget ids and keep prop/event ownership explicit.',
+        'Use widget extensions as the supported decomposition boundary when independent page sections or repeated panels should be reviewed, enabled, and maintained separately; do not invent static imports or local .vue files.',
       ].join(' '),
       {
         id: z.union([z.number(), z.string()]).describe('Numeric enfyra_extension widget id. Strings are allowed but return a warning because names/extensionId are wrong for Widget.'),
@@ -626,6 +629,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         'With apply=false it validates code, reads live menu/extension state, and returns pending steps.',
         'With apply=true it applies exactly the next pending step. With applyAll=true it advances all currently safe pending steps.',
         'Call get_extension_theme_contract before generating or reviewing UI.',
+        'Before saving a large SFC, split independent feature sections or unrelated API/state domains into focused widget extensions composed by numeric id with explicit props/events; split unrelated shell-wide registrations into separate global extensions.',
       ].join(' '),
       {
         name: z.string().describe('Extension unique name.'),

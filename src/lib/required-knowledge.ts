@@ -2,7 +2,7 @@ export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY
 export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-export const REQUIRED_KNOWLEDGE_VERSION = '2026-08-07.permission-exposure-severity-contract';
+export const REQUIRED_KNOWLEDGE_VERSION = '2026-09-07.composition-decomposition-contract';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -294,6 +294,18 @@ const DYNAMIC_CODE_SECTIONS = [
     ],
   },
   {
+    id: 'dynamic-code-decomposition',
+    rules: [
+      'Use cohesion and runtime ownership, not a hard line-count threshold, to decide when dynamic code must be decomposed. If a script mixes unrelated responsibilities or cannot be reviewed, tested, and changed as one unit, split it before saving.',
+      'For route behavior, keep endpoint-specific validation, business decisions, repository orchestration, and response ownership in the handler. Use small local helper functions for cohesive handler internals; extract shared gating or normalization into multiple named pre-hooks and response shaping or best-effort work into named post-hooks. Put durable or retryable side effects in flows.',
+      'Keep one responsibility per hook. When a pre-hook or post-hook grows across unrelated concerns, create separate named hooks with explicit method scopes and priorities, then test their order, pre-hook short-circuit behavior, and post-hook error behavior independently. Do not move handler-owned business logic into hooks solely to shorten the handler.',
+      'For flows, prefer multiple named flow steps with one business operation per step. Use fixed query/create/update/delete/http/sleep/trigger/log steps when their static contract is sufficient, and keep each script or condition step focused on the dynamic behavior that fixed steps cannot express. Preserve one transaction boundary when operations truly must be atomic.',
+      'For websocket code, keep the gateway source focused on connection lifecycle, authentication, and room/setup concerns. Put each event contract in its own websocket event record, and move durable, retryable, or scheduled side effects into a flow instead of growing the connection or event script.',
+      'Keep OAuth provisioning and bootstrap scripts focused on their own lifecycle contract. Use local helper functions for cohesive transformations, and split independent work into supported records or flows only when runtime ordering and atomicity remain explicit; do not invent static imports or unsupported shared modules.',
+      'After decomposition, inspect and verify every saved handler, hook, flow step, websocket record, OAuth source, or bootstrap source at its own runtime boundary. A passing test for one unit does not prove the ordering or failure behavior of the composed workflow.',
+    ],
+  },
+  {
     id: 'hook-layering-contract',
     rules: [
       'Do not put every concern into one hook or handler. Split the request lifecycle by responsibility: Guard Engine for request gating and abuse controls, pre-hook for shared pre-handler policy/normalization, handler for endpoint-specific business orchestration, post-hook for response or best-effort side effects, column rules for deterministic body validation, field permissions for field visibility, and flows for durable asynchronous work.',
@@ -360,6 +372,18 @@ const DYNAMIC_CODE_SECTIONS = [
 ];
 
 const EXTENSION_SECTIONS = [
+  {
+    id: 'extension-composition',
+    rules: [
+      'Use cohesion and ownership, not a hard line-count threshold, to decide when an extension must be decomposed. If one SFC contains independent feature areas, unrelated API/state domains, or repeated panels that cannot be reviewed and changed safely as one unit, split it before saving.',
+      'A page extension owns menu/shell wiring, route-level layout, and top-level coordination. Split independent feature sections into focused widget extensions, create and verify each widget record separately, then compose them in the page with <Widget :id="numericExtensionId" />.',
+      'Connect page and widget extensions through explicit props and events. Give each widget one clear UI/data/interaction contract; do not let a widget reach into page-local state implicitly or duplicate page-owned orchestration.',
+      'Keep tightly coupled drawers, modals, forms, and small presentational sections inside the owning page or widget. Do not create a widget for trivial markup or split a workflow whose state and mutation lifecycle must remain atomic.',
+      'Keep a global extension focused on one shell-wide registration or one cohesive group of registrations. Split unrelated menu notifications, account-panel items, or other global behaviors into separate global extension records so they can be inspected, enabled, and maintained independently.',
+      'Extension SFCs do not support static imports. Use Enfyra widget extension records as the maintainable composition boundary instead of inventing local .vue files or unsupported component imports.',
+      'Search, inspect, validate, save, and verify each page, widget, or global extension independently, then verify the composed page and its live API/permission behavior in a signed-in browser.',
+    ],
+  },
   {
     id: 'theme-contract-first',
     rules: [

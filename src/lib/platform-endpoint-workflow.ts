@@ -421,6 +421,10 @@ export async function runApiEndpointWorkflow(apiUrl, opts) {
     operations: operations.map(summarizeWorkflowOperation),
     complete: latestSteps.every((item) => ['completed', 'skipped'].includes(item.status)),
     nextSteps,
+    guidance: [
+      'Assess handler cohesion before saving. Keep endpoint-specific validation, business decisions, repository orchestration, and small local helpers in the handler.',
+      'When lifecycle concerns are independently owned, use named pre-hooks for shared gating/normalization, named post-hooks for response or best-effort work, and flows for durable or retryable side effects. Do not move business logic into hooks solely to shorten the handler.',
+    ],
     cleanupHints: latestState.endpoint.routeId
       ? [
         `Use delete_route({ routeId: ${JSON.stringify(latestState.endpoint.routeId)}, confirm: false }) to preview route-owned handlers, hooks, guards, and permissions before cleanup.`,

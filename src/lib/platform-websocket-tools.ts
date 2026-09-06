@@ -20,7 +20,7 @@ import { materializeSourceInput } from './source-artifacts.js';
 export function registerPlatformWebsocketTools(server, ENFYRA_API_URL) {
   server.tool(
       'ensure_websocket_gateway',
-      'Business operation: create or update an Enfyra Socket.IO gateway. Connection handler sourceCode is validated before save.',
+      'Business operation: create or update an Enfyra Socket.IO gateway. Connection handler sourceCode is validated before save. Keep it focused on connection lifecycle, authentication, and room/setup concerns; put each message behavior in its own websocket event record and durable or retryable work in a flow.',
       {
         path: z.string().describe('Gateway namespace/path, e.g. /chat.'),
         sourceCode: z.string().optional().describe('Optional connection handler dynamic script sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
@@ -57,7 +57,7 @@ export function registerPlatformWebsocketTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_websocket_event',
-      'Business operation: create or update one websocket event handler. It resolves gateway path/id and validates sourceCode before save.',
+      'Business operation: create or update one websocket event handler. It resolves gateway path/id and validates sourceCode before save. Keep one event contract and one cohesive response behavior in this record; split unrelated event names into separate records and move durable or retryable side effects into flows.',
       {
         gatewayPath: z.string().optional().describe('Gateway path, e.g. /chat. Use gatewayPath or gatewayId.'),
         gatewayId: z.union([z.string(), z.number()]).optional().describe('Gateway id. Use gatewayPath or gatewayId.'),

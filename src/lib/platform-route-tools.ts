@@ -279,6 +279,7 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
         'Use this when an LLM is building or changing endpoint behavior and should follow live nextSteps instead of guessing raw metadata mutations.',
         'With apply=false it validates sourceCode, blocks canonical-route collisions, reviews explicit repository metadata/security boundaries, reads live route/handler/access state, and returns pending steps.',
         'With apply=true it applies only the next pending step, then returns a fresh plan. With applyAll=true it advances all currently safe pending steps.',
+        'Before saving a hard-to-review handler, decompose shared gating/normalization into named pre-hooks, response or best-effort work into named post-hooks, and durable work into flows; keep cohesive endpoint-specific business orchestration in the handler.',
       ].join(' '),
       {
         path: z.string().describe('Custom route path, e.g. /sum. Must not be a full URL.'),
@@ -315,6 +316,7 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
         'Use this one-shot helper only when the endpoint contract is already clear and no authenticated route-permission step is needed in the same operation, such as a simple public webhook or private admin-only utility that will be granted separately.',
         'It creates the route without mainTableId, ensures the method is available, validates sourceCode, creates or overwrites the route handler, optionally makes the method public, reloads routes, and can smoke-test the endpoint.',
         'For sourceCode, call discover_script_contexts first. Use #secure.table_name or @REPOS.secure.table_name for explicit user-facing table access; reserve #table_name/@REPOS.table_name for intentional trusted internal access.',
+        'If the handler mixes lifecycle responsibilities or is difficult to maintain as one unit, decompose it through named pre-hooks, post-hooks, and flows according to ownership; keep cohesive endpoint-specific logic and small local helpers in the handler.',
         'Use table/schema tools separately when the user needs persisted data. This tool is for custom behavior endpoints.',
       ].join(' '),
       {

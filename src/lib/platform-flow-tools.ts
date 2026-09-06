@@ -29,6 +29,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
         'For a fully specified, non-destructive flow, use apply=true to create/update the flow and all steps sequentially in one call. Use apply=false only when step types or risk need review.',
         'Prefer this over choosing individual ensure_*_flow_step tools in guided mode.',
         'Fixed query/create/update/delete/http/sleep/trigger/log config is static in current ESV and does not interpolate @FLOW_PAYLOAD/@FLOW_LAST/@FLOW; use a focused script step for runtime values.',
+        'Keep one business operation per step. Split long or mixed-responsibility script logic into named fixed/script/condition steps, or a triggered child flow for a cohesive reusable unit, while preserving operations that truly require one atomic transaction boundary.',
       ].join(' '),
       {
         name: z.string().describe('Flow name. Existing flow with this name is updated.'),
@@ -209,7 +210,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_script_flow_step',
-      'Business operation: create or update one script flow step. Use this for JavaScript/TypeScript flow logic instead of choosing type=script manually.',
+      'Business operation: create or update one focused script flow step. Use this for JavaScript/TypeScript flow logic instead of choosing type=script manually. If the source mixes multiple business operations or becomes hard to test, split it into named fixed/script/condition steps or a triggered child flow; keep truly atomic repository mutations in one transaction boundary.',
       {
         flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
         flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
@@ -233,7 +234,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_condition_flow_step',
-      'Business operation: create or update one condition flow step. Use this for dynamic conditional branching instead of choosing type=condition manually.',
+      'Business operation: create or update one focused condition flow step. Use this for dynamic conditional branching instead of choosing type=condition manually. Keep branching decisions separate from unrelated mutations or side effects, and split those into later named steps.',
       {
         flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
         flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
