@@ -177,6 +177,7 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       'Update sourceCode on a script-backed record without forcing the caller to JSON-escape long code.',
       'Pass sourceFile or sourceResourceUri from a prior inspect when the reviewed artifact is the intended full replacement; the MCP process reads it without echoing the source through the model call.',
       'Use this for enfyra_flow_step, enfyra_route_handler, enfyra_pre_hook, enfyra_post_hook, enfyra_websocket_event, enfyra_websocket, enfyra_oauth_config, and enfyra_bootstrap_script.',
+      'For enfyra_oauth_config, sourceCode is the one transactional OAuth lifecycle script: use @USER and the normalized @DATA.oauth contract, perform repository side effects, and do not return a value.',
       'The tool validates sourceCode through /admin/script/validate before saving, re-reads the saved source, returns a fresh artifact/hash verification, and never accepts compiledCode.',
       'Before a full replacement, assess cohesion. If the source mixes independently owned lifecycle concerns or is difficult to review and test as one unit, decompose it through the supported route hooks, flow steps, websocket events, or separate focused lifecycle records instead of preserving one oversized script.',
     ].join(' '),

@@ -27,11 +27,12 @@ export function buildDynamicScriptContextTypeContract() {
       },
       '@USER': {
         type: 'RuntimeRecord | null',
-        guarantee: 'The authenticated Enfyra user record, otherwise null. It is non-null after an authenticated route or websocket boundary; public routes and anonymously triggered flows must handle null when identity is required.',
+        guarantee: 'The authenticated Enfyra user record, otherwise null. It is non-null after an authenticated route or websocket boundary and in the OAuth lifecycle script, where it is the resolved persisted user. Public routes and anonymously triggered flows must handle null when identity is required.',
       },
       '@DATA': {
         type: 'unknown',
-        guarantee: 'In a post-hook this is the handler result. Canonical CRUD results use CollectionResult; custom handlers may return any JSON-serializable value.',
+        declaration: 'type OAuthLifecycleData = { oauth: { event: "user_created" | "login"; provider: "google" | "facebook" | "github"; profile: { providerUserId: string; email: string; emailVerified: boolean | null; name: string | null; givenName: string | null; familyName: string | null; username: string | null; avatarUrl: string | null; profileUrl: string | null; locale: string | null }; claims: Record<string, unknown>; accessToken: string; token: { type: string | null; scopes: string[]; expiresAt: string | null } } }',
+        guarantee: 'In the OAuth lifecycle script, @DATA is OAuthLifecycleData. In a post-hook this is the handler result. Canonical CRUD results use CollectionResult; custom handlers may return any JSON-serializable value.',
       },
       '@STATUS': {
         type: 'number',
@@ -56,7 +57,7 @@ export function buildDynamicScriptContextTypeContract() {
           'type HttpRequestContext = { method: string; url: string; headers: Record<string, string | string[] | undefined>; query: QueryContext; params: Record<string, string>; ip: string | null; hostname: string; protocol: string; path: string; originalUrl: string; rawBody?: string }',
           "type WebsocketRequestContext = { method: 'WS_CONNECT' | 'WS_EVENT' | 'WS_CONNECT_TEST' | 'WS_EVENT_TEST'; url: string; headers: RuntimeRecord; ip: string | null; user: RuntimeRecord | null }",
         ],
-        guarantee: 'Present in HTTP and websocket contexts; not part of the flow or OAuth provisioning surface.',
+        guarantee: 'Present in HTTP and websocket contexts; not part of the flow or OAuth lifecycle surface.',
       },
       '@API': {
         type: 'ApiExecutionContext',
@@ -133,7 +134,7 @@ export function buildDynamicScriptContextTypeContract() {
       },
       '@RES': 'HTTP handler only: stream(readable, options?): Promise<void>. The readable must be a server-side Node readable or approved Web ReadableStream exposed by a server package bridge. Options may include statusCode, mimetype, filename, headers, observer?: (chunkText: string, kind: "chunk" | "end" | "error") => unknown | Promise<unknown>, and transform?: (chunkText: string, kind: "chunk" | "end") => string | null | undefined | Promise<string | null | undefined>. transform receives UTF-8-decoded fragments before relay: one decoder spans the full stream, so a Unicode code point split across byte chunks is intact. A fragment may still end inside an SSE line or event, so SSE transforms keep a per-request buffer and parse only complete blank-line-delimited events; never use a fixed chunk size or spaces as a protocol boundary. Return a string to replace output, null to suppress it, or undefined to preserve it; transform failures fail the stream. observer remains best-effort and observes original fragments, then an empty end/error notification. It pipes directly to the client, so await @RES.stream(...) and do not return another payload afterward. The selected method timeout remains the single deadline for observer, transform, and stream relay; client abort/response close cancels the task. This is the streaming response boundary; use @HELPERS.$fetch only for buffered json/text/ArrayBuffer responses.',
       '@TRIGGER': 'trigger(flowIdOrName: Id, payload?: JsonValue): Promise<{ jobId: string; flowId: Id } | { triggered: true; flowId: Id; flowName: string }>.',
-      '@TRANSACTION': 'Maps to $ctx.$transaction. Use await @TRANSACTION.run<T>(async () => { ... }) for an atomic repository mutation scope. Only repository operations participate in rollback; external effects such as fetch, storage, cache, socket, and flow triggers do not.',
+      '@TRANSACTION': 'Maps to $ctx.$transaction. Use await @TRANSACTION.run<T>(async () => { ... }) for an atomic repository mutation scope. The OAuth lifecycle script already runs inside a server-owned transaction, and a nested @TRANSACTION.run joins it. Repository cache invalidations and mutation events flush after commit; direct external effects such as fetch, storage, cache, socket, and flow triggers do not roll back.',
       '@LOGS': 'Synchronous callable: (...values: unknown[]) => void. Prefer @LOGS(message, details?).',
       '@THROW': [
         'Every method returns never synchronously; do not await throw helpers.',

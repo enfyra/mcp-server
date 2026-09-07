@@ -65,7 +65,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
       'validate_dynamic_script',
       [
         'Validate Enfyra dynamic script code before saving it to any script-backed metadata record.',
-        'Use this before create/update of handlers, hooks, flow steps, websocket scripts, OAuth provisioning scripts, or bootstrap scripts when the user is iterating on code.',
+        'Use this before create/update of handlers, hooks, flow steps, websocket scripts, OAuth lifecycle scripts, or bootstrap scripts when the user is iterating on code.',
         'This calls the same server compiler contract used by Enfyra, but does not save anything.',
       ].join(' '),
       {

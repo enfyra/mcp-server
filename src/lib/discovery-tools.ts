@@ -554,10 +554,12 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
             data: ['@BODY event payload', '@DATA event payload', '@REQ websocket request metadata', '@API request metadata', '@USER if authenticated', '@HELPERS', '@FETCH', '@SOCKET reply/join/leave/disconnect/emit helpers/roomSize'],
             resultBehavior: 'Client ack receives queued state first; handler result is emitted asynchronously as ws:result/ws:error with requestId.',
           },
-          oauthUserProvisioning: {
-            runs: 'Before a new OAuth identity creates its enfyra_user row.',
-            data: ['@REPOS.main scoped to enfyra_user', '@HELPERS', '@FETCH', '@STORAGE', '@CACHE'],
-            resultBehavior: 'Return a plain object of additional user fields. Provider identity fields are merged afterward and take precedence. The script has no authenticated @USER and should not return a user response.',
+          oauthLifecycle: {
+            runs: 'Once per successful provider callback, after the user and OAuth account are resolved and before session creation, inside the server-owned database transaction.',
+            data: ['@USER resolved persisted user', '@DATA.oauth normalized lifecycle data', '@REPOS trusted and secure repositories', '@TRANSACTION nested calls join the active transaction', '@HELPERS', '@FETCH', '@STORAGE', '@CACHE'],
+            eventContract: '@DATA.oauth.event is user_created for a newly inserted user or login for an existing linked OAuth identity. An unlinked provider identity whose email already exists fails with a conflict and does not run this script.',
+            profileContract: '@DATA.oauth.profile contains stable provider-independent fields: providerUserId, email, emailVerified, name, givenName, familyName, username, avatarUrl, profileUrl, and locale. Provider-specific extras are in @DATA.oauth.claims. accessToken and token metadata are ephemeral for this execution.',
+            resultBehavior: 'Perform mutations through repositories and do not return a value. A script failure rolls back the user, OAuth account, session, refresh-token hash, and script repository mutations; no Enfyra auth tokens are returned.',
           },
           graphqlResolver: {
             runs: 'Generated GraphQL resolver delegates to dynamic repo/query services.',

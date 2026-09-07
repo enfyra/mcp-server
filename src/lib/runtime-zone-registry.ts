@@ -74,7 +74,7 @@ export const RUNTIME_ZONE_DESCRIPTIONS: Record<RuntimeZone, string> = {
   schema_data: 'Tables, columns, relations, column rules, field permissions, and route-backed data shape.',
   package_runtime: 'Installed app/server packages and runtime package availability.',
   storage_file: 'Storage configs, folders, files, public file state, and file permissions.',
-  auth_security: 'Users, roles, native authentication header mappings, route/field permissions, guards, OAuth provider provisioning, and linked OAuth accounts.',
+  auth_security: 'Users, roles, native authentication header mappings, route/field permissions, guards, transactional OAuth lifecycle configuration, and linked OAuth accounts.',
 };
 
 export function buildRuntimeZoneCatalog() {

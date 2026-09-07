@@ -59,7 +59,7 @@ export function assertExtensionReadFields(tableName: string, fields?: string[]) 
   if (!requestsSourceCode) return;
   throw new Error([
     'enfyra_extension stores editable Vue SFC extension source in `code`, not `sourceCode`.',
-    '`sourceCode` belongs to dynamic server script records such as handlers, hooks, flow steps, websocket handlers, OAuth provider provisioning, and bootstrap scripts.',
+    '`sourceCode` belongs to dynamic server script records such as handlers, hooks, flow steps, websocket handlers, the OAuth lifecycle, and bootstrap scripts.',
     'For admin UI lookup, use search_admin_extensions(mode="search") then search_admin_extensions(mode="inspect").',
     'For focused extension edits, use patch_extension_code or update_extension_code.',
     'If you intentionally read raw extension records, request fields such as ["id","name","type","version","code"].',

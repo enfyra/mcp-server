@@ -36,5 +36,24 @@ const callback = result.callbackUri
           'Never echo clientId or clientSecret in the handoff.',
         ],
       },
+      {
+        name: 'Transactional OAuth lifecycle source',
+        code: `if (@DATA.oauth.event === 'user_created') {
+  await @REPOS.enfyra_user.update({
+    id: @USER.id,
+    data: {
+      name: @DATA.oauth.profile.name,
+      avatar: @DATA.oauth.profile.avatarUrl,
+    },
+  })
+}`,
+        notes: [
+          'This example assumes non-system name and avatar columns exist on enfyra_user. Inspect the live schema before using those fields.',
+          'The same source runs for user_created and login. @USER is persisted; @DATA.oauth.profile is provider-independent and claims contains provider-specific extras.',
+          'Do not return a value. Repository mutations share the server-owned OAuth transaction and roll back when the script throws.',
+          'Use update_script_source only after locating and inspecting the exact enfyra_oauth_config record and acknowledging dynamic-code knowledge.',
+          'Never log @DATA.oauth.accessToken. Direct fetch, storage, cache, socket, and flow-trigger effects are not rolled back.',
+        ],
+      },
     ],
   };

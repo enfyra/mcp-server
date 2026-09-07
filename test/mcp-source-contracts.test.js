@@ -472,18 +472,25 @@ test('GraphQL uses generated resolvers instead of script-backed source records',
   assert.match(entry, /server\.tool\(\s*['"]test_graphql['"]/);
 });
 
-test('OAuth provider provisioning source is treated as a script-backed identity surface', () => {
+test('OAuth lifecycle source exposes the transactional @USER and @DATA contract', () => {
   const entry = readEntrySource();
   const guards = readSourceFiles('lib/mutation-guards.ts');
   const zones = readRuntimeZoneSource();
+  const knowledge = readSourceFiles('lib/required-knowledge.ts');
+  const contexts = readSourceFiles('lib/dynamic-script-context-contract.ts');
 
   assert.match(entry, /SCRIPT_BACKED_TABLES[\s\S]*'enfyra_oauth_config'/);
   assert.match(guards, /SCRIPT_TABLES[\s\S]*'enfyra_oauth_config'/);
-  assert.match(entry, /oauthUserProvisioning/);
+  assert.match(entry, /oauthLifecycle/);
+  assert.doesNotMatch(entry, /oauthUserProvisioning/);
   assert.match(zones, /enfyra_oauth_config[^\n]*sourceCode[^\n]*appCallbackUrl/);
   assert.match(zones, /enfyra_user/);
   assert.match(zones, /enfyra_auth_header[^\n]*headerKey[^\n]*credentialType[^\n]*priority/);
   assert.match(zones, /enfyra_oauth_account/);
+  assert.match(knowledge, /@DATA\.oauth\.event[\s\S]*user_created[\s\S]*login/);
+  assert.match(knowledge, /same email[\s\S]*conflict/i);
+  assert.match(contexts, /OAuthLifecycleData/);
+  assert.match(contexts, /providerUserId[\s\S]*avatarUrl[\s\S]*claims[\s\S]*accessToken/);
 });
 
 test('run_admin_test exposes the backend generic script test kind', () => {
@@ -864,6 +871,10 @@ test('OAuth setup examples guide provider console callback configuration', () =>
   assert.match(examples, /setupComplete=false/i);
   assert.match(examples, /cookieBridgePrefix/);
   assert.match(examples, /Do not parse tokens from the URL/);
+  assert.match(examples, /Transactional OAuth lifecycle source/);
+  assert.match(examples, /@DATA\.oauth\.event === 'user_created'/);
+  assert.match(examples, /@DATA\.oauth\.profile\.avatarUrl/);
+  assert.match(examples, /Do not return a value/);
 });
 
 test('route creation tools report real route reload status instead of a hardcoded success flag', () => {
