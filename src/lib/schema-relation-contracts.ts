@@ -72,6 +72,53 @@ export function normalizeRelationForTablePatch(relation: AnyRecord): RelationPat
   return normalized;
 }
 
+export function assertOwningRelationCreationInput(relation: AnyRecord, operation: string): RelationPatch {
+  const normalized = normalizeRelationForTablePatch(relation);
+  const hasInverseIntent = Object.prototype.hasOwnProperty.call(relation, 'inversePropertyName');
+  const hasMappedBy = normalized.mappedBy !== undefined && normalized.mappedBy !== null && normalized.mappedBy !== '';
+  if (hasInverseIntent || hasMappedBy || normalized.type === 'one-to-many') {
+    throw new Error(
+      `${operation} creates owning relations only. Omit inversePropertyName/mappedBy and create the owning relation first, then evaluate the returned inverseDecision. Call create_inverse_relation only when a concrete reverse traversal consumer exists.`,
+    );
+  }
+  return normalized;
+}
+
+export function deriveInverseRelationType(type: unknown): string {
+  const normalized = normalizeRelationType(type);
+  if (normalized === 'many-to-one') return 'one-to-many';
+  if (normalized === 'one-to-one') return 'one-to-one';
+  if (normalized === 'many-to-many') return 'many-to-many';
+  throw new Error('A one-to-many relation is already an inverse relation and cannot own another inverse.');
+}
+
+export function buildInverseDecision({
+  sourceTableId,
+  sourceTableName,
+  targetTableId,
+  targetTableName,
+  relationId,
+  propertyName,
+  type,
+}: AnyRecord): AnyRecord {
+  const sourceLabel = sourceTableName || `table ${String(sourceTableId)}`;
+  const targetLabel = targetTableName || `table ${String(targetTableId)}`;
+  return {
+    status: 'reasoning_required',
+    question: `Does the application have a concrete reverse traversal from ${targetLabel} to ${sourceLabel} through a separate relation property?`,
+    decisionRule: 'Keep the relation one-way unless a response, UI, deep query, aggregate, or parent-to-child workflow reads from the target back to the source.',
+    defaultAction: 'keep_one_way',
+    owningRelation: {
+      tableId: sourceTableId,
+      relationId,
+      propertyName,
+      type,
+    },
+    nextTool: 'create_inverse_relation',
+    requiredIfNeeded: ['inversePropertyName', 'consumer'],
+  };
+}
+
 export function normalizeRelationType(type: unknown) {
   const raw = String(type ?? '').trim();
   const normalized = RELATION_TYPE_ALIASES[raw] ?? raw;

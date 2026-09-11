@@ -48,9 +48,10 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(1, 'get_enfyra_required_knowledge', 'Read schema invariants and collect globalRulesAckKey.'),
         step(2, 'get_schema_design_context', 'Step zero: read live column types, table/column/relation attributes, constraint shape, and creation order.'),
         step(3, 'get_all_tables or inspect_table', 'Check existing tables before naming new tables or adding to an existing table.', { when: 'Use get_all_tables for new app schemas; inspect_table for a known existing table.' }),
-        step(4, 'create_tables / create_columns / create_relations / update_tables', 'Apply schema changes with native array inputs using only supported Enfyra types and relation propertyName values from the design context. Put relation-based unique/index groups in the same create_tables item as the owning relations, or add them later with update_tables after relations exist.'),
-        step(5, 'delete_tables / confirm_schema_mutation', 'delete_tables confirm returns table_delete_pending_confirmation with requiredConfirmHash, confirmPath, and confirmMethod; call confirm_schema_mutation directly with that exact hash to execute the deletion.', { when: 'Deleting a table definition.' }),
-        step(6, 'inspect_table', 'Re-read saved metadata before creating records, queries, handlers, or UI against the table.'),
+        step(4, 'create_tables / create_columns / create_relations / update_tables', 'Apply schema changes with native array inputs using only supported Enfyra types and relation propertyName values from the design context. Create owning relations without inversePropertyName or mappedBy. Put relation-based unique/index groups in the same create_tables item as the owning relations, or add them later with update_tables after relations exist.'),
+        step(5, 'create_inverse_relation', 'Evaluate every inverseDecision. Keep the relation one-way by default; call this tool only when a named response, UI, deep query, aggregate, or parent-to-child workflow needs target-to-source traversal.', { when: 'A concrete reverse traversal consumer exists.' }),
+        step(6, 'delete_tables / confirm_schema_mutation', 'delete_tables confirm returns table_delete_pending_confirmation with requiredConfirmHash, confirmPath, and confirmMethod; call confirm_schema_mutation directly with that exact hash to execute the deletion.', { when: 'Deleting a table definition.' }),
+        step(7, 'inspect_table', 'Re-read saved metadata before creating records, queries, handlers, or UI against the table.'),
       ];
     case 'record-data':
       return [

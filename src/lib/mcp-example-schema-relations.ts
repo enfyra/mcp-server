@@ -166,7 +166,8 @@ create_relations({
         notes: [
           'create_columns/create_relations run items sequentially through the schema queue.',
           'Use relation property names only. Never provide fkCol, sourceColumn, targetColumn, or junction column names.',
-          'Use inversePropertyName only when a concrete parent detail/deep/count/sort use case needs the reverse traversal.',
+          'The relation response asks whether a reverse traversal is actually needed. Keep it one-way unless a concrete consumer exists.',
+          'When a concrete consumer exists, call create_inverse_relation with the returned owning table/relation ids, a semantic inversePropertyName, and the named consumer.',
           'Use isEncrypted=true for encryption at rest. Add isUpdatable=false separately only when the field should be immutable.',
         ],
       },

@@ -33,9 +33,9 @@ const BASELINES = [
       ENFYRA_MCP_PROFILE: 'all',
       ENFYRA_MCP_DYNAMIC_TOOLS: 'off',
     },
-    count: 107,
-    hash: '933b5ccd11f7efd3ae524008ad98afe50e9b34b0d1dc687a738dcf7744667f8f',
-    maxTokens: 42000,
+    count: 108,
+    hash: '5e34caa587e82b0d2aa214038b6edea39aae5854758da81c596d66d223b41ca2',
+    maxTokens: 42500,
   },
 ];
 

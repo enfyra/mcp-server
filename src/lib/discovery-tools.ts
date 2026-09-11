@@ -216,9 +216,9 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
           supportedColumnTypes: getSupportedColumnTypes(),
           columnTypeGuidance: 'Use varchar for short strings, text/richtext for long prose, float for price/amount/rating/decimal-like values unless decimal is listed, simple-json for structured objects/arrays only when listed, and relations instead of *_id columns for links. For richtext, configure the eApp editor through column.metadata.richText with JSON-safe toolbar/customButtons/formats values.',
           relations: routeTables.has('enfyra_relation')
-            ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relations/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
-            : 'Use create_relations/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
-          relationCascadeFkContract: 'Do not ask for or send physical FK/junction column names in relation create/update payloads. Enfyra derives fk/junction columns from relation propertyName/table metadata and hides FK columns from app schema/forms. Use targetTable, type, propertyName, inversePropertyName or mappedBy, isNullable, onDelete. Add inversePropertyName only when a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal will use the reverse field.',
+            ? 'enfyra_relation has a REST route for reads/metadata, but canonical schema migration is create_relations/create_inverse_relation/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.'
+            : 'Use create_relations/create_inverse_relation/delete_relations or enfyra_table PATCH with the full relations array. Relation onDelete accepts CASCADE, SET NULL, or RESTRICT.',
+          relationCascadeFkContract: 'Do not ask for or send physical FK/junction column names. create_tables/create_relations accept owning relations only and return inverseDecision. Keep them one-way unless a concrete reverse consumer exists; create_inverse_relation then derives the inverse type and creates the ESV mappedBy side.',
           tableDefinitionRelations: (tableDefinition?.relations || []).map((rel) => rel.propertyName),
           relationDefinitionRelations: (relationTable?.relations || []).map((rel) => rel.propertyName),
         },
@@ -409,7 +409,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
             ? 'Use this table metadata primary column when available.'
             : 'SQL commonly uses id; Mongo uses _id. Use table metadata primary column when available.',
           relationNames: 'API relation operations use relation propertyName, not physical FK column names.',
-          relationCascadeFkContract: 'When creating relations through create_tables/create_relations/enfyra_table PATCH, never provide fkCol/fkColumn/foreignKeyColumn/sourceColumn/targetColumn/junction*Column. These are physical implementation details derived by Enfyra and hidden from app schema/forms. Add inversePropertyName only for a concrete reverse traversal such as parent deep child lists, response fields, UI sections, or aggregate sort/count.',
+          relationCascadeFkContract: 'When creating relations through create_tables/create_relations, never provide inversePropertyName, mappedBy, one-to-many, or physical FK/junction fields. Evaluate inverseDecision and call create_inverse_relation only for a concrete reverse traversal such as parent deep child lists, response fields, UI sections, or aggregate sort/count.',
           graphql: 'GraphQL query args also accept filter/sort/page/limit. Table data requires authenticated JWT or PAT credentials and table enablement via enfyra_graphql; anonymous root/schema probes may still return 200.',
         },
         table: tableName

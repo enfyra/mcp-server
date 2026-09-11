@@ -380,7 +380,7 @@ export function rejectUnsafeRelationDefinitionPayload(tableName, payload) {
   if (forbidden.length > 0) {
     throw new Error(
       `Do not send physical FK/junction fields to enfyra_relation: ${forbidden.join(', ')}. ` +
-      'Use create_relations with targetTable/type/propertyName; Enfyra derives physical columns.'
+      'Use create_relations for the owning side, then evaluate inverseDecision and use create_inverse_relation only for a concrete reverse consumer. Enfyra derives physical columns.'
     );
   }
 }

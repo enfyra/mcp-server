@@ -705,13 +705,14 @@ test('guidance rejects sql-like filter operators', () => {
   assert.match(requiredKnowledge, /do not use _like/);
 });
 
-test('schema design context warns about column relation namespace clashes', () => {
+test('schema design context warns about namespace clashes and gates inverse creation', () => {
   const tableTools = readSchemaSource();
   const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
   assert.match(tableTools, /Column names and relation propertyName values share one table namespace/);
   assert.match(tableTools, /Relation propertyName must be unique among both relation names and scalar column names/);
-  assert.match(tableTools, /parent detail\/read must deep-load a child collection/);
-  assert.match(requiredKnowledge, /deep-read a parent with child collections/);
+  assert.match(tableTools, /Evaluate each returned inverseDecision/);
+  assert.match(tableTools, /create_inverse_relation only for a concrete target-to-source consumer/);
+  assert.match(requiredKnowledge, /ESV persists an inverse as a separate relation on the target/);
 });
 
 test('timestamp guidance reuses updatedAt and distinguishes flow checkpoints', () => {

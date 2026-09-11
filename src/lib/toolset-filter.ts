@@ -75,6 +75,7 @@ const PROFILE_TOOL_NAMES: Record<Exclude<McpProfile, 'all'>, readonly string[]> 
     'update_columns',
     'delete_columns',
     'create_relations',
+    'create_inverse_relation',
     'update_relation_constraints',
     'delete_relations',
     'ensure_column_rule',

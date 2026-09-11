@@ -177,7 +177,7 @@ export const TOOL_WORKFLOWS = [
     firstTools: ['get_enfyra_required_knowledge', 'get_schema_design_context', 'inspect_table', 'get_all_tables'],
     inspectTools: ['get_schema_design_context', 'inspect_table', 'get_table_metadata', 'get_all_tables'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'get_schema_design_context', 'get_enfyra_examples'],
-    writeTools: ['create_tables', 'update_tables', 'delete_tables', 'confirm_schema_mutation', 'create_columns', 'update_columns', 'delete_columns', 'create_relations', 'update_relation_constraints', 'delete_relations', 'ensure_column_rule'],
+    writeTools: ['create_tables', 'update_tables', 'delete_tables', 'confirm_schema_mutation', 'create_columns', 'update_columns', 'delete_columns', 'create_relations', 'create_inverse_relation', 'update_relation_constraints', 'delete_relations', 'ensure_column_rule'],
     verifyTools: ['inspect_table', 'get_table_metadata'],
     avoidTools: [
       {
@@ -187,10 +187,10 @@ export const TOOL_WORKFLOWS = [
         reason: 'Schema tools resolve table ids, preserve relation contracts, and reject physical FK names.',
       },
       {
-        tool: 'manual inversePropertyName',
+        tool: 'inversePropertyName or mappedBy in create_tables/create_relations',
         when: 'there is no concrete response/UI/deep-query/aggregate need for reverse traversal',
-        useInstead: 'owning relation only',
-        reason: 'Relation design stays minimal unless the reverse field is actually used.',
+        useInstead: 'owning relation first, then create_inverse_relation only after inverseDecision identifies a concrete consumer',
+        reason: 'ESV stores inverse as a separate mappedBy relation; relation design stays one-way unless the reverse field is actually used.',
       },
     ],
     requiredAck: ['globalRulesAckKey'],

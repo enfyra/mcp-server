@@ -71,7 +71,7 @@ function createToolHarness() {
   };
 }
 
-test('delete_relations detaches an inverse through its owning relation snapshot', async () => {
+test('delete_relations removes the inverse row from its own target-table aggregate', async () => {
   const originalFetch = global.fetch;
   const patchBodies = [];
   let detached = false;
@@ -95,7 +95,6 @@ test('delete_relations detaches an inverse through its owning relation snapshot'
           propertyName: 'forceVisibleForUsers',
           type: 'many-to-many',
           targetTable: 2,
-          inversePropertyName: 'forcedAnnouncements',
         }],
       } });
     }
@@ -113,10 +112,10 @@ test('delete_relations detaches an inverse through its owning relation snapshot'
         }],
       } });
     }
-    if (requestUrl.includes('/enfyra_table/1') && init.method === 'PATCH') {
+    if (requestUrl.includes('/enfyra_table/2') && init.method === 'PATCH') {
       patchBodies.push(JSON.parse(init.body));
       if (requestUrl.includes('schemaConfirmHash=')) detached = true;
-      return jsonResponse({ data: detached ? { id: 1 } : {
+      return jsonResponse({ data: detached ? { id: 2 } : {
         _preview: true,
         requiredConfirmHash: 'detach-inverse',
       } });
@@ -136,14 +135,11 @@ test('delete_relations detaches an inverse through its owning relation snapshot'
     });
 
     const payload = JSON.parse(result.content[0].text);
-    assert.equal(payload.action, 'inverse_relation_detached');
-    assert.equal(payload.owningTableId, 1);
+    assert.equal(payload.action, 'relation_deleted');
+    assert.equal(payload.tableId, 2);
     assert.equal(detached, true);
     assert.equal(patchBodies.length, 2);
-    assert.equal(
-      Object.hasOwn(patchBodies[0].relations[0], 'inversePropertyName'),
-      false,
-    );
+    assert.deepEqual(patchBodies[0].relations, []);
   } finally {
     resetTokens();
     global.fetch = originalFetch;

@@ -17,6 +17,8 @@ import {
   assertIndexesDoNotReferenceUniqueFields,
   assertNoColumnRelationNameCollision,
   assertNoForbiddenRelationKeys,
+  assertOwningRelationCreationInput,
+  buildInverseDecision,
   buildColumnDefinition,
   buildPrimaryColumnForDbType,
   fetchTableWithDetails,
@@ -24,6 +26,7 @@ import {
   getPatchableColumns,
   getSupportedColumnTypes,
   mergeConstraintGroups,
+  deriveInverseRelationType,
   normalizeColumnForTablePatch,
   normalizeColumnOptionsValue,
   parseColumnTypeOptions,
@@ -86,8 +89,10 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       return withSchemaQueue(async () => {
       assertNoForbiddenRelationKeys(args);
   	    const { sourceTableId, targetTableId, targetTable } = args;
-  	    const relationPatch = normalizeRelationForTablePatch(args);
-  	    const { type, propertyName, inversePropertyName, mappedBy, isNullable, onDelete, description } = relationPatch;
+	    const relationPatch = args.allowInverseCreation
+        ? normalizeRelationForTablePatch(args)
+        : assertOwningRelationCreationInput(args, 'create_relations');
+	    const { type, propertyName, mappedBy, isNullable, onDelete, description } = relationPatch;
       const targetRef = targetTableId ?? targetTable;
       if (targetRef === undefined || targetRef === null || targetRef === '') {
         throw new Error('create_relations requires targetTableId or targetTable. Pass an existing table id, name, or alias.');
@@ -102,23 +107,108 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       const existingRelations = (tableData.relations || []).map(sanitizeExistingRelationForTablePatch);
       const beforeIds = existingRelations.map((relation) => String(getId(relation))).filter((id) => id !== 'null');
   	    const newRelation: RelationPatch = { targetTable: resolvedTargetTableId, type, propertyName };
-      if (inversePropertyName !== undefined) newRelation.inversePropertyName = inversePropertyName || null;
       if (mappedBy !== undefined) newRelation.mappedBy = mappedBy;
       if (isNullable !== undefined) newRelation.isNullable = isNullable;
       if (onDelete !== undefined) newRelation.onDelete = onDelete;
       if (description !== undefined) newRelation.description = description;
-      const result = await patchTableAutoConfirm(ENFYRA_API_URL, resolvedSourceTableId, { relations: [...existingRelations, newRelation] });
-      await verifyRelationCascade(ENFYRA_API_URL, resolvedSourceTableId, beforeIds, {
+	    const result = await patchTableAutoConfirm(ENFYRA_API_URL, resolvedSourceTableId, { relations: [...existingRelations, newRelation] });
+      const afterRelations = await verifyRelationCascade(ENFYRA_API_URL, resolvedSourceTableId, beforeIds, {
         action: 'create',
         propertyName,
       });
+      const savedRelation = afterRelations.find((relation) => relation.propertyName === propertyName);
+      const sourceTable = catalog.find((table) => String(getId(table)) === String(resolvedSourceTableId));
+      const targetTableRecord = catalog.find((table) => String(getId(table)) === String(resolvedTargetTableId));
       return jsonContent({
         action: 'relation_created',
-        relation: { propertyName, type, sourceTableId: resolvedSourceTableId, targetTableId: resolvedTargetTableId },
+        relation: { id: getId(savedRelation), propertyName, type, sourceTableId: resolvedSourceTableId, targetTableId: resolvedTargetTableId },
+        ...(!mappedBy ? {
+          inverseDecision: buildInverseDecision({
+            sourceTableId: resolvedSourceTableId,
+            sourceTableName: sourceTable?.name,
+            targetTableId: resolvedTargetTableId,
+            targetTableName: targetTableRecord?.name,
+            relationId: getId(savedRelation),
+            propertyName,
+            type,
+          }),
+        } : {}),
         result,
       });
       });
     }
+
+  async function createInverseRelation({
+    owningTableId,
+    owningRelationId,
+    owningPropertyName,
+    inversePropertyName,
+    consumer,
+    description,
+    globalRulesAckKey,
+  }) {
+    assertGlobalRulesAck(globalRulesAckKey);
+    const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+    const resolvedOwningTableId = resolveTableIdentifierFromMetadata(catalog, owningTableId, 'owningTableId');
+    const owningTable = await fetchTableWithDetails(ENFYRA_API_URL, resolvedOwningTableId);
+    const owningRelations = (owningTable.relations || []).map(sanitizeExistingRelationForTablePatch);
+    const owningRelation = owningRelations.find((relation) => (
+      (owningRelationId === undefined || String(getId(relation)) === String(owningRelationId)) &&
+      (!owningPropertyName || relation.propertyName === owningPropertyName)
+    ));
+    if (!owningRelation) {
+      const relationRef = owningRelationId === undefined ? `'${String(owningPropertyName)}'` : String(owningRelationId);
+      throw new Error(`Owning relation ${relationRef} was not found on table ${String(resolvedOwningTableId)}.`);
+    }
+    if (owningRelation.mappedBy) {
+      throw new Error(`Relation ${String(getId(owningRelation))} is already an inverse relation; pass its owning relation instead.`);
+    }
+    const resolvedTargetTableId = resolveTableIdentifierFromMetadata(catalog, owningRelation.targetTable, 'owning relation targetTable');
+    const targetTable = await fetchTableWithDetails(ENFYRA_API_URL, resolvedTargetTableId);
+    const targetRelations = (targetTable.relations || []).map(sanitizeExistingRelationForTablePatch);
+    const existingInverse = targetRelations.find((relation) => (
+      relation.mappedBy === owningRelation.propertyName &&
+      String(relation.targetTable) === String(resolvedOwningTableId)
+    ));
+    if (existingInverse) {
+      throw new Error(`Owning relation ${String(getId(owningRelation))} already has inverse '${String(existingInverse.propertyName)}'.`);
+    }
+    if (targetRelations.some((relation) => relation.propertyName === inversePropertyName)) {
+      throw new Error(`Inverse property '${inversePropertyName}' already exists on table ${String(resolvedTargetTableId)}.`);
+    }
+    const inverseType = deriveInverseRelationType(owningRelation.type);
+    const created = await appendRelationToTable({
+      sourceTableId: resolvedTargetTableId,
+      targetTableId: resolvedOwningTableId,
+      type: inverseType,
+      propertyName: inversePropertyName,
+      mappedBy: owningRelation.propertyName,
+      isNullable: owningRelation.isNullable,
+      onDelete: owningRelation.onDelete,
+      description,
+      allowInverseCreation: true,
+      globalRulesAckKey,
+    });
+    const payload = JSON.parse(created.content[0].text);
+    return jsonContent({
+      action: 'inverse_relation_created',
+      owning: {
+        tableId: resolvedOwningTableId,
+        relationId: getId(owningRelation),
+        propertyName: owningRelation.propertyName,
+        type: owningRelation.type,
+      },
+      inverse: {
+        tableId: resolvedTargetTableId,
+        relationId: payload.relation?.id,
+        propertyName: inversePropertyName,
+        type: inverseType,
+        mappedBy: owningRelation.propertyName,
+      },
+      consumer,
+      result: payload.result,
+    });
+  }
 
   async function updateRelationConstraints({ globalRulesAckKey, ...args }) {
     const update = validateRelationConstraintUpdate(args);
@@ -273,69 +363,6 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         throw new Error(`Relation ${relationId} was not found on table ${tableId}; refusing schema cascade patch.`);
       }
       const target = existingRelations.find((relation) => String(getId(relation)) === String(relationId));
-      if (target?.mappedBy) {
-        const owningTableId = target.targetTable;
-        const owningTable = await fetchTableWithDetails(ENFYRA_API_URL, owningTableId);
-        if (!owningTable) {
-          throw new Error(`Owning table ${owningTableId} for inverse relation ${relationId} was not found.`);
-        }
-        const owningRelations = (owningTable.relations || []).map(
-          sanitizeExistingRelationForTablePatch,
-        );
-        const owningRelation = owningRelations.find(
-          (relation) =>
-            relation.propertyName === target.mappedBy &&
-            String(relation.targetTable) === String(tableId),
-        );
-        if (!owningRelation) {
-          throw new Error(
-            `Owning relation '${target.mappedBy}' for inverse relation ${relationId} was not found on table ${owningTableId}.`,
-          );
-        }
-        const detachedRelations = owningRelations.map((relation) => {
-          if (String(getId(relation)) !== String(getId(owningRelation))) return relation;
-          const { inversePropertyName, ...withoutInverse } = relation;
-          return withoutInverse;
-        });
-        if (!confirm) {
-          return {
-            content: [{ type: 'text', text: JSON.stringify({
-              action: 'detach_inverse_relation_preview',
-              tableId,
-              relationId,
-              targetRelation: target,
-              owningTableId,
-              owningRelationId: getId(owningRelation),
-              preservedRelationIds: beforeIds.filter((id) => id !== String(relationId)),
-              destructive: true,
-              next: 'Call delete_relations again with the same one-item array and confirm=true to remove the inverse from the owning relation snapshot.',
-            }, null, 2) }],
-          };
-        }
-        assertGlobalRulesAck(globalRulesAckKey);
-        const result = await patchTableAutoConfirm(ENFYRA_API_URL, owningTableId, {
-          relations: detachedRelations,
-        });
-        const afterRelations = await verifyRelationCascade(ENFYRA_API_URL, tableId, beforeIds, {
-          action: 'delete',
-          relationId,
-        });
-        return jsonContent({
-          action: 'inverse_relation_detached',
-          tableId,
-          relationId,
-          owningTableId,
-          owningRelationId: getId(owningRelation),
-          result,
-          postcondition: {
-            verificationMethod: 'table_schema_relation_ids',
-            confirmedAbsent: !afterRelations.some((relation) => String(getId(relation)) === String(relationId)),
-            remainingRelationIds: afterRelations
-              .filter((relation) => String(getId(relation)) === String(relationId))
-              .map(getId),
-          },
-        });
-      }
       if (!confirm) {
         return {
           content: [{ type: 'text', text: JSON.stringify({
@@ -392,7 +419,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
   	      ...(args._requestedTableName ? [{ field: 'name', from: args._requestedTableName, to: args.name, reason: 'Enfyra table names are lowercase.' }] : []),
   	      ...normalizations,
   	    ];
-	    const allRelations = arrayValue('relations', args.relations).map(normalizeRelationForTablePatch);
+	    const allRelations = arrayValue('relations', args.relations).map((relation) => assertOwningRelationCreationInput(relation, 'create_tables'));
 	    const relationNames = new Set(allRelations.map((relation) => relation.propertyName).filter(Boolean));
   	    assertNoColumnRelationNameCollision(
   	      normalizedUserColumns.map((column) => String(column.name || '')).filter(Boolean),
@@ -703,6 +730,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
   return {
     appendColumnToTable,
     appendRelationToTable,
+    createInverseRelation,
     applyDeferredConstraints,
     arrayValue,
     createOneTable,

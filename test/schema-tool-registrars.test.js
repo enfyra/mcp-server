@@ -554,7 +554,7 @@ test('create_relations resolves table names before schema patch', async () => {
     resetTokens();
     initAuth('https://example.test/api', 'api-token');
     registerTableTools(server, 'https://example.test/api');
-    await server.get('create_relations').handler({
+    const response = await server.get('create_relations').handler({
       items: [{
         sourceTableId: 'mcp_issue',
         targetTable: 'enfyra_user',
@@ -567,6 +567,116 @@ test('create_relations resolves table names before schema patch', async () => {
 
     assert.equal(patchedBody.relations[0].targetTable, 4);
     assert.equal(patchedBody.relations[0].propertyName, 'owner');
+    const payload = JSON.parse(response.content[0].text);
+    assert.deepEqual(payload.created[0].relation, {
+      id: 20,
+      propertyName: 'owner',
+      type: 'many-to-one',
+      sourceTableId: 9,
+      targetTableId: 4,
+    });
+    assert.equal(payload.created[0].inverseDecision.status, 'reasoning_required');
+    assert.equal(payload.created[0].inverseDecision.defaultAction, 'keep_one_way');
+    assert.equal(payload.created[0].inverseDecision.nextTool, 'create_inverse_relation');
+    assert.deepEqual(payload.created[0].inverseDecision.owningRelation, {
+      tableId: 9,
+      relationId: 20,
+      propertyName: 'owner',
+      type: 'many-to-one',
+    });
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('create_tables rejects inverse intent before creating any table', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let fetchCount = 0;
+  global.fetch = async () => {
+    fetchCount += 1;
+    return jsonResponse({ message: 'unexpected request' }, 500);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    await assert.rejects(
+      server.get('create_tables').handler({
+        items: [{
+          name: 'mcp_issue',
+          relations: [{ targetTable: 'enfyra_user', type: 'many-to-one', propertyName: 'owner', inversePropertyName: 'issues' }],
+        }],
+        globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+      }),
+      /create_inverse_relation/,
+    );
+    assert.equal(fetchCount, 0);
+  } finally {
+    resetTokens();
+    global.fetch = originalFetch;
+  }
+});
+
+test('create_inverse_relation materializes the ESV mappedBy side from an owning relation', async () => {
+  const originalFetch = global.fetch;
+  const server = createToolHarness();
+  let targetRelations = [];
+  let patchedBody = null;
+
+  global.fetch = async (url, init = {}) => {
+    const urlText = String(url);
+    if (urlText.endsWith('/auth/token/exchange')) return jsonResponse({ accessToken: 'access-token', expTime: Date.now() + 60_000 });
+    if (urlText.includes('/enfyra_table?')) return jsonResponse({ data: [
+      { id: 9, name: 'mcp_issue' },
+      { id: 4, name: 'enfyra_user', isSystem: true },
+    ] });
+    if (urlText.endsWith('/metadata/mcp_issue')) return jsonResponse({ data: {
+      id: 9,
+      name: 'mcp_issue',
+      columns: [],
+      relations: [{ id: 20, propertyName: 'owner', targetTable: 4, type: 'many-to-one', isNullable: false, onDelete: 'CASCADE' }],
+    } });
+    if (urlText.endsWith('/metadata/enfyra_user')) return jsonResponse({ data: {
+      id: 4,
+      name: 'enfyra_user',
+      columns: [],
+      relations: targetRelations,
+    } });
+    if (urlText.endsWith('/enfyra_table/4') && init.method === 'PATCH') {
+      patchedBody = JSON.parse(init.body);
+      targetRelations = patchedBody.relations.map((relation, index) => ({ id: index + 30, ...relation }));
+      return jsonResponse({ data: [{ id: 4, name: 'enfyra_user', relations: targetRelations }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  try {
+    resetTokens();
+    initAuth('https://example.test/api', 'api-token');
+    registerTableTools(server, 'https://example.test/api');
+    const response = await server.get('create_inverse_relation').handler({
+      owningTableId: 9,
+      owningPropertyName: 'owner',
+      inversePropertyName: 'issues',
+      consumer: 'The user detail response deep-loads issues owned by that user.',
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+    assert.deepEqual(patchedBody.relations[0], {
+      targetTable: 9,
+      type: 'one-to-many',
+      propertyName: 'issues',
+      mappedBy: 'owner',
+      isNullable: false,
+      onDelete: 'CASCADE',
+    });
+    const payload = JSON.parse(response.content[0].text);
+    assert.equal(payload.action, 'inverse_relation_created');
+    assert.equal(payload.inverse.relationId, 30);
+    assert.equal(payload.inverse.mappedBy, 'owner');
+    assert.equal(payload.consumer, 'The user detail response deep-loads issues owned by that user.');
   } finally {
     resetTokens();
     global.fetch = originalFetch;
@@ -797,6 +907,9 @@ test('create_tables accepts tables alias and defers relation constraints until F
     assert.deepEqual(payload.appliedDeferredConstraints[0].prunedExistingIndexes, [['scheduledDate']]);
     assert.deepEqual(payload.cleanupHints.recordCreateOrder, ['event_registration']);
     assert.match(payload.cleanupHints.recordCreateRule, /parent\/target rows/);
+    assert.equal(payload.inverseDecisions.length, 2);
+    assert.deepEqual(payload.inverseDecisions.map((decision) => decision.owningRelation.propertyName), ['event', 'attendee']);
+    assert.equal(payload.inverseDecisions.every((decision) => decision.nextTool === 'create_inverse_relation'), true);
   } finally {
     resetTokens();
     global.fetch = originalFetch;

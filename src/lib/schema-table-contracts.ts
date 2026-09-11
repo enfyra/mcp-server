@@ -6,6 +6,7 @@ import {
   AnyRecord,
   ConstraintGroup,
 } from './schema-mutation-coordinator.js';
+import { assertOwningRelationCreationInput } from './schema-relation-contracts.js';
 import { normalizeTableName } from './tool-input-normalization.js';
 
 export function parseJsonArrayParam(name, value) {
@@ -132,6 +133,7 @@ export function preflightCreateTableDefinitions(items: AnyRecord[]) {
     const { columns: userColumns } = stripAutoManagedColumns(columns);
     const columnNames = userColumns.map((column) => String(column?.name ?? '')).filter(Boolean);
     const relationNames = relations.map((relation) => String(relation?.propertyName ?? '')).filter(Boolean);
+    relations.forEach((relation) => assertOwningRelationCreationInput(relation, `create_tables items[${index}]`));
     assertNoColumnRelationNameCollision(columnNames, relationNames, `create_tables items[${index}] (${item.name || '<unnamed>'})`);
 
     const logicalFields = new Set([...AUTO_MANAGED_COLUMN_NAMES, ...columnNames, ...relationNames]);

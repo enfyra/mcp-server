@@ -16,17 +16,21 @@ import {
   AnyRecord,
   FORBIDDEN_RELATION_KEYS,
   assertBulkLimit,
+  buildInverseDecision,
   bulkObjectArrayParam,
   computeBatchCleanupOrder,
   getId,
   getSupportedColumnTypes,
+  fetchTableWithDetails,
   metadataColumnNames,
   metadataColumnOptions,
   normalizeCreateTableDefinitions,
   normalizeRelationType,
   parseBulkItemsParam,
+  parseJsonArrayParam,
   preflightCreateTableDefinitions,
   resolveTableIdentifierFromMetadata,
+  sanitizeExistingRelationForTablePatch,
   withSchemaQueue,
 } from './table-tool-logic.js';
 
@@ -190,13 +194,13 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             namespaceRule: 'Column names and relation propertyName values share one table namespace. Do not define a scalar column and a relation with the same name in one table.',
           },
           relationDefinitionInput: {
-            allowedFields: ['targetTableId', 'targetTable', 'type', 'propertyName', 'inversePropertyName', 'mappedBy', 'isNullable', 'onDelete', 'description'],
+            allowedFields: ['targetTableId', 'targetTable', 'type', 'propertyName', 'isNullable', 'onDelete', 'description'],
             relationTypes: relationTypes.length ? relationTypes : ['many-to-one', 'one-to-many', 'one-to-one', 'many-to-many'],
             onDeleteOptions: onDeleteOptions.length ? onDeleteOptions : ['CASCADE', 'SET NULL', 'RESTRICT'],
             forbiddenPhysicalFields: FORBIDDEN_RELATION_KEYS,
             rule: 'Use relations for links between records. Do not create scalar FK columns such as userId, owner_id, categoryIds, or courseId unless the user explicitly wants denormalized snapshot data.',
             namespaceRule: 'Relation propertyName must be unique among both relation names and scalar column names on the same table. If a relation is named owner, do not also create ownerId/owner as a scalar field.',
-            inverseDesignRule: 'If a parent detail/read must deep-load a child collection (for example application.reviewAssignments or assignment.scorecards), create the owning child many-to-one relation with inversePropertyName immediately. Without the inverse, parent-to-child deep reads will fail with unknown relation.',
+            inverseDesignRule: 'Create the owning relation first without inversePropertyName or mappedBy. Evaluate the returned inverseDecision. Only when a concrete reverse response, UI, deep query, aggregate, or parent-to-child consumer exists, call create_inverse_relation with that consumer and a semantic inversePropertyName.',
           },
           constraints: {
             indexes: 'JSON array of non-unique logical field groups, e.g. [["status","createdAt"]]. Relation propertyName values are allowed.',
@@ -209,9 +213,9 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             '1. Name domain entities and decide which existing tables are reused, especially enfyra_user for users/owners/actors.',
             '2. Create independent lookup/base tables first with scalar columns only.',
             '3. Create dependent tables with scalar columns and relations whose target tables already exist.',
-            '4. Use create_relations after both tables exist when a relation could not be included during table creation.',
+            '4. Use create_relations after both tables exist when an owning relation could not be included during table creation.',
             '5. Add relation-based unique groups in the same create_tables item when the relations are declared there, or via update_tables after relations exist.',
-            '6. Before deep parent detail queries, confirm every child collection relation exists as an inversePropertyName on the owning child relation.',
+            '6. Evaluate each returned inverseDecision. Call create_inverse_relation only for a concrete target-to-source consumer; otherwise keep the relation one-way.',
             '7. Insert records using column names and relation propertyName values, never hidden FK columns.',
             '8. Re-inspect each table with inspect_table before writing records or adding query examples.',
           ],
@@ -230,8 +234,8 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
       'create_tables',
       [
         'Create one or more table definitions. Always pass items as a native JSON array; for one table, pass one item.',
-        'The tool creates tables sequentially, creates columns with each table, then creates all requested relations after every table in the batch exists. This avoids relation target races for weak agents.',
-        'Each item supports { name, description?, isSingleRecord?, columns?, relations?, indexes?, uniques? }. columns/relations/indexes/uniques may be arrays inside the item.',
+        'The tool creates tables sequentially, creates columns with each table, then creates all requested owning relations after every table in the batch exists. This avoids relation target races for weak agents.',
+        'Each item supports { name, description?, isSingleRecord?, columns?, relations?, indexes?, uniques? }. Relations reject inversePropertyName, mappedBy, and one-to-many; evaluate inverseDecisions after creation and use create_inverse_relation only for a concrete reverse consumer. columns/relations/indexes/uniques may be arrays inside the item.',
         'Column items may include metadata and placeholder. For ordinary application fields, omit isPublished and isUpdatable because both default to true; false has API-access and canonical-PATCH consequences, not merely UI consequences. For type richtext, store editor configuration at column.metadata.richText using JSON-safe values; function callbacks are eApp source configuration, not column JSON.',
         'Do not include id, _id, createdAt, or updatedAt in columns; Enfyra manages them and create_tables strips them before save.',
         'Every field named in indexes/uniques must be a scalar column, auto-managed column, or relation propertyName in the same table item; otherwise the tool rejects the whole batch before creating tables.',
@@ -279,8 +283,6 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
 	            targetTableId: tableId,
 	            type: relation.type,
 	            propertyName: relation.propertyName,
-	            inversePropertyName: relation.inversePropertyName,
-	            mappedBy: relation.mappedBy,
 	            isNullable: relation.isNullable,
 	            onDelete: relation.onDelete,
 	            description: relation.description,
@@ -313,8 +315,6 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             targetTableId: resolvedTargetId,
             type: relation.type,
             propertyName: relation.propertyName,
-            inversePropertyName: relation.inversePropertyName,
-            mappedBy: relation.mappedBy,
             isNullable: relation.isNullable,
             onDelete: relation.onDelete,
             description: relation.description,
@@ -323,16 +323,44 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
   	        createdRelations.push({ index: relation.index, ...JSON.parse(relationResult.content[0].text) });
   	      }
   
-  	      const appliedDeferredConstraints: AnyRecord[] = [];
+        const appliedDeferredConstraints: AnyRecord[] = [];
   	      for (const constraints of deferredConstraints) {
   	        const constraintResult = await withSchemaQueue(() => applyDeferredConstraints(constraints.tableId, {
   	          indexes: constraints.indexes,
   	          uniques: constraints.uniques,
   	        }));
   	        if (constraintResult) appliedDeferredConstraints.push({ index: constraints.index, ...constraintResult });
-  	      }
-  
-  	      return jsonContent({
+	      }
+
+        const inverseDecisions: AnyRecord[] = [];
+        for (const [index, item] of parsedItems.entries()) {
+          const tableId = createdTableIds.get(String(item.name || '').toLowerCase());
+          if (tableId === undefined) continue;
+          const requestedRelations = Array.isArray(item.relations)
+            ? item.relations
+            : parseJsonArrayParam(`items[${index}].relations`, item.relations || '[]');
+          if (requestedRelations.length === 0) continue;
+          const liveTable = await fetchTableWithDetails(ENFYRA_API_URL, tableId).catch(() => null);
+          for (const requestedRelation of requestedRelations) {
+            const liveRelation = (liveTable?.relations || []).find(
+              (relation: AnyRecord) => relation.propertyName === requestedRelation.propertyName,
+            );
+            const relation = liveRelation
+              ? sanitizeExistingRelationForTablePatch(liveRelation)
+              : requestedRelation;
+            inverseDecisions.push(buildInverseDecision({
+              sourceTableId: tableId,
+              sourceTableName: item.name,
+              targetTableId: relation.targetTable ?? relation.targetTableId,
+              targetTableName: liveRelation?.targetTableName || liveRelation?.targetTable?.name,
+              relationId: getId(relation),
+              propertyName: relation.propertyName,
+              type: relation.type,
+            }));
+          }
+        }
+
+	      return jsonContent({
   	        action: 'tables_created',
   	        requested: parsedItems.length,
   	        createdCount: created.length,
@@ -361,7 +389,8 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
   	        })),
           createdRelations: createdRelations.map(({ result, responseFormat, ...item }) => item),
           appliedDeferredConstraints: appliedDeferredConstraints.map(({ result, ...item }) => item),
-  	      });
+          inverseDecisions,
+	      });
   	    }
   	  );
 

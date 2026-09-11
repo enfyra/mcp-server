@@ -19,6 +19,7 @@ import {
   assertIndexesDoNotReferenceUniqueFields,
   buildPrimaryColumnForDbType,
   computeBatchCleanupOrder,
+  deriveInverseRelationType,
   fetchTableWithDetails,
   getSupportedColumnTypes,
   normalizeColumnsForLiveMetadata,
@@ -31,6 +32,7 @@ import {
   resolveTableFromMetadata,
   resolveTableFromMetadataByName,
   sanitizeExistingRelationForTablePatch,
+  assertOwningRelationCreationInput,
 } from '../dist/lib/table-tools.js';
 import { prepareRecordBatchMutation, prepareRecordMutation, validatePortableScriptSource } from '../dist/lib/mutation-guards.js';
 import { validateMainTableRoutePath } from '../dist/lib/route-guards.js';
@@ -81,6 +83,33 @@ test('relation normalization accepts common aliases and removes invalid one-to-m
       mappedBy: 'project',
     },
   );
+});
+
+test('inverse relation decisions follow the ESV ownership contract', () => {
+  assert.equal(deriveInverseRelationType('many-to-one'), 'one-to-many');
+  assert.equal(deriveInverseRelationType('one-to-one'), 'one-to-one');
+  assert.equal(deriveInverseRelationType('many-to-many'), 'many-to-many');
+  assert.throws(() => deriveInverseRelationType('one-to-many'), /already an inverse/);
+
+  assert.deepEqual(assertOwningRelationCreationInput({
+    targetTable: 'enfyra_user',
+    type: 'many-to-one',
+    propertyName: 'owner',
+  }, 'create_relations'), {
+    targetTable: 'enfyra_user',
+    type: 'many-to-one',
+    propertyName: 'owner',
+  });
+  for (const relation of [
+    { targetTable: 'enfyra_user', type: 'many-to-one', propertyName: 'owner', inversePropertyName: 'issues' },
+    { targetTable: 'mcp_issue', type: 'one-to-many', propertyName: 'issues', mappedBy: 'owner' },
+    { targetTable: 'mcp_issue', type: 'one-to-many', propertyName: 'issues' },
+  ]) {
+    assert.throws(
+      () => assertOwningRelationCreationInput(relation, 'create_relations'),
+      /create_inverse_relation/,
+    );
+  }
 });
 
 test('delete_records defaults to cascade-tolerant not-found cleanup', () => {

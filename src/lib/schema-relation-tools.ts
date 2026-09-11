@@ -8,9 +8,10 @@ import { jsonContent } from './response-format.js';
 import { createSchemaToolOperations } from './schema-tool-operations.js';
 import { executeSequentialBatch } from './sequential-batch.js';
 import {
-  AnyRecord,
+  type AnyRecord,
   assertBulkLimit,
   assertNoDuplicateRelationConstraintTargets,
+  assertOwningRelationCreationInput,
   bulkObjectArrayParam,
   parseBulkItemsParam,
   validateRelationConstraintUpdate,
@@ -20,6 +21,7 @@ export function registerSchemaRelationTools(server, ENFYRA_API_URL, options: { t
   const toolset = options.toolset || 'guided';
   const {
     appendRelationToTable,
+    createInverseRelation,
     removeRelationFromTable,
     updateRelationConstraints,
   } = createSchemaToolOperations(ENFYRA_API_URL, toolset);
@@ -27,9 +29,9 @@ export function registerSchemaRelationTools(server, ENFYRA_API_URL, options: { t
   
     server.tool(
       'create_relations',
-      'Create one or more relations. Always pass items as a native JSON array; for one relation, pass one item. Items run sequentially through the schema queue and table names/aliases are resolved internally.',
+      'Create one or more owning relations. Always pass items as a native JSON array; for one relation, pass one item. This tool rejects inversePropertyName, mappedBy, and one-to-many; evaluate inverseDecision after creation and use create_inverse_relation only for a concrete reverse consumer. Items run sequentially through the schema queue and table names/aliases are resolved internally.',
       {
-        items: bulkObjectArrayParam(z, 'Relation definitions').optional().describe('Native JSON array of relation definitions. Each item uses { sourceTableId, targetTableId or targetTable, type, propertyName, inversePropertyName?, mappedBy?, isNullable?, onDelete?, description? }. Do not send physical FK fields.'),
+        items: bulkObjectArrayParam(z, 'Owning relation definitions').optional().describe('Native JSON array of owning relation definitions. Each item uses { sourceTableId, targetTableId or targetTable, type, propertyName, isNullable?, onDelete?, description? }. Do not send inversePropertyName, mappedBy, one-to-many, or physical FK fields. Evaluate inverseDecision after creation.'),
         relations: bulkObjectArrayParam(z, 'Relation definitions').optional().describe('Alias for items when the caller naturally names the batch relations. Pass either items or relations, not both.'),
         maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
         globalRulesAckKey: globalRulesAckParam(z),
@@ -39,14 +41,35 @@ export function registerSchemaRelationTools(server, ENFYRA_API_URL, options: { t
         if (items !== undefined && relations !== undefined) throw new Error('Pass either items or relations to create_relations, not both.');
         const parsedItems = parseBulkItemsParam('items', items ?? relations);
         assertBulkLimit('create_relations', parsedItems, maxItems);
+        const owningItems = parsedItems.map((item) => assertOwningRelationCreationInput(item, 'create_relations'));
         const created: AnyRecord[] = [];
-        for (const [index, item] of parsedItems.entries()) {
+        for (const [index, item] of owningItems.entries()) {
           const result = await appendRelationToTable({ ...item, globalRulesAckKey });
           created.push({ index, ...JSON.parse(result.content[0].text) });
         }
         return jsonContent({ action: 'relations_created', requested: parsedItems.length, createdCount: created.length, sequential: true, created });
       }
     );
+
+  server.tool(
+    'create_inverse_relation',
+    'Create the mappedBy side for one existing owning relation. Use only after create_relations/create_tables returns inverseDecision and a concrete response, UI, deep query, aggregate, or parent-to-child consumer requires reverse traversal. The tool derives the inverse type from ESV ownership semantics and reuses the owning FK or junction.',
+    {
+      owningTableId: z.union([z.string().min(1), z.number()]).describe('Table id, name, or alias containing the owning relation.'),
+      owningRelationId: z.union([z.string().min(1), z.number()]).optional().describe('Exact owning relation id returned by create_relations or inspect_table.'),
+      owningPropertyName: z.string().trim().min(1).optional().describe('Owning relation propertyName. Use this when create_tables returned a decision before a relation id was available.'),
+      inversePropertyName: z.string().trim().min(1).describe('Semantic property name exposed on the target table for reverse traversal.'),
+      consumer: z.string().trim().min(12).describe('Concrete app consumer that reads target-to-source, such as a named response field, UI section, deep query, aggregate, or parent detail workflow.'),
+      description: z.string().optional().describe('Optional inverse relation description.'),
+      globalRulesAckKey: globalRulesAckParam(z),
+    },
+    async (args) => {
+      if (args.owningRelationId === undefined && !args.owningPropertyName) {
+        throw new Error('create_inverse_relation requires owningRelationId or owningPropertyName.');
+      }
+      return createInverseRelation(args);
+    },
+  );
 
   server.tool(
     'update_relation_constraints',

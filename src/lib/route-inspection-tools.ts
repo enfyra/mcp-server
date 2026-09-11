@@ -103,7 +103,7 @@ export function registerRouteInspectionTools(server, ENFYRA_API_URL) {
             fields: 'Use column names and relation propertyName values.',
             filter: 'Use query DSL operators on column names or nested relation propertyName objects.',
             deep: 'Deep fetch keys are relation propertyName values.',
-            relationMutation: 'For relation schema creation/update use targetTable/type/propertyName/inversePropertyName|mappedBy/isNullable/onDelete only. Do not provide physical FK/junction columns; Enfyra derives and hides them. Omit inversePropertyName unless a concrete response, UI, deep query, aggregate sort/count, or parent-to-child traversal needs it.',
+            relationMutation: 'For relation schema creation use create_tables/create_relations with owning targetTable/type/propertyName/isNullable/onDelete only. Evaluate inverseDecision and use create_inverse_relation only for a concrete reverse consumer. Do not provide physical FK/junction columns; Enfyra derives and hides them.',
           },
         };
     
