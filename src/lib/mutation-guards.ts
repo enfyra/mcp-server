@@ -281,8 +281,17 @@ export function validatePortableScriptSource(sourceCode) {
   if (typeof sourceCode !== 'string') return;
   validateLogsContract(sourceCode);
   validateSocketContract(sourceCode);
+  validateTriggerContract(sourceCode);
   validateAwaitedRepositoryCalls(sourceCode);
   validateNumericThrowDetails(sourceCode);
+}
+
+function validateTriggerContract(sourceCode) {
+  const methodCall = /(?:@TRIGGER|\$ctx\.\$trigger)\s*\.\s*trigger\s*\(/u.exec(sourceCode);
+  if (!methodCall) return;
+  throw new Error(
+    '@TRIGGER is callable, not a service object. Use await @TRIGGER(flowIdOrName, payload); do not use @TRIGGER.trigger(...).'
+  );
 }
 
 function validateSocketContract(sourceCode) {

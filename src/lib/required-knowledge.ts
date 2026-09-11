@@ -359,6 +359,7 @@ const DYNAMIC_CODE_SECTIONS = [
       'Create/update repository calls return collection-shaped data arrays; read result.data?.[0] for a single row.',
       '@LOGS is a callable function: use @LOGS(message, details?). It has no .info/.warn/.error/.debug methods.',
       '@SOCKET has no generic emit() method. Bound websocket scripts use reply, emitToCurrentRoom, or broadcastToRoom; global HTTP/flow scripts use emitToGateway, emitToRoom, emitToUser, or broadcast.',
+      '@TRIGGER is a callable macro. Use await @TRIGGER(flowIdOrName, payload); never use @TRIGGER.trigger(...).',
       'ESV fixed flow step configs are static host-side objects. Do not put @FLOW_PAYLOAD, @FLOW_LAST, or @FLOW inside query/create/update/delete/http/sleep/trigger/log config; use a focused script step when runtime values are required.',
       'Flow step timeout contract: `enfyra_flow_step.timeout` is the per-step execution deadline. When unset, ESV defaults the step to 5000 ms, which is below the flow-level timeout and too low for a script or condition step that loops over records or makes several repository/cache/transaction round-trips. Before saving a script or condition step, self-assess its worst-case duration and set an explicit `timeout` (up to the flow timeout) instead of relying on the default.',
       'trigger_flow only executes enabled flows. Verify a disabled flow with test_flow_step; enable it explicitly before testing the real queue/runtime trigger path.',

@@ -32,6 +32,11 @@ test('dynamic scripts reject method-style log calls and accept the callable log 
     /no generic emit\(\) method/i,
   );
   assert.doesNotThrow(() => validatePortableScriptSource('@SOCKET.emitToGateway("/jobs", "done", payload)'));
+  assert.throws(
+    () => validatePortableScriptSource('await @TRIGGER.trigger("send-email", payload)'),
+    /@TRIGGER is callable/i,
+  );
+  assert.doesNotThrow(() => validatePortableScriptSource('await @TRIGGER("send-email", payload)'));
 });
 
 test('runtime guidance distinguishes admin-test capture and executable storage limits', () => {
