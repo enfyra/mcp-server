@@ -140,18 +140,12 @@ export function registerPackageTools(server, ENFYRA_API_URL) {
         });
       }
   
-      // Step 3: Get current user for installedBy
-      const me = await fetchAPI(ENFYRA_API_URL, '/me');
-      const userId = me.data?.[0]?.id || me.data?.[0]?._id;
-      if (!userId) throw new Error('Cannot get current user ID');
-  
-      // Step 4: Install via enfyra_package
+      // Step 3: Install via enfyra_package
       const body = {
         name,
         version: pkgVersion,
         description: pkgDescription,
         type,
-        installedBy: { id: userId },
       };
   
       const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_package', {

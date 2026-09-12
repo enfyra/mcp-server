@@ -26,6 +26,51 @@ function createToolHarness() {
   };
 }
 
+test('install_package leaves installedBy ownership to the authenticated server route', async () => {
+  const originalFetch = globalThis.fetch;
+  const server = createToolHarness();
+  const requests = [];
+
+  globalThis.fetch = async (url, options = {}) => {
+    const urlText = String(url);
+    requests.push({ url: urlText, options });
+    if (urlText.includes('/enfyra_package?filter=')) {
+      return jsonResponse({ data: [] });
+    }
+    if (urlText.endsWith('/enfyra_package') && options.method === 'POST') {
+      return jsonResponse({ data: [{ id: 'package-1', name: 'pg', type: 'Server' }] });
+    }
+    return jsonResponse({ message: 'not found' }, 404);
+  };
+
+  resetTokens();
+  initAuth('https://example.test/api', 'api-token');
+  registerPackageTools(server, 'https://example.test/api');
+
+  try {
+    await server.get('install_package').handler({
+      name: 'pg',
+      type: 'Server',
+      version: '8.23.0',
+      globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
+    });
+
+    assert.equal(requests.some((request) => request.url.endsWith('/me')), false);
+    const installRequest = requests.find((request) =>
+      request.url.endsWith('/enfyra_package') && request.options.method === 'POST');
+    assert.ok(installRequest);
+    assert.deepEqual(JSON.parse(String(installRequest.options.body)), {
+      name: 'pg',
+      version: '8.23.0',
+      description: '',
+      type: 'Server',
+    });
+  } finally {
+    resetTokens();
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('package lifecycle tools toggle runtime state and preview uninstall before deletion', async () => {
   const originalFetch = globalThis.fetch;
   const server = createToolHarness();
