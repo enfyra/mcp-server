@@ -70,6 +70,7 @@ export type McpProfile = 'all' | 'extension' | 'schema' | 'runtime' | 'operation
 
 export interface ToolCatalogOptions {
   resolveAvailability?: (toolNames: string[]) => Promise<Record<string, ToolAvailability>>;
+  sourceDirectory?: () => string | null;
 }
 
 export type ToolAvailabilityStatus = 'allowed' | 'denied' | 'unknown';

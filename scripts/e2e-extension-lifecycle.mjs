@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { connectRootMcp } from './support/root-mcp-client.mjs';
 const fixtureName = `McpExtensionLifecycle_${Date.now()}_${randomUUID().slice(0, 8)}`;
 const initialMarker = 'mcp-extension-e2e-v1';
@@ -12,6 +15,7 @@ const initialCode = `<template>
 
 async function main() {
   const { client, execute: call, discover } = await connectRootMcp('extension');
+  const projectRoot = await mkdtemp(join(tmpdir(), 'enfyra-workspace-lifecycle-'));
   let extensionId = null;
   let primaryError = null;
   let cleanupError = null;
@@ -23,6 +27,7 @@ async function main() {
     const tools = await client.listTools();
     const toolNames = tools.tools.map((tool) => tool.name);
     assert.deepEqual(toolNames, ['enfyra']);
+    await call('prepare_enfyra_workspace', { projectRoot, artifacts: [] });
     for (const name of ['extension_workflow', 'patch_extension_code', 'verify_extension_runtime', 'delete_extension']) {
       assert.equal((await discover(name)).tools[0].name, name);
     }
@@ -40,33 +45,23 @@ async function main() {
     extensionId = created.extension?.id;
     assert.equal(created.complete, true);
     assert.ok(extensionId, 'extension_workflow did not return the created extension id');
-
-    const preview = await call('patch_extension_code', {
-      id: extensionId,
-      search: initialMarker,
-      replace: updatedMarker,
-      replaceAll: true,
-      apply: false,
-    });
-    assert.equal(preview.action, 'extension_code_patch_previewed');
-    assert.equal(preview.occurrences, 2);
-    assert.ok(preview.currentSha256);
-    assert.ok(preview.nextSha256);
-
-    const patched = await call('patch_extension_code', {
-      id: extensionId,
-      search: initialMarker,
-      replace: updatedMarker,
-      replaceAll: true,
-      expectedSha256: preview.currentSha256,
-      apply: true,
-    });
-    assert.equal(patched.action, 'extension_code_patch_applied');
-    assert.equal(patched.nextSha256, preview.nextSha256);
+    const workspace = await call('prepare_enfyra_workspace', { projectRoot, artifacts: [{ tableName: 'enfyra_extension', id: String(extensionId) }] });
+    const localFile = workspace.artifacts[0].localFile;
+    const source = await readFile(localFile, 'utf8');
+    assert.equal(source.split(initialMarker).length - 1, 2);
+    await writeFile(localFile, source.replaceAll(initialMarker, updatedMarker));
+    const preview = await call('push_enfyra_sources', { apply: false });
+    assert.ok(preview.planId);
+    assert.equal(preview.artifacts.length, 1);
+    const pushed = await call('push_enfyra_sources', { apply: true, planId: preview.planId });
+    assert.equal(pushed.complete, true);
+    assert.equal(pushed.artifacts[0].verified, true);
+    const expectedSha256 = pushed.artifacts[0].sourceSha256;
+    assert.equal((await call('inspect_enfyra_workspace')).artifacts[0].status, 'synced');
 
     const verified = await call('verify_extension_runtime', {
       id: extensionId,
-      expectedSha256: preview.nextSha256,
+      expectedSha256,
     });
     assert.equal(verified.valid, true);
     assert.equal(verified.checks.savedRecord.status, 'passed');
@@ -121,6 +116,7 @@ async function main() {
       }
     }
     await client.close().catch(() => undefined);
+    await rm(projectRoot, { recursive: true, force: true });
   }
 
   if (primaryError && cleanupError) {
@@ -128,7 +124,7 @@ async function main() {
   }
   if (cleanupError) throw cleanupError;
   if (primaryError) throw primaryError;
-  process.stdout.write(`${JSON.stringify({ passed: true, profile: 'extension', lifecycle: ['create', 'patch-preview', 'patch-apply', 'verify', 'cleanup'], fixtureRemoved: true })}\n`);
+  process.stdout.write(`${JSON.stringify({ passed: true, profile: 'extension', lifecycle: ['create', 'workspace-prepare', 'workspace-edit', 'push-preview', 'push-apply', 'verify', 'cleanup'], fixtureRemoved: true })}\n`);
 }
 
 await main();

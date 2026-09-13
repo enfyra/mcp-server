@@ -34,6 +34,7 @@ import { registerTableTools } from './table-tools.js';
 import { registerToolCatalogTools } from './tool-catalog.js';
 import { installToolAnnotations } from './tool-contracts.js';
 import { installToolOutputContracts } from './tool-output-contracts.js';
+import { registerWorkspaceTools } from './workspace-tools.js';
 import {
   installToolsetFilter,
   summarizeToolsetForInstructions,
@@ -95,8 +96,10 @@ export function createEnfyraMcpServer() {
   registerIdentityTools(server, ENFYRA_API_URL);
   registerPackageTools(server, ENFYRA_API_URL);
   registerCompoundTools(server, ENFYRA_API_URL);
+  const workspace = registerWorkspaceTools(server, toolsetState, ENFYRA_API_URL, process.env.ENFYRA_MCP_PROJECT_ROOT);
   registerToolCatalogTools(server, toolsetState, {
     resolveAvailability: resolveCatalogToolAvailability,
+    sourceDirectory: workspace.artifactDirectory,
   });
 
   return server;

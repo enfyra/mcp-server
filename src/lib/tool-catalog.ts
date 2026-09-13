@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { recordMcpToolUsage } from './mcp-usage-telemetry.js';
 import { paginateResults } from './pagination.js';
-import { formatToolResult, jsonContent } from './response-format.js';
-import { afterMcpToolExecution, beforeMcpToolExecution } from './session-safety.js';
+import { jsonContent } from './response-format.js';
+import { withSourceArtifactDirectory } from './source-artifacts.js';
+import { executeToolDefinition } from './tool-execution.js';
 import { getToolContract, isCatalogExecutable } from './tool-contracts.js';
-import { getToolOutputSchema, validateStructuredToolOutput } from './tool-output-contracts.js';
+import { getToolOutputSchema } from './tool-output-contracts.js';
 import { discoverWorkflowRoutes, listWorkflowSurfaces } from './tool-routing.js';
 import type { RegisteredToolDefinition, ToolAvailability, ToolCatalogOptions, ToolsetRegistrationState } from './types.js';
 
@@ -53,7 +53,7 @@ const gatewayInput = z.discriminatedUnion('action', [
   z.object({ action: z.literal('execute'), ...executionInput }).strict(),
 ]);
 
-export function registerToolCatalogTools(server: any, state: ToolsetRegistrationState, { resolveAvailability }: ToolCatalogOptions = {}) {
+export function registerToolCatalogTools(server: any, state: ToolsetRegistrationState, { resolveAvailability, sourceDirectory }: ToolCatalogOptions = {}) {
   const availabilityFor = async (names: string[]) => {
     const remote = names.filter((name) => name !== 'get_enfyra_api_context' && getToolContract(name).annotations.openWorldHint);
     const availability = defaultAvailability(names);
@@ -115,6 +115,7 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
           }),
           prerequisites: [
             { ...invocationFor('get_enfyra_api_context'), when: 'Before the first write, execute and verify the target API.' },
+            { ...invocationFor('prepare_enfyra_workspace'), when: 'Before inspecting or editing live source, prepare its ignored project workspace with explicit artifact references.' },
             { ...invocationFor('get_enfyra_required_knowledge'), when: 'Discover its schema and execute with the workflow domain before writing.' },
           ],
           guidance: [
@@ -129,25 +130,8 @@ export function registerToolCatalogTools(server: any, state: ToolsetRegistration
       if (!tool || !isCatalogExecutable(request.name)) {
         throw new Error(`Operation "${request.name}" is unavailable through enfyra. Use action=discover to find its guided workflow.`);
       }
-      const startedAt = Date.now();
-      let formatted: any;
-      try {
-        const parsed = z.object(tool.inputSchema as z.ZodRawShape).parse(request.arguments);
-        beforeMcpToolExecution(tool.name, parsed);
-        const availability = (await availabilityFor([tool.name]))[tool.name];
-        if (availability?.status === 'denied') throw new Error(`${tool.name} is unavailable for the current PAT: ${availability.reason}`);
-        const result = await tool.handler(parsed, extra);
-        formatted = formatToolResult(result, { toolName: tool.name });
-        if (formatted?.isError !== true) {
-          const validated = validateStructuredToolOutput(tool.name, formatted?.structuredContent);
-          if (validated.success === false) throw new Error(`${tool.name} returned invalid structured output: ${validated.error.message}`);
-        }
-        afterMcpToolExecution(tool.name, parsed, formatted);
-        recordMcpToolUsage(tool.name, startedAt, [parsed], formatted);
-      } catch (error) {
-        recordMcpToolUsage(tool.name, startedAt, [request.arguments], undefined, error);
-        throw error;
-      }
+      const execute = () => executeToolDefinition(tool, request.arguments, extra, availabilityFor);
+      const formatted = await (sourceDirectory ? withSourceArtifactDirectory(sourceDirectory(), execute) : execute());
       const text = formatted?.content?.filter((item: any) => item.type === 'text').map((item: any) => item.text).join('\n') ?? '';
       const envelope = jsonContent({ action: 'enfyra_catalog_tool_executed', tool: tool.name, result: formatted?.structuredContent ?? text }, { columnar: false });
       return {

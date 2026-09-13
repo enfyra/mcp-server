@@ -2,6 +2,7 @@ import type { ToolWorkflow, WorkflowProfile, WorkflowSurface } from './workflow-
 export type { AvoidToolRule, ToolWorkflow, WorkflowDetail, WorkflowPathStep, WorkflowProfile, WorkflowRouteOptions, WorkflowSurface } from './workflow-types.js';
 
 export const WORKFLOW_SURFACES = [
+  'script-workspace',
   'api-endpoint',
   'extension',
   'schema',
@@ -25,13 +26,29 @@ export const WORKFLOW_SURFACES = [
 export const ALL_DETAILS = ['summary', 'plan', 'full'] as const;
 
 export const WORKFLOW_SURFACES_BY_PROFILE: Record<Exclude<WorkflowProfile, 'all'>, readonly WorkflowSurface[]> = {
-  extension: ['extension'],
-  schema: ['schema', 'record-data', 'guards-permissions-rules'],
-  runtime: ['api-endpoint', 'dynamic-script', 'route-access', 'guards-permissions-rules', 'flow', 'websocket', 'graphql'],
-  operations: ['storage-file', 'oauth', 'identity-access', 'platform-config', 'package', 'cache', 'logs-debug', 'auth-context'],
+  extension: ['extension', 'script-workspace'],
+  schema: ['schema', 'record-data', 'guards-permissions-rules', 'script-workspace'],
+  runtime: ['api-endpoint', 'dynamic-script', 'route-access', 'guards-permissions-rules', 'flow', 'websocket', 'graphql', 'script-workspace'],
+  operations: ['storage-file', 'oauth', 'identity-access', 'platform-config', 'package', 'cache', 'logs-debug', 'auth-context', 'script-workspace'],
 };
 
 export const TOOL_WORKFLOWS = [
+  {
+    key: 'script-workspace',
+    title: 'Project-local live source worktree',
+    useWhen: ['Preparing, inspecting, editing or synchronizing live scripts in a local project.'],
+    keywords: ['workspace', 'worktree', 'mirror', 'sync scripts', 'pull source', 'push source', 'local source', 'gitignore', 'đồng bộ', 'thư mục'],
+    firstTools: ['get_enfyra_api_context', 'prepare_enfyra_workspace'],
+    inspectTools: ['inspect_enfyra_workspace'],
+    knowledgeTools: ['get_enfyra_required_knowledge'],
+    writeTools: ['prepare_enfyra_workspace', 'pull_enfyra_sources', 'push_enfyra_sources'],
+    verifyTools: ['inspect_enfyra_workspace'],
+    avoidTools: [{ tool: 'update_records', when: 'synchronizing reviewed workspace sources', useInstead: 'push_enfyra_sources', reason: 'Workspace push preserves the baseline, canonical validation and saved-source verification.' }],
+    requiredAck: ['globalRulesAckKey', 'dynamicCodeKnowledgeAckKey or extensionKnowledgeAckKey'],
+    exampleCategories: [],
+    nextStepTemplate: ['Locate exact source records, prepare the ignored project workspace, inspect drift, edit localFile, preview push, apply the unchanged plan and verify.'],
+    recommendedScope: 'dynamic-code',
+  },
   {
     key: 'api-endpoint',
     title: 'Custom REST endpoint with handler',

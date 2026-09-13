@@ -20,6 +20,21 @@ const EXPECTED_ENV = {
   ENFYRA_API_TOKEN: 'secret-token',
 };
 
+test('project-root configuration is emitted and preserved by JSON and Codex hosts', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'enfyra-workspace-config-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const entry = buildServerEntry(EXPECTED_ENV.ENFYRA_API_URL, EXPECTED_ENV.ENFYRA_API_TOKEN, { projectRoot: root });
+  assert.equal(entry.env.ENFYRA_MCP_PROJECT_ROOT, root);
+  const jsonPath = getClientPath('cursor', root);
+  await mergeMcpFile(jsonPath, entry);
+  await mergeMcpFile(jsonPath, buildServerEntry(EXPECTED_ENV.ENFYRA_API_URL, EXPECTED_ENV.ENFYRA_API_TOKEN));
+  assert.equal(JSON.parse(await readFile(jsonPath, 'utf8')).mcpServers.enfyra.env.ENFYRA_MCP_PROJECT_ROOT, root);
+  const codexPath = getClientPath('codex', root);
+  await mergeCodexConfig(codexPath, EXPECTED_ENV.ENFYRA_API_URL, EXPECTED_ENV.ENFYRA_API_TOKEN, { projectRoot: root });
+  await mergeCodexConfig(codexPath, EXPECTED_ENV.ENFYRA_API_URL, EXPECTED_ENV.ENFYRA_API_TOKEN);
+  assert.ok((await readFile(codexPath, 'utf8')).includes(`ENFYRA_MCP_PROJECT_ROOT = ${JSON.stringify(root)}`));
+});
+
 test('all supported clients are selected equally by default and explicit selectors stay isolated', () => {
   const clientFlags = {
     codex: '--codex',

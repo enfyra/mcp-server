@@ -11,6 +11,7 @@ const execFile = promisify(execFileCallback);
 type JsonRecord = Record<string, any>;
 type ServerEntry = ReturnType<typeof buildServerEntry>;
 const ADVANCED_RUNTIME_ENV_KEYS = [
+  'ENFYRA_MCP_PROJECT_ROOT',
   'ENFYRA_MCP_DYNAMIC_TOOLS',
   'ENFYRA_MCP_PROFILE',
 ] as const;
@@ -25,13 +26,14 @@ function advancedRuntimeEnv(env: unknown) {
 }
 
 function runtimeEnvForMode(options: McpServerEntryOptions = {}) {
+  const workspaceEnv = options.projectRoot ? { ENFYRA_MCP_PROJECT_ROOT: options.projectRoot } : {};
   if (options.toolMode === 'compact') {
-    return { ENFYRA_MCP_DYNAMIC_TOOLS: 'on' };
+    return { ...workspaceEnv, ENFYRA_MCP_DYNAMIC_TOOLS: 'on' };
   }
   if (options.toolMode === 'static') {
-    return { ENFYRA_MCP_DYNAMIC_TOOLS: 'off' };
+    return { ...workspaceEnv, ENFYRA_MCP_DYNAMIC_TOOLS: 'off' };
   }
-  return {};
+  return workspaceEnv;
 }
 
 function mergeServerEntry(existing: unknown, next: ServerEntry): ServerEntry {

@@ -1,4 +1,5 @@
 export type WorkflowSurface =
+  | 'script-workspace'
   | 'api-endpoint'
   | 'extension'
   | 'schema'

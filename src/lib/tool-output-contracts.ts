@@ -192,6 +192,7 @@ const BASE_OUTPUT_TOOLS = new Set([
 ]);
 
 export function getToolOutputSchema(toolName: string): ZodRawShape | undefined {
+  if (['prepare_enfyra_workspace', 'inspect_enfyra_workspace', 'pull_enfyra_sources', 'push_enfyra_sources'].includes(toolName)) return actionOutputSchema;
   if (toolName === 'enfyra') return actionOutputSchema;
   if (toolName === 'discover_enfyra_workflows') return workflowDiscoveryOutputSchema;
   if (toolName === 'get_enfyra_api_context') return apiContextOutputSchema;

@@ -8,6 +8,7 @@ export type McpConfigToolMode = 'preserve' | 'compact' | 'static';
 
 export type McpServerEntryOptions = {
   toolMode?: McpConfigToolMode;
+  projectRoot?: string;
 };
 
 export type ParsedArgs = ClientSelection & {

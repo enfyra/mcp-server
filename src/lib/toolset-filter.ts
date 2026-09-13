@@ -4,6 +4,10 @@ export type { McpProfile, McpToolset } from './types.js';
 export const MCP_PROFILES = ['all', 'extension', 'schema', 'runtime', 'operations'] as const;
 
 export const CORE_TOOL_NAMES = [
+  'prepare_enfyra_workspace',
+  'inspect_enfyra_workspace',
+  'pull_enfyra_sources',
+  'push_enfyra_sources',
   'get_enfyra_required_knowledge',
   'get_enfyra_examples',
   'discover_enfyra_workflows',

@@ -84,6 +84,17 @@ function requireScope(scope: string): KnowledgeScope {
 
 const GLOBAL_RULES_SECTIONS = [
   {
+    id: 'project-source-workspace',
+    rules: [
+      'Before inspecting or editing live source, call prepare_enfyra_workspace with the client projectRoot and exact tableName/id artifacts from discovery. Pass artifacts=[] only to start a new project source workflow. Reopen an existing workspace before source work in each MCP session; the runtime does not guess projectRoot from cwd.',
+      'The complete enfyra/ worktree and .tmp/enfyra/ are local-only. Preparation adds and verifies Git ignore before source checkout. Never commit the worktree; it may contain live server code. A prepared workspace is bound to the configured API target.',
+      'Use inspect_enfyra_workspace before editing localFile. Pull updates only missing or unchanged local sources; conflicts and remote deletions preserve local files. Never overwrite local edits or infer a server deletion from a removed local file.',
+      'Push with apply=false to validate and review source diffs, then apply=true with that planId. Local/live hashes must still match the reviewed plan. Saved source is reread and verified; partial failures require fresh inspection and preview. The check is optimistic and does not atomically lock external server writers.',
+      'All source and diff artifacts from the connected MCP are stored beneath the prepared project .tmp/enfyra target/session directory. Workspace push stages local files into the current process artifact registry; arbitrary sourceFile paths remain rejected by ordinary source operations.',
+      'A workspace mirrors assembled live scripts. When a separate project source tree composes shared fragments, edit/build that owning tree deliberately and stage its complete output in the workspace; never replace a fragment with an assembled live script.',
+    ],
+  },
+  {
     id: 'examples-are-reasoning-anchors',
     rules: [
       'Examples explain transferable decisions, not copy-paste mandates.',

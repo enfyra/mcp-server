@@ -26,6 +26,15 @@ function step(order: number, tool: string, purpose: string, extra: Partial<Workf
 
 function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
   switch (workflow.key) {
+    case 'script-workspace':
+      return [
+        step(1, 'get_enfyra_api_context', 'Confirm the connected target before local workspace setup or source writes.'),
+        step(2, 'prepare_enfyra_workspace', 'Use explicit artifact ids from prior discovery. Add Git ignore before source checkout; reopen an existing workspace without overwriting local edits.'),
+        step(3, 'inspect_enfyra_workspace', 'Compare local, baseline and live hashes. Pull remote-only changes; resolve conflicts before editing.'),
+        step(4, 'get_enfyra_required_knowledge', 'Load dynamic-code for scripts or extension for Vue source before validating and pushing.'),
+        step(5, 'push_enfyra_sources', 'Edit localFile, preview with apply=false, review diffs, then apply=true with the unchanged planId. Partial failures require fresh inspection.'),
+        step(6, 'inspect_enfyra_workspace', 'Verify local and live source hashes agree. Runtime behavior still requires the owning workflow smoke test.'),
+      ];
     case 'api-endpoint':
       return [
         step(1, 'get_enfyra_required_knowledge', 'Read mutation/security contracts and collect acknowledgement keys.'),

@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { normalizeOptionalText } from './tool-input-normalization.js';
 
@@ -16,6 +17,17 @@ const SOURCE_FIELD_NAMES = new Set([
 ]);
 const SOURCE_ARTIFACTS = new Map<string, { path: string; mimeType: string }>();
 export const SOURCE_ARTIFACT_DIR = join(tmpdir(), 'enfyra-mcp-sources', String(process.pid));
+const artifactDirectory = new AsyncLocalStorage<string | null>();
+
+export function withSourceArtifactDirectory<T>(directory: string | null, run: () => T): T {
+  return artifactDirectory.run(directory, run);
+}
+
+function currentArtifactDirectory() {
+  const directory = artifactDirectory.getStore();
+  if (directory === null) throw new Error('Prepare the project source workspace first with prepare_enfyra_workspace. Source artifacts require a project-local .tmp directory.');
+  return directory ?? SOURCE_ARTIFACT_DIR;
+}
 
 type SourceArtifactInput = {
   tableName?: string;
@@ -56,18 +68,19 @@ function artifactId(tableName: string | undefined, id: string | number, fieldNam
 }
 
 export function writeSourceArtifact({ tableName, id, fieldName, source }: SourceArtifactInput) {
+  const directory = currentArtifactDirectory();
   const hash = sha256(source);
   const extension = extensionForField(fieldName);
-  mkdirSync(SOURCE_ARTIFACT_DIR, { recursive: true, mode: 0o700 });
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
   const fileName = [
     safePart(tableName),
     safePart(id),
     safePart(fieldName),
     hash.slice(0, 12),
   ].join('-') + extension;
-  const path = join(SOURCE_ARTIFACT_DIR, fileName);
+  const path = join(directory, fileName);
   writeFileSync(path, source, { mode: 0o600 });
-  const resourceId = artifactId(tableName, id, fieldName, hash);
+  const resourceId = `${sha256(directory).slice(0, 16)}-${artifactId(tableName, id, fieldName, hash)}`;
   const resourceUri = `enfyra-source://artifact/${encodeURIComponent(resourceId)}`;
   SOURCE_ARTIFACTS.set(resourceId, { path, mimeType: mimeTypeForExtension(extension) });
   return {
@@ -82,10 +95,11 @@ export function writeSourceArtifact({ tableName, id, fieldName, source }: Source
 }
 
 export function cleanupSourceArtifacts() {
-  const existed = existsSync(SOURCE_ARTIFACT_DIR);
-  if (existed) rmSync(SOURCE_ARTIFACT_DIR, { recursive: true, force: true });
-  SOURCE_ARTIFACTS.clear();
-  return { directory: SOURCE_ARTIFACT_DIR, removed: existed };
+  const directory = currentArtifactDirectory();
+  const existed = existsSync(directory);
+  if (existed) rmSync(directory, { recursive: true, force: true });
+  for (const [id, artifact] of SOURCE_ARTIFACTS) if (dirname(artifact.path) === directory) SOURCE_ARTIFACTS.delete(id);
+  return { directory, removed: existed };
 }
 
 export function readSourceArtifactResource(resourceUri: string) {
@@ -181,7 +195,7 @@ export function materializeSourceInput({ source, sourceCode, code, sourceFile, s
 
 export function compactSourceField({ tableName, id, fieldName, source, alwaysWrite = false }: SourceArtifactInput & { alwaysWrite?: boolean }) {
   if (typeof source !== 'string') return source;
-  if (!alwaysWrite && source.length <= DEFAULT_INLINE_LIMIT) return source;
+  if (artifactDirectory.getStore() === undefined && !alwaysWrite && source.length <= DEFAULT_INLINE_LIMIT) return source;
   return writeSourceArtifact({ tableName, id, fieldName, source });
 }
 

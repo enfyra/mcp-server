@@ -25,6 +25,7 @@ export function buildMcpServerInstructions(apiBaseUrl, options: McpInstructionOp
     '',
     '- Only `enfyra` is callable: action=discover loads schemas; action=execute runs internal names with arguments.',
     '- Before writes, execute `get_enfyra_api_context`. Inspect only the exact artifact.',
+    '- Before source work, use `prepare_enfyra_workspace`; edit its ignored local files and push reviewed plans.',
     '- For known non-destructive tasks, load narrow `get_enfyra_required_knowledge`; use the most specific operation tool. Session acknowledgement removes repeated keys.',
     '- Capability index: API, extension, schema/data, scripts, access, flow, GraphQL, storage, identity. Discover by intent; load context lazily.',
     '- Third-app: install @enfyra/sdk-*; no manual proxy. OAuth: connect first, ask only for credentials, show `setup_oauth_provider` callback, wait, verify `/me`.',

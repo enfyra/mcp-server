@@ -16,7 +16,7 @@ The setup asks for:
 - an `ENFYRA_API_TOKEN` created from the Enfyra admin UI `/me` page;
 - the MCP clients to configure.
 
-It writes project-local configuration and replaces only the `enfyra` server entry.
+It writes project-local configuration, records the setup directory as `ENFYRA_MCP_PROJECT_ROOT`, and replaces only the `enfyra` server entry.
 
 | Client | Command | Project config |
 |---|---|---|
@@ -126,10 +126,13 @@ npx @enfyra/mcp-server@latest config [options]
 |---|---|---|
 | `ENFYRA_API_URL` | Runtime API base written into MCP config | Required |
 | `ENFYRA_API_TOKEN` | Programmatic token from the Enfyra admin UI `/me` | Required |
+| `ENFYRA_MCP_PROJECT_ROOT` | Absolute project directory for source workspaces | Set by `config`; otherwise use an explicit tool argument or one client-provided root |
 
 The MCP connection exposes one tool, `enfyra`, throughout the session. No tool-loading configuration is needed. `ENFYRA_MCP_PROFILE` guides workflow discovery; it does not add public tools. Re-running `config` preserves existing advanced settings. `ENFYRA_MCP_DYNAMIC_TOOLS` and `--static-tools` do not change the single-tool runtime surface. Reconnect the MCP client after updating the installed package.
 
 The MCP sends this PAT directly through Enfyra Server's native `x-enfyra-pat` header. It does not exchange the PAT for a short-lived access token or send it as a Bearer token.
+
+Source workflows prepare an `enfyra/` working directory and store source snapshots and diffs under `.tmp/enfyra/<target>/<session>/` inside the selected project. Preparation adds `/enfyra/` and `/.tmp/enfyra/` to the project's `.gitignore` before writing source. The runtime does not infer the project from its launch directory. Reopen the workspace in each new MCP session; existing local edits are preserved.
 
 ## Verify the Connection
 
