@@ -9,7 +9,6 @@ import {
   CAPABILITY_AREAS,
   FIELD_PERMISSION_CONDITION_OPERATORS,
   FILTER_OPERATORS,
-  MCP_DYNAMIC_TOOLS,
   MCP_PROFILE,
   asNonEmptyStringTuple,
   collectPartialErrors,
@@ -145,7 +144,7 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
       detail: z.enum(['summary', 'plan', 'full']).optional().default('summary').describe('summary lists candidate workflows; plan adds tool sequence and avoidTools; full also includes matching keywords.'),
       limit: z.number().int().positive().max(10).optional().default(5).describe('Maximum workflows to return.'),
     },
-    async (input) => jsonContent(discoverWorkflowRoutes(input, MCP_PROFILE, MCP_DYNAMIC_TOOLS)),
+    async (input) => jsonContent(discoverWorkflowRoutes(input, MCP_PROFILE)),
   );
 
   server.tool(

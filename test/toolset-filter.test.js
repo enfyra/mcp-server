@@ -3,8 +3,7 @@ import assert from 'node:assert/strict';
 import { registeredToolNamesFromSource } from '../test-support/source-tree.js';
 import {
   installToolsetFilter,
-  isToolVisibleInToolset,
-  normalizeDynamicToolPacks,
+  isToolInProfile,
   normalizeMcpProfile,
   summarizeToolsetForInstructions,
 } from '../dist/lib/toolset-filter.js';
@@ -39,19 +38,10 @@ test('normalizes MCP domain profile to all by default', () => {
   assert.equal(normalizeMcpProfile('operations'), 'operations');
 });
 
-test('dynamic tool packs are the default and keep profile fallback', () => {
-  assert.equal(normalizeDynamicToolPacks(undefined, 'all'), true);
-  assert.equal(normalizeDynamicToolPacks('', 'all'), true);
-  assert.equal(normalizeDynamicToolPacks('off', 'all'), false);
-  assert.equal(normalizeDynamicToolPacks('on', 'all'), true);
-  assert.equal(normalizeDynamicToolPacks(undefined, 'extension'), false);
-  assert.equal(normalizeDynamicToolPacks('on', 'extension'), false);
-});
-
 test('guided domain profiles expose a bounded task surface', () => {
   const registered = registeredToolNames();
   for (const profile of ['extension', 'schema', 'runtime', 'operations']) {
-    const visible = [...registered].filter((name) => isToolVisibleInToolset(name, 'guided', profile));
+    const visible = [...registered].filter((name) => isToolInProfile(name, profile));
     assert.ok(visible.length >= 20, `${profile} exposes too few tools: ${visible.length}`);
     assert.ok(visible.length <= 52, `${profile} exposes too many tools: ${visible.length}`);
     assert.ok(visible.includes('get_enfyra_api_context'));
@@ -61,109 +51,90 @@ test('guided domain profiles expose a bounded task surface', () => {
 });
 
 test('extension and schema profiles isolate normal domain tools', () => {
-  assert.equal(isToolVisibleInToolset('extension_workflow', 'guided', 'extension'), true);
-  assert.equal(isToolVisibleInToolset('patch_extension_code', 'guided', 'extension'), true);
-  assert.equal(isToolVisibleInToolset('delete_extension', 'guided', 'extension'), true);
-  assert.equal(isToolVisibleInToolset('delete_menu', 'guided', 'extension'), true);
-  assert.equal(isToolVisibleInToolset('create_tables', 'guided', 'extension'), false);
-  assert.equal(isToolVisibleInToolset('create_handler', 'guided', 'extension'), false);
+  assert.equal(isToolInProfile('extension_workflow', 'extension'), true);
+  assert.equal(isToolInProfile('patch_extension_code', 'extension'), true);
+  assert.equal(isToolInProfile('delete_extension', 'extension'), true);
+  assert.equal(isToolInProfile('delete_menu', 'extension'), true);
+  assert.equal(isToolInProfile('create_tables', 'extension'), false);
+  assert.equal(isToolInProfile('create_handler', 'extension'), false);
 
-  assert.equal(isToolVisibleInToolset('create_tables', 'guided', 'schema'), true);
-  assert.equal(isToolVisibleInToolset('query_table', 'guided', 'schema'), true);
-  assert.equal(isToolVisibleInToolset('extension_workflow', 'guided', 'schema'), false);
-  assert.equal(isToolVisibleInToolset('search_logs', 'guided', 'schema'), false);
+  assert.equal(isToolInProfile('create_tables', 'schema'), true);
+  assert.equal(isToolInProfile('query_table', 'schema'), true);
+  assert.equal(isToolInProfile('extension_workflow', 'schema'), false);
+  assert.equal(isToolInProfile('search_logs', 'schema'), false);
 });
 
 test('guided toolset exposes front-door tools and hides escape hatches', () => {
-  assert.equal(isToolVisibleInToolset('discover_enfyra_workflows', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('select_enfyra_workflow', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('confirm_schema_mutation', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('confirm_schema_mutation', 'guided', 'schema'), true);
-  assert.equal(isToolVisibleInToolset('search_admin_extensions', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('assess_permission_exposure', 'guided', 'extension'), true);
-  assert.equal(isToolVisibleInToolset('search_runtime_zone', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('inspect_rest_projection', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('debug_field_exposure', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('api_endpoint_workflow', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('apply_endpoint', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('apply_schema', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('resolve_route_context', 'guided', 'runtime'), true);
-  assert.equal(isToolVisibleInToolset('resolve_route_context', 'guided', 'operations'), true);
-  assert.equal(isToolVisibleInToolset('patch_extension_code', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('verify_extension_runtime', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_ui', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_extension_api_usage', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('validate_extension_code', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('get_theme_class_reference', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_drawer', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_modal', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_page_shell', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_permission_gate', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_empty_state', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_resource_list', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_form_editor', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_widget', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_menu_notification', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_account_panel_item', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_tabs', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('build_extension_upload_modal', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('review_extension_ui_contract', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('create_pre_hook', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('ensure_route_rate_limit', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('flow_workflow', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('ensure_flow', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('ensure_flow_trigger', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('remove_flow_trigger', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('delete_flow', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('delete_flow_step', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('plan_flow_steps', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('test_graphql', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('build_dynamic_repository_usage', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('create_handler', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('create_post_hook', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('delete_route_handler', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('delete_route_hook', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('delete_route_permission', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('ensure_auth_header', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('reorder_auth_headers', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('ensure_auth_header', 'guided', 'operations'), true);
-  assert.equal(isToolVisibleInToolset('list_methods', 'guided'), true);
-  assert.equal(isToolVisibleInToolset('ensure_script_flow_step', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('ensure_manual_flow', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('ensure_scheduled_flow', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('create_route', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('reload_all', 'guided'), false);
-  assert.equal(isToolVisibleInToolset('get_log_content', 'guided'), false);
+  assert.equal(isToolInProfile('discover_enfyra_workflows'), true);
+  assert.equal(isToolInProfile('select_enfyra_workflow'), false);
+  assert.equal(isToolInProfile('confirm_schema_mutation'), true);
+  assert.equal(isToolInProfile('confirm_schema_mutation', 'schema'), true);
+  assert.equal(isToolInProfile('search_admin_extensions'), true);
+  assert.equal(isToolInProfile('assess_permission_exposure', 'extension'), true);
+  assert.equal(isToolInProfile('search_runtime_zone'), true);
+  assert.equal(isToolInProfile('inspect_rest_projection'), true);
+  assert.equal(isToolInProfile('debug_field_exposure'), false);
+  assert.equal(isToolInProfile('api_endpoint_workflow'), true);
+  assert.equal(isToolInProfile('apply_endpoint'), false);
+  assert.equal(isToolInProfile('apply_schema'), false);
+  assert.equal(isToolInProfile('resolve_route_context', 'runtime'), true);
+  assert.equal(isToolInProfile('resolve_route_context', 'operations'), true);
+  assert.equal(isToolInProfile('patch_extension_code'), true);
+  assert.equal(isToolInProfile('verify_extension_runtime'), true);
+  assert.equal(isToolInProfile('build_extension_ui'), true);
+  assert.equal(isToolInProfile('build_extension_api_usage'), false);
+  assert.equal(isToolInProfile('validate_extension_code'), false);
+  assert.equal(isToolInProfile('get_theme_class_reference'), false);
+  assert.equal(isToolInProfile('build_extension_drawer'), false);
+  assert.equal(isToolInProfile('build_extension_modal'), false);
+  assert.equal(isToolInProfile('build_extension_page_shell'), false);
+  assert.equal(isToolInProfile('build_extension_permission_gate'), false);
+  assert.equal(isToolInProfile('build_extension_empty_state'), false);
+  assert.equal(isToolInProfile('build_extension_resource_list'), false);
+  assert.equal(isToolInProfile('build_extension_form_editor'), false);
+  assert.equal(isToolInProfile('build_extension_widget'), false);
+  assert.equal(isToolInProfile('build_extension_menu_notification'), false);
+  assert.equal(isToolInProfile('build_extension_account_panel_item'), false);
+  assert.equal(isToolInProfile('build_extension_tabs'), false);
+  assert.equal(isToolInProfile('build_extension_upload_modal'), false);
+  assert.equal(isToolInProfile('review_extension_ui_contract'), false);
+  assert.equal(isToolInProfile('create_pre_hook'), true);
+  assert.equal(isToolInProfile('ensure_route_rate_limit'), true);
+  assert.equal(isToolInProfile('flow_workflow'), true);
+  assert.equal(isToolInProfile('ensure_flow'), true);
+  assert.equal(isToolInProfile('ensure_flow_trigger'), true);
+  assert.equal(isToolInProfile('remove_flow_trigger'), true);
+  assert.equal(isToolInProfile('delete_flow'), true);
+  assert.equal(isToolInProfile('delete_flow_step'), true);
+  assert.equal(isToolInProfile('plan_flow_steps'), true);
+  assert.equal(isToolInProfile('test_graphql'), true);
+  assert.equal(isToolInProfile('build_dynamic_repository_usage'), true);
+  assert.equal(isToolInProfile('create_handler'), true);
+  assert.equal(isToolInProfile('create_post_hook'), true);
+  assert.equal(isToolInProfile('delete_route_handler'), true);
+  assert.equal(isToolInProfile('delete_route_hook'), true);
+  assert.equal(isToolInProfile('delete_route_permission'), true);
+  assert.equal(isToolInProfile('ensure_auth_header'), true);
+  assert.equal(isToolInProfile('reorder_auth_headers'), true);
+  assert.equal(isToolInProfile('ensure_auth_header', 'operations'), true);
+  assert.equal(isToolInProfile('list_methods'), true);
+  assert.equal(isToolInProfile('ensure_script_flow_step'), false);
+  assert.equal(isToolInProfile('ensure_manual_flow'), false);
+  assert.equal(isToolInProfile('ensure_scheduled_flow'), false);
+  assert.equal(isToolInProfile('create_route'), false);
+  assert.equal(isToolInProfile('reload_all'), false);
+  assert.equal(isToolInProfile('get_log_content'), false);
 });
 
-test('installToolsetFilter registers disabled tools and activates one bounded pack', () => {
-  const registered = [];
-  const server = {
-    tool(name, description, schema, handler) {
-      const registration = { name, enabled: true };
-      registered.push({ name, description, schema, handler, registration });
-      return registration;
-    },
-    sendToolListChanged() {},
-  };
-  const state = installToolsetFilter(server, 'guided', 'all', { dynamic: true });
-  assert.equal(server.tool('discover_enfyra_workflows', '', {}, () => null).enabled, true);
+test('registration exposes only the gateway while keeping internal operations callable by the catalog', () => {
+  const server = { tool: (name) => ({ name, enabled: true }) };
+  const state = installToolsetFilter(server, 'guided', 'all');
+  assert.equal(server.tool('enfyra', '', {}, () => null).enabled, true);
+  assert.equal(server.tool('get_enfyra_api_context', '', {}, () => null).enabled, false);
   assert.equal(server.tool('create_route', '', {}, () => null).enabled, false);
-  assert.deepEqual(registered.map((item) => item.name), ['discover_enfyra_workflows', 'create_route']);
-  assert.deepEqual(state.hiddenTools, ['create_route']);
-  assert.equal(state.profile, 'all');
-  assert.equal(state.getTool('create_route').visible, false);
-  assert.equal(state.getTool('discover_enfyra_workflows').visible, true);
-  const activated = state.setActiveTools(['create_route']);
-  assert.equal(activated.visibleToolNames.includes('create_route'), false);
-  assert.equal(activated.visibleToolNames.includes('discover_enfyra_workflows'), true);
-});
-
-test('guided profiles expose the hybrid catalog front doors', () => {
-  for (const profile of ['all', 'extension', 'schema', 'runtime', 'operations']) {
-    assert.equal(isToolVisibleInToolset('search_enfyra_tools', 'guided', profile), true);
-    assert.equal(isToolVisibleInToolset('execute_enfyra_tool', 'guided', profile), true);
-  }
+  assert.deepEqual(state.listVisibleToolNames(), ['enfyra']);
+  assert.equal(typeof state.getTool('get_enfyra_api_context').handler, 'function');
+  assert.deepEqual(state.hiddenTools, ['get_enfyra_api_context', 'create_route']);
 });
 
 test('toolset instruction summary describes the fixed guided surface', () => {
@@ -184,7 +155,7 @@ test('guided workflow primary paths never direct callers to hidden tools', () =>
       const toolNames = step.tool.split(/\s+or\s+|\s*\/\s*/g).map((tool) => tool.trim());
       for (const toolName of toolNames) {
         assert.equal(
-          isToolVisibleInToolset(toolName, 'guided'),
+          isToolInProfile(toolName),
           true,
           `${surface} primary path directs guided callers to hidden tool ${toolName}`,
         );
@@ -198,10 +169,10 @@ test('dynamic workflow discovery routes hidden domain tools through the schema-v
     intent: 'create a temporary widget extension',
     detail: 'plan',
     limit: 1,
-  }, 'all', true);
+  }, 'all');
   assert.equal(result.nextSelection, undefined);
-  assert.match(result.guidance[0], /search_enfyra_tools.*exact name.*execute_enfyra_tool/i);
-  assert.match(result.guidance[0], /Do not rely on tools\/list_changed refreshes/i);
+  assert.match(result.guidance[0], /enfyra action=discover.*exact name.*action=execute/i);
+  assert.match(result.guidance[0], /tools\/list stays unchanged/i);
   assert.match(JSON.stringify(result.workflows[0].primaryPath), /already return valid saved-state verification/i);
 });
 
@@ -212,7 +183,7 @@ test('OAuth provider setup intents route to the dedicated OAuth workflow', () =>
     'tích hợp đăng nhập Google cho third app dùng Enfyra',
     'cấu hình OAuth provider cho app bên ngoài',
   ]) {
-    const result = discoverWorkflowRoutes({ intent, risk: 'write', detail: 'plan', limit: 1 }, 'all', true);
+    const result = discoverWorkflowRoutes({ intent, risk: 'write', detail: 'plan', limit: 1 }, 'all');
     assert.equal(result.workflows[0].key, 'oauth', intent);
     assert.equal(result.nextSelection, undefined);
     assert.match(JSON.stringify(result.workflows[0].primaryPath), /setup_oauth_provider/);
@@ -249,7 +220,7 @@ test('every workflow pack includes its direct primary and verification tools', (
 test('every guided mutation belongs to at least one dynamic workflow pack', () => {
   const packedTools = new Set(WORKFLOW_SURFACES.flatMap(workflowToolNames));
   const orphanMutations = [...registeredToolNames()]
-    .filter((toolName) => isToolVisibleInToolset(toolName, 'guided'))
+    .filter((toolName) => isToolInProfile(toolName))
     .filter(isMutationTool)
     .filter((toolName) => toolName !== 'execute_enfyra_tool')
     .filter((toolName) => !packedTools.has(toolName));
@@ -275,7 +246,7 @@ test('domain-profile workflow routes only direct callers to visible profile tool
         if (step.tool === 'visible reload workflow') continue;
         for (const toolName of splitWorkflowToolNames(step.tool)) {
           assert.equal(
-            isToolVisibleInToolset(toolName, 'guided', profile),
+            isToolInProfile(toolName, profile),
             true,
             `${profile}/${surface} directs callers to hidden tool ${toolName}`,
           );

@@ -1,7 +1,7 @@
 import { recordMcpToolUsage } from './mcp-usage-telemetry.js';
 import { afterMcpToolExecution, beforeMcpToolExecution } from './session-safety.js';
 import { getToolContract } from './tool-contracts.js';
-import type { ToolResult, UnknownRecord } from "./types.js";
+import type { JsonContentOptions, ToolResult, UnknownRecord } from "./types.js";
 
 const RESPONSE_FORMAT = 'json+columnar-v1';
 const COLUMNAR_FORMAT = 'columnar-v1';
@@ -143,8 +143,8 @@ export function formatJsonPayload(payload: unknown): UnknownRecord {
   return formatJsonPayloadDetailed(payload).payload;
 }
 
-export function jsonContent(payload: unknown, { pretty = false }: { pretty?: boolean } = {}): ToolResult {
-  const formatted = formatJsonPayloadDetailed(payload);
+export function jsonContent(payload: unknown, { pretty = false, columnar = true }: JsonContentOptions = {}): ToolResult {
+  const formatted = columnar ? formatJsonPayloadDetailed(payload) : { payload: wrapPayload(payload), compressionStats: undefined };
   return {
     content: [{
       type: 'text',

@@ -111,7 +111,7 @@ npx @enfyra/mcp-server@latest config [options]
 | `--api-token`, `-t` | Set `ENFYRA_API_TOKEN` |
 | `--yes` | Run non-interactively |
 | `--reconfig` | Select clients again and replace the existing `enfyra` entry |
-| `--static-tools` | Use the guided static compatibility manifest instead of dynamic packs |
+| `--static-tools` | Preserve compatibility config; the runtime still exposes only `enfyra` |
 | `--codex` | Write Codex config |
 | `--claude-code`, `--claude` | Write Claude Code config |
 | `--cursor` | Write Cursor config |
@@ -127,7 +127,7 @@ npx @enfyra/mcp-server@latest config [options]
 | `ENFYRA_API_URL` | Runtime API base written into MCP config | Required |
 | `ENFYRA_API_TOKEN` | Programmatic token from the Enfyra admin UI `/me` | Required |
 
-The MCP server starts with a compact guided catalog. For a hidden guided operation, call `search_enfyra_tools` to load its exact schema, then call `execute_enfyra_tool`; low-level tools remain hidden. No tool-loading configuration is needed. Re-running `config` preserves existing `ENFYRA_MCP_DYNAMIC_TOOLS` and `ENFYRA_MCP_PROFILE` values. Use `--static-tools` only for a compatibility client that needs the complete direct manifest.
+The MCP connection exposes one tool, `enfyra`, throughout the session. No tool-loading configuration is needed. `ENFYRA_MCP_PROFILE` guides workflow discovery; it does not add public tools. Re-running `config` preserves existing advanced settings. `ENFYRA_MCP_DYNAMIC_TOOLS` and `--static-tools` do not change the single-tool runtime surface. Reconnect the MCP client after updating the installed package.
 
 The MCP sends this PAT directly through Enfyra Server's native `x-enfyra-pat` header. It does not exchange the PAT for a short-lived access token or send it as a Bearer token.
 

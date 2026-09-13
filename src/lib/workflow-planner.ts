@@ -305,7 +305,7 @@ export function discoverWorkflowRoutes({
   risk = 'unknown',
   detail = 'summary',
   limit = 5,
-}: WorkflowRouteOptions = {}, profile: WorkflowProfile = 'all', dynamicToolPacks = false) {
+}: WorkflowRouteOptions = {}, profile: WorkflowProfile = 'all') {
   const normalizedSurface = surface ? normalize(surface) : undefined;
   const normalizedDetail = normalizeDetail(detail);
   const normalizedRisk = normalizeRisk(risk);
@@ -352,7 +352,7 @@ export function discoverWorkflowRoutes({
     })),
     surfaces: normalizedDetail === 'summary' ? availableSurfaces : undefined,
     guidance: [
-      ...(dynamicToolPacks ? ['For each hidden primaryPath tool, call search_enfyra_tools with its exact name, then call execute_enfyra_tool using the returned schema. Do not rely on tools/list_changed refreshes.'] : []),
+      'For each primaryPath operation, call enfyra action=discover with its exact name, then action=execute using the returned schema. The public tools/list stays unchanged.',
       'Use this as progressive disclosure: pick the closest workflow and follow primaryPath in order instead of choosing from the flat MCP tool list.',
       'For writes, call get_enfyra_required_knowledge and pass the returned acknowledgement keys into write tools.',
       'Treat avoidTools as negative routing boundaries; they prevent near-correct tool choices from crossing the wrong platform contract.',

@@ -272,7 +272,7 @@ test('startup instructions remain a compact router because hosts may repeat them
   assert.ok(Buffer.byteLength(instructions, 'utf8') < 1200);
   assert.match(instructions, /get_enfyra_api_context/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
-  assert.match(instructions, /discover_enfyra_workflows/);
+  assert.match(instructions, /action=discover/);
   assert.match(instructions, /Capability index/);
   assert.match(instructions, /schema\/data/);
   assert.match(instructions, /install @enfyra\/sdk-\*/);

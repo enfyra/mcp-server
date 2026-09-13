@@ -35,33 +35,6 @@ const workflowDiscoveryOutputSchema = {
   guidance: z.array(z.string()),
 } satisfies ZodRawShape;
 
-const workflowSelectionOutputSchema = {
-  ...baseOutputSchema,
-  action: z.literal('enfyra_workflow_selected'),
-  mode: z.enum(['replace', 'add', 'reset']),
-  activeSurfaces: z.array(z.string()),
-  visibleToolCount: z.number().int().nonnegative(),
-  visibleTools: z.array(z.string()),
-  hiddenToolCount: z.number().int().nonnegative(),
-  changed: z.boolean(),
-} satisfies ZodRawShape;
-
-const catalogSearchOutputSchema = {
-  ...baseOutputSchema,
-  action: z.literal('enfyra_tools_searched'),
-  resultCount: z.number().int().nonnegative(),
-  page: z.record(z.unknown()),
-  tools: recordArrayOutputSchema,
-  guidance: z.array(z.string()),
-} satisfies ZodRawShape;
-
-const catalogExecuteOutputSchema = {
-  ...baseOutputSchema,
-  action: z.literal('enfyra_catalog_tool_executed'),
-  tool: z.string(),
-  result: z.unknown(),
-} satisfies ZodRawShape;
-
 const apiContextOutputSchema = {
   ...baseOutputSchema,
   targetInstance: z.object({
@@ -219,10 +192,8 @@ const BASE_OUTPUT_TOOLS = new Set([
 ]);
 
 export function getToolOutputSchema(toolName: string): ZodRawShape | undefined {
+  if (toolName === 'enfyra') return actionOutputSchema;
   if (toolName === 'discover_enfyra_workflows') return workflowDiscoveryOutputSchema;
-  if (toolName === 'select_enfyra_workflow') return workflowSelectionOutputSchema;
-  if (toolName === 'search_enfyra_tools') return catalogSearchOutputSchema;
-  if (toolName === 'execute_enfyra_tool') return catalogExecuteOutputSchema;
   if (toolName === 'get_enfyra_api_context') return apiContextOutputSchema;
   if (toolName === 'query_table') return queryTableOutputSchema;
   if (toolName === 'inspect_rest_projection') return restProjectionOutputSchema;

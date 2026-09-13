@@ -1,5 +1,5 @@
 import type { McpToolAnnotations, McpToolContract } from './types.js';
-import { isToolVisibleInToolset } from './toolset-filter.js';
+import { isToolInProfile } from './toolset-filter.js';
 
 const DESTRUCTIVE_TOOLS = new Set([
   'delete_records',
@@ -88,6 +88,13 @@ function titleForTool(toolName: string) {
 }
 
 export function getToolContract(toolName: string): McpToolContract {
+  if (toolName === 'enfyra') {
+    return {
+      name: toolName,
+      annotations: { title: 'Enfyra', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+      catalogExecutable: false,
+    };
+  }
   const mutation = isMutationTool(toolName);
   const destructive = isDestructiveTool(toolName);
   const annotations: McpToolAnnotations = {
@@ -100,7 +107,7 @@ export function getToolContract(toolName: string): McpToolContract {
   return {
     name: toolName,
     annotations,
-    catalogExecutable: isToolVisibleInToolset(toolName, 'guided', 'all'),
+    catalogExecutable: isToolInProfile(toolName),
   };
 }
 

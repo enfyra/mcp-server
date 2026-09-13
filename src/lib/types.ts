@@ -15,6 +15,11 @@ export interface ToolResult {
   _meta?: Record<string, unknown>;
 }
 
+export interface JsonContentOptions {
+  pretty?: boolean;
+  columnar?: boolean;
+}
+
 export interface DestructivePreviewReceipt {
   version: 1;
   valid: true;
@@ -53,17 +58,18 @@ export interface RegisteredToolDefinition {
 
 export interface ToolsetRegistrationState {
   toolset: string;
-  profile: string;
-  dynamic: boolean;
+  profile: McpProfile;
   hiddenTools: string[];
   getTool(name: string): RegisteredToolDefinition | undefined;
   listTools(): RegisteredToolDefinition[];
   listVisibleToolNames(): string[];
-  setActiveTools(toolNames: Iterable<string>): {
-    changed: boolean;
-    visibleToolNames: string[];
-    hiddenToolCount: number;
-  };
+}
+
+export type McpToolset = 'guided';
+export type McpProfile = 'all' | 'extension' | 'schema' | 'runtime' | 'operations';
+
+export interface ToolCatalogOptions {
+  resolveAvailability?: (toolNames: string[]) => Promise<Record<string, ToolAvailability>>;
 }
 
 export type ToolAvailabilityStatus = 'allowed' | 'denied' | 'unknown';

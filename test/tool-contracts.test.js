@@ -39,8 +39,8 @@ test('the catalog gateway executes curated guided tools but keeps low-level esca
   assert.equal(isCatalogExecutable('review_extension_ui_contract'), false);
   assert.equal(isCatalogExecutable('create_route'), false);
   assert.equal(isCatalogExecutable('reload_all'), false);
-  assert.equal(getToolContract('execute_enfyra_tool').annotations.readOnlyHint, false);
-  assert.equal(getToolContract('execute_enfyra_tool').annotations.destructiveHint, true);
+  assert.equal(getToolContract('enfyra').annotations.readOnlyHint, false);
+  assert.equal(getToolContract('enfyra').annotations.destructiveHint, true);
 });
 
 test('annotation installer adds a complete annotation contract to legacy tool registrations', () => {

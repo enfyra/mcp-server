@@ -1,15 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { parse as parseEnv } from 'dotenv';
-
-const rootEnvPath = fileURLToPath(new URL('../../.codex/.env', import.meta.url));
-const serverEntry = fileURLToPath(new URL('../dist/index.js', import.meta.url));
-const rootEnv = parseEnv(readFileSync(rootEnvPath));
+import { connectRootMcp } from './support/root-mcp-client.mjs';
 const fixtureName = `McpExtensionLifecycle_${Date.now()}_${randomUUID().slice(0, 8)}`;
 const initialMarker = 'mcp-extension-e2e-v1';
 const updatedMarker = 'mcp-extension-e2e-v2';
@@ -19,50 +10,22 @@ const initialCode = `<template>
   </section>
 </template>`;
 
-function parseToolResult(result) {
-  if (result.isError) {
-    const message = result.content?.map((item) => item.type === 'text' ? item.text : '').filter(Boolean).join('\n');
-    throw new Error(message || 'MCP tool returned an error result.');
-  }
-  const text = result.content?.find((item) => item.type === 'text')?.text;
-  if (!text) throw new Error('MCP tool returned no JSON text content.');
-  return JSON.parse(text);
-}
-
 async function main() {
-  assert.ok(rootEnv.ENFYRA_API_URL, `ENFYRA_API_URL is required in ${rootEnvPath}`);
-  assert.ok(rootEnv.ENFYRA_API_TOKEN, `ENFYRA_API_TOKEN is required in ${rootEnvPath}`);
-  const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [serverEntry],
-    env: {
-      ...process.env,
-      ...rootEnv,
-      ENFYRA_MCP_TOOLSET: 'guided',
-      ENFYRA_MCP_PROFILE: 'extension',
-    },
-    stderr: 'inherit',
-  });
-  const client = new Client({ name: 'enfyra-extension-lifecycle-e2e', version: '1.0.0' });
+  const { client, execute: call, discover } = await connectRootMcp('extension');
   let extensionId = null;
-  let connected = false;
   let primaryError = null;
   let cleanupError = null;
 
-  const call = async (name, args = {}) => parseToolResult(await client.callTool({ name, arguments: args }));
   try {
-    await client.connect(transport);
-    connected = true;
     const context = await call('get_enfyra_api_context');
     assert.match(context.enfyraApiUrl, /^http:\/\/(?:localhost|127\.0\.0\.1):3000\/api$/);
 
     const tools = await client.listTools();
     const toolNames = tools.tools.map((tool) => tool.name);
-    assert.ok(toolNames.length >= 20 && toolNames.length <= 40, `extension profile returned ${toolNames.length} tools`);
-    assert.ok(toolNames.includes('extension_workflow'));
-    assert.ok(toolNames.includes('patch_extension_code'));
-    assert.ok(toolNames.includes('verify_extension_runtime'));
-    assert.equal(toolNames.includes('create_tables'), false);
+    assert.deepEqual(toolNames, ['enfyra']);
+    for (const name of ['extension_workflow', 'patch_extension_code', 'verify_extension_runtime', 'delete_extension']) {
+      assert.equal((await discover(name)).tools[0].name, name);
+    }
 
     await call('get_enfyra_required_knowledge', { scope: 'extension' });
     const created = await call('extension_workflow', {
@@ -113,10 +76,14 @@ async function main() {
     assert.equal(verified.checks.themeContract.status, 'passed');
     assert.equal(verified.checks.runtimeContract.status, 'passed');
     assert.equal(verified.checks.browserRender.status, 'not_run');
+    const inspected = await call('search_admin_extensions', { mode: 'inspect', id: extensionId });
+    assert.match(inspected.source.resourceUri, /^enfyra-source:\/\/artifact\//);
+    const resource = await client.readResource({ uri: inspected.source.resourceUri });
+    assert.match(resource.contents[0].text, new RegExp(updatedMarker));
   } catch (error) {
     primaryError = error;
   } finally {
-    if (connected && !extensionId) {
+    if (!extensionId) {
       try {
         const located = await call('query_table', {
           tableName: 'enfyra_extension',
@@ -131,19 +98,16 @@ async function main() {
     }
     if (extensionId) {
       try {
-        await call('delete_records', {
-          tableName: 'enfyra_extension',
-          items: [{ id: extensionId }],
+        await call('delete_extension', {
+          id: extensionId,
           confirm: false,
         });
-        const deleted = await call('delete_records', {
-          tableName: 'enfyra_extension',
-          items: [{ id: extensionId }],
+        const deleted = await call('delete_extension', {
+          id: extensionId,
+          expectedExtensionId: extensionId,
           confirm: true,
         });
-        assert.equal(deleted.deleted?.length, 1);
         assert.equal(deleted.postcondition?.confirmedAbsent, true);
-        assert.deepEqual(deleted.postcondition?.remainingIds, []);
         const remaining = await call('query_table', {
           tableName: 'enfyra_extension',
           fields: ['id', 'name'],

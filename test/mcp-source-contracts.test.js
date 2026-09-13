@@ -148,7 +148,7 @@ test('code-writing tools require session or explicit required-knowledge acknowle
   assert.match(requiredKnowledge, /native fetch, Readable, or AbortController/);
   assert.match(requiredKnowledge, /theme-contract-first/);
   assert.match(instructions, /get_enfyra_required_knowledge/);
-  assert.match(instructions, /discover_enfyra_workflows/);
+  assert.match(instructions, /action=discover/);
   assert.match(instructions, /known non-destructive task/);
   assert.match(instructions, /Session acknowledgement removes repeated keys/);
 
@@ -418,7 +418,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(examples, /hover:eapp-surface-muted/);
   assert.match(instructions, /most specific operation tool/);
   assert.match(instructions, /lazily/);
-  assert.match(instructions, /discover_enfyra_workflows/);
+  assert.match(instructions, /action=discover/);
   assert.match(routing, /ensure_websocket_event/);
   assert.match(routing, /extension_workflow/);
   assert.match(routing, /reorder_menus/);
@@ -519,10 +519,10 @@ test('server instructions stay compact and route details to tools', () => {
   const routing = readRoutingSource();
 
   assert.ok(Buffer.byteLength(instructions, 'utf8') < 4000);
-  assert.match(instructions, /path is ambiguous/);
+  assert.match(instructions, /Discover by intent/);
   assert.match(instructions, /get_enfyra_api_context/);
   assert.match(instructions, /Inspect only the exact artifact/);
-  assert.match(instructions, /Load other context lazily/);
+  assert.match(instructions, /load context lazily/);
   assert.match(instructions, /Session acknowledgement/);
   assert.match(routing, /progressive disclosure/);
   assert.match(routing, /query_table on destination domain lists/);

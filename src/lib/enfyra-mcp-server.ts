@@ -9,7 +9,6 @@ import { registerDynamicRepositoryBuilder } from './dynamic-repository-builder.j
 import {
   ENFYRA_API_TOKEN,
   ENFYRA_API_URL,
-  MCP_DYNAMIC_TOOLS,
   MCP_PROFILE,
   MCP_TOOLSET,
   resolveCatalogToolAvailability,
@@ -39,7 +38,6 @@ import {
   installToolsetFilter,
   summarizeToolsetForInstructions,
 } from './toolset-filter.js';
-import { registerWorkflowToolPack } from './workflow-tool-packs.js';
 
 function readPackageVersion(): string {
   try {
@@ -61,13 +59,13 @@ export function createEnfyraMcpServer() {
     },
     {
       instructions: buildMcpServerInstructions(ENFYRA_API_URL, {
-        toolsetSummary: summarizeToolsetForInstructions(MCP_TOOLSET, MCP_PROFILE, MCP_DYNAMIC_TOOLS),
+        toolsetSummary: summarizeToolsetForInstructions(MCP_TOOLSET, MCP_PROFILE),
       }),
     },
   );
   installToolOutputContracts(server);
   installColumnarToolFormatter(server);
-  const toolsetState = installToolsetFilter(server, MCP_TOOLSET, MCP_PROFILE, { dynamic: MCP_DYNAMIC_TOOLS });
+  const toolsetState = installToolsetFilter(server, MCP_TOOLSET, MCP_PROFILE);
   installToolAnnotations(server);
   startMcpUsageTelemetry(ENFYRA_API_URL, `${MCP_TOOLSET}:${MCP_PROFILE}`);
   server.registerResource(
@@ -96,11 +94,10 @@ export function createEnfyraMcpServer() {
   registerLogTools(server, ENFYRA_API_URL);
   registerIdentityTools(server, ENFYRA_API_URL);
   registerPackageTools(server, ENFYRA_API_URL);
-registerToolCatalogTools(server, toolsetState, {
-	  resolveAvailability: resolveCatalogToolAvailability,
-	});
-	registerWorkflowToolPack(server, toolsetState);
-	registerCompoundTools(server, ENFYRA_API_URL);
+  registerCompoundTools(server, ENFYRA_API_URL);
+  registerToolCatalogTools(server, toolsetState, {
+    resolveAvailability: resolveCatalogToolAvailability,
+  });
 
   return server;
 }

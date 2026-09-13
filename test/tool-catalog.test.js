@@ -40,7 +40,7 @@ test('catalog gateway executes a hidden guided mutation through its exact schema
       calls.push(input);
       return {
         content: [{ type: 'text', text: 'created' }],
-        structuredContent: { action: 'tables_created' },
+        structuredContent: { action: 'tables_created', responseFormat: 'json-v1' },
       };
     },
     visible: false,
@@ -60,7 +60,8 @@ test('catalog gateway executes a hidden guided mutation through its exact schema
   registerToolCatalogTools(server, state);
   afterMcpToolExecution('get_enfyra_api_context', {}, { content: [] });
 
-  const result = await handlers.get('execute_enfyra_tool')({
+  const result = await handlers.get('enfyra')({
+    action: 'execute',
     name: 'create_tables',
     arguments: { tables: ['tasks'] },
   });

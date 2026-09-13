@@ -105,8 +105,13 @@ function eventIndex(events: ModelEvalTraceEvent[], tools: string[], after = -1) 
 
 function expandCatalogToolEvents(events: ModelEvalTraceEvent[]) {
   return events.flatMap((event) => {
-    if (event.tool !== 'execute_enfyra_tool' || event.isError) return [event];
+    const gatewayExecution = event.tool === 'enfyra' && event.arguments?.action === 'execute';
+    if (!gatewayExecution && event.tool !== 'execute_enfyra_tool') return [event];
     const tool = typeof event.arguments?.name === 'string' ? event.arguments.name : '';
+    if (gatewayExecution && event.isError && tool) {
+      return [event, { tool, arguments: isRecord(event.arguments?.arguments) ? event.arguments.arguments : {}, result: event.result, isError: true }];
+    }
+    if (event.isError) return [event];
     if (!tool || !isRecord(event.result)) return [event];
     const nestedResult = event.result.result;
     if (event.result.action !== 'enfyra_catalog_tool_executed' || event.result.tool !== tool || nestedResult === undefined) return [event];
@@ -152,7 +157,7 @@ function workflowSelectionCheck(scenario: ModelEvalScenario, events: ModelEvalTr
     return typeof selectedSurface !== 'string' || selectedSurface === scenario.surface;
   });
   const catalogExecution = events.findIndex((event) => (
-    event.tool === 'execute_enfyra_tool'
+    (event.tool === 'execute_enfyra_tool' || (event.tool === 'enfyra' && event.arguments?.action === 'execute'))
       && !event.isError
       && typeof event.arguments?.name === 'string'
       && [...scenario.requiredToolGroups.flat(), ...scenario.verificationTools].includes(event.arguments.name)

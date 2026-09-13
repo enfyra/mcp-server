@@ -3,7 +3,7 @@
  */
 
 // Import modules
-import { normalizeDynamicToolPacks, normalizeMcpProfile } from './toolset-filter.js';
+import { normalizeMcpProfile } from './toolset-filter.js';
 export type { AnyRecord, MethodPatchBody, RouteCreateBody, RouteHandlerBody } from './enfyra-tool-types.js';
 
 export // Configuration
@@ -70,7 +70,6 @@ export const MCP_TOOLSET = 'guided' as const;
 
 export const MCP_PROFILE = normalizeMcpProfile(process.env.ENFYRA_MCP_PROFILE);
 
-export const MCP_DYNAMIC_TOOLS = normalizeDynamicToolPacks(process.env.ENFYRA_MCP_DYNAMIC_TOOLS, MCP_PROFILE);
 
 export const CAPABILITY_AREAS = [
   {

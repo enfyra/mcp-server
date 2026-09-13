@@ -75,6 +75,22 @@ test('model eval blocks outcome claims after an unverified mutation error', () =
   assert.equal(score.recommended, false);
 });
 
+test('gateway traces retain successful stages and failed mutation verification requirements', () => {
+  const scenario = MODEL_EVAL_SCENARIOS.find((item) => item.id === 'custom-endpoint-contract');
+  const events = ['get_enfyra_api_context', 'get_enfyra_required_knowledge', 'discover_script_contexts', 'api_endpoint_workflow', 'test_rest_endpoint'].map((name) => ({
+    tool: 'enfyra',
+    arguments: { action: 'execute', name, arguments: {} },
+    result: { action: 'enfyra_catalog_tool_executed', tool: name, result: {} },
+  }));
+  const success = scoreModelEvalRun({ scenarioId: scenario.id, model: 'fixture', events }, scenario);
+  assert.equal(success.recommended, true);
+  const failure = scoreModelEvalRun({ scenarioId: scenario.id, model: 'fixture', events: [...events, {
+    tool: 'enfyra', arguments: { action: 'execute', name: 'api_endpoint_workflow', arguments: {} }, isError: true,
+  }] }, scenario);
+  assert.equal(failure.checks.find((check) => check.key === 'failed_mutation_verification').passed, false);
+  assert.equal(failure.recommended, false);
+});
+
 test('model eval accepts the generic catalog gateway while still requiring a destructive preview', () => {
   const scenario = MODEL_EVAL_SCENARIOS.find((item) => item.id === 'destructive-preview-and-cleanup');
   const score = scoreModelEvalRun({

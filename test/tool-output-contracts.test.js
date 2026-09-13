@@ -11,9 +11,7 @@ import { formatJsonPayload } from '../dist/lib/response-format.js';
 test('core workflow tools receive formal output schemas', () => {
   for (const name of [
     'discover_enfyra_workflows',
-    'select_enfyra_workflow',
-    'search_enfyra_tools',
-    'execute_enfyra_tool',
+    'enfyra',
     'get_enfyra_api_context',
     'setup_oauth_provider',
     'get_permission_profile',
