@@ -144,7 +144,7 @@ test('code-writing tools require session or explicit required-knowledge acknowle
   assert.match(requiredKnowledge, /remove_field_permission/);
   assert.match(requiredKnowledge, /bounded request helper/);
   assert.match(requiredKnowledge, /@TRANSACTION\.run/);
-  assert.match(requiredKnowledge, /package request -> readable handle -> @RES\.stream/);
+  assert.match(requiredKnowledge, /package request -> preflight first raw chunk -> replay stream -> @RES\.stream/);
   assert.match(requiredKnowledge, /native fetch, Readable, or AbortController/);
   assert.match(requiredKnowledge, /theme-contract-first/);
   assert.match(instructions, /get_enfyra_required_knowledge/);

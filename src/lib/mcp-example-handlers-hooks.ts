@@ -230,7 +230,7 @@ return {
         ],
       },
       {
-        name: 'Buffered fetch versus direct response streaming',
+        name: 'Buffered fetch, preflighted streaming, and bounded package consumption',
         code: `// Buffered JSON/text/ArrayBuffer request: use the bounded helper.
 const response = await @HELPERS.$fetch("https://api.example.test/data", {
   method: "GET",
@@ -238,25 +238,37 @@ const response = await @HELPERS.$fetch("https://api.example.test/data", {
 })
 return { data: response }
 
-// Streaming is a different contract. @RES.stream needs a compatible
-// server-side readable obtained from an approved Server package bridge.
-// Do not replace that readable with @HELPERS.$fetch: it buffers the body.
-// After the package-readable chain has passed a non-saving admin test:
-// await @RES.stream(upstream.body, {
+// For a streaming client that must retry a no-byte upstream before commit:
+// const upstream = await @PKGS.undici.request(upstreamUrl, requestOptions)
+// const guarded = await $ctx.$streams.preflight(upstream.body, {
+//   timeoutMs: 15_000
+// })
+// await @RES.stream(guarded.stream, {
 //   statusCode: upstream.statusCode,
 //   mimetype: upstream.headers["content-type"],
 //   observer: async (fragment, kind) => {
 //     // A fragment is not a complete SSE/JSON message; buffer before parsing.
 //   }
 // })
+
+// For a buffered client that must validate the complete package stream first:
+// const upstream = await @PKGS.undici.request(upstreamUrl, requestOptions)
+// const text = await $ctx.$streams.readText(upstream.body, {
+//   timeoutMs: 60_000,
+//   maxBytes: 8 * 1024 * 1024
+// })
+// return { data: JSON.parse(text) }
 `,
         notes: [
           '@HELPERS.$fetch is bounded and buffered; use it for JSON, text, or ArrayBuffer responses only.',
-          '@RES.stream is the direct HTTP response boundary and must be awaited. Do not return another payload after starting it.',
-          'The optional observer is for lightweight usage inspection; chunks are fragments, so buffer message framing before parsing.',
-          'Set one method timeout for the complete upstream request and stream. If the client disconnects, do not try to send a second response; required audit work belongs in a Flow.',
+          '$ctx.$streams.preflight pulls the first non-empty raw chunk before response commit and returns a replay stream. Reasoning-only SSE bytes count as activity.',
+          'ERR_PACKAGE_STREAM_TIMEOUT and ERR_PACKAGE_STREAM_EMPTY can be caught before commit so application code can issue a new upstream request in the same task. Kernel never retries the request.',
+          '$ctx.$streams.readText/readBytes consume without starting a response, default to an 8 MiB raw-byte limit, and honor the enclosing task deadline.',
+          '@RES.stream is the HTTP response commit boundary and must be awaited. Do not return another payload after starting it.',
+          'observer and transform run after commit; they are not readiness primitives. Their text values are fragments, so buffer message framing before parsing.',
+          'Each package body is single-consumer. Never preflight or collect a body and then relay the original body; relay guarded.stream or create a new upstream request.',
           'The sandbox does not expose native fetch/Readable/AbortController as a portable script API.',
-          'A Server package must be inspected and the complete package-readable -> @RES.stream -> client chain must pass a non-saving test before a streaming handler is persisted.',
+          'A Server package must be inspected and both selected package-readable flow and its timeout/error path must pass a non-saving test before the handler is persisted.',
           'Never forward Authorization or other secret-bearing request headers to the client; allowlist response headers and keep provider keys server-side.',
         ],
       },

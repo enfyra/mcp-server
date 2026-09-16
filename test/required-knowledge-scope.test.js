@@ -162,11 +162,21 @@ test('dynamic code knowledge distinguishes buffered fetch from streaming respons
   const rules = section.rules.join('\n');
   assert.ok(rules.includes('@HELPERS.$fetch(url, options?) is the bounded request helper'));
   assert.match(rules, /not a streaming transport/);
-  assert.ok(rules.includes('@RES.stream(readable, options?) is the response boundary'));
-  assert.match(rules, /package request -> readable handle -> @RES\.stream/);
+  assert.match(rules, /Package-backed readable contract/);
+  assert.match(rules, /single-consumer AsyncIterable<Uint8Array>/);
+  assert.match(rules, /\$ctx\.\$streams\.preflight/);
+  assert.match(rules, /first non-empty raw chunk before committing the public response/);
+  assert.match(rules, /reasoning-only SSE data/);
+  assert.match(rules, /ERR_PACKAGE_STREAM_TIMEOUT/);
+  assert.match(rules, /ERR_PACKAGE_STREAM_EMPTY/);
+  assert.match(rules, /readBytes\/readText/);
+  assert.match(rules, /default maxBytes to 8 MiB/);
+  assert.match(rules, /Direct @RES\.stream\(upstream\.body/);
+  assert.match(rules, /observer and transform run only after @RES\.stream starts response relay/);
+  assert.match(rules, /package request -> preflight first raw chunk -> replay stream -> @RES\.stream/);
   assert.match(rules, /native fetch, Readable, or AbortController/);
   assert.match(rules, /observer\(chunkText, kind\)/);
-  assert.match(rules, /one timeout for the request/);
+  assert.match(rules, /capped by that enclosing deadline/);
   assert.match(rules, /If the client stops listening/);
 });
 
