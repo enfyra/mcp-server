@@ -52,12 +52,14 @@ export function writeWorkspaceFile(root: string, name: string, content: string, 
   try { mode = lstatSync(file).mode & 0o777; }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
   const fd = openSync(temporary, 'wx', mode);
-  try { writeFileSync(fd, content); } finally { closeSync(fd); }
   try {
+    try { writeFileSync(fd, content); } finally { closeSync(fd); }
     safeWorkspacePath(root, name);
     if (expected !== undefined && readWorkspaceFile(root, name) !== expected) throw new Error(`Local file changed while synchronizing: ${name}`);
     renameSync(temporary, file);
-  } finally { rmSync(temporary, { force: true }); }
+  } finally {
+    rmSync(temporary, { force: true });
+  }
   return file;
 }
 
@@ -106,6 +108,10 @@ export async function withWorkspaceLock<T>(paths: WorkspacePaths, run: () => Pro
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error('Workspace is locked by another operation. Retry when it finishes; inspect an abandoned lock before removing it.');
     throw error;
   }
-  writeFileSync(fd, JSON.stringify({ pid: process.pid }));
-  try { return await run(); } finally { closeSync(fd); rmSync(lock, { force: true }); }
+  try {
+    writeFileSync(fd, JSON.stringify({ pid: process.pid }));
+    return await run();
+  } finally {
+    try { closeSync(fd); } finally { rmSync(lock, { force: true }); }
+  }
 }

@@ -77,12 +77,12 @@ test('all scope values in KNOWLEDGE_SCOPES are valid', () => {
   }
 });
 
-test('ack keys are always present regardless of scope', () => {
+test('ack keys are returned only for knowledge domains included in the scope', () => {
   for (const scope of KNOWLEDGE_SCOPES) {
     const payload = buildRequiredKnowledgePayload(scope);
     assert.ok(typeof payload.globalRulesAckKey === 'string' && payload.globalRulesAckKey.length > 0, `globalRulesAckKey missing in ${scope}`);
-    assert.ok(typeof payload.dynamicCodeAckKey === 'string' && payload.dynamicCodeAckKey.length > 0, `dynamicCodeAckKey missing in ${scope}`);
-    assert.ok(typeof payload.extensionAckKey === 'string' && payload.extensionAckKey.length > 0, `extensionAckKey missing in ${scope}`);
+    assert.equal(Boolean(payload.dynamicCodeAckKey), payload.includedDomains.includes('dynamicServerCode'));
+    assert.equal(Boolean(payload.extensionAckKey), payload.includedDomains.includes('extensions'));
   }
 });
 

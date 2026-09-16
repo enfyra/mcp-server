@@ -1,7 +1,7 @@
 import { io, type Socket } from 'socket.io-client';
 import { getApiToken } from './auth.js';
 import { fetchAPI } from './fetch.js';
-import { clearRuntimeCache, clearRuntimeCacheDomains, recordRuntimeCacheWarm, runtimeCacheDomainsForReloadSteps, runtimeCacheKeysForDomains } from './runtime-cache.js';
+import { clearRuntimeCache, clearRuntimeCacheDomains, recordRuntimeCacheWarm, runtimeCacheDomainsForReloadSteps, runtimeCacheKeysForDomains, setRuntimeCacheEnabled } from './runtime-cache.js';
 
 type ReloadPayload = {
   status?: 'pending' | 'done';
@@ -17,6 +17,12 @@ let reconnectAttempt = 0;
 
 const RECONNECT_DELAY_MS = 2_000;
 const RECONNECT_DELAY_MAX_MS = 30_000;
+
+function cancelRuntimeCacheWarm() {
+  if (!warmTimer) return;
+  clearTimeout(warmTimer);
+  warmTimer = null;
+}
 
 function socketOrigin(apiUrl: string) {
   return apiUrl.replace(/\/api\/?$/, '');
@@ -75,12 +81,16 @@ async function refreshCachedEntries(apiUrl: string, paths: string[]) {
 }
 
 function invalidateAndWarm(apiUrl: string, steps: string[]) {
+  if (steps.length === 0 || steps.some((step) => runtimeCacheDomainsForReloadSteps([step]).length === 0)) {
+    cancelRuntimeCacheWarm();
+    clearRuntimeCache('reload');
+    return;
+  }
   const domains = runtimeCacheDomainsForReloadSteps(steps);
-  if (!domains.length) return;
   const paths = runtimeCacheKeysForDomains(domains);
   clearRuntimeCacheDomains(domains, 'reload');
   if (!paths.length) return;
-  if (warmTimer) clearTimeout(warmTimer);
+  cancelRuntimeCacheWarm();
   warmTimer = setTimeout(() => {
     warmTimer = null;
     void refreshCachedEntries(apiUrl, paths);
@@ -89,11 +99,16 @@ function invalidateAndWarm(apiUrl: string, steps: string[]) {
 
 export function startRuntimeCacheSocket(apiUrl: string) {
   if (socket || socketStarting || socketStopped) return;
+  setRuntimeCacheEnabled(false);
+  clearRuntimeCache('reload');
   void connectRuntimeCacheSocket(apiUrl);
 }
 
 function stopReconnecting() {
   socketStopped = true;
+  setRuntimeCacheEnabled(false);
+  clearRuntimeCache('auth');
+  cancelRuntimeCacheWarm();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
@@ -123,21 +138,20 @@ function scheduleRuntimeCacheSocketReconnect(apiUrl: string) {
 }
 
 function bindRuntimeCacheSocketEvents(nextSocket: Socket, apiUrl: string) {
-  let hasConnectedBefore = false;
-
   nextSocket.on('$system:reload', (payload: ReloadPayload) => {
-    if (payload?.status === 'done') invalidateAndWarm(apiUrl, payload.steps || []);
+    if (payload?.status === 'done') invalidateAndWarm(apiUrl, Array.isArray(payload.steps) ? payload.steps : []);
   });
 
   nextSocket.on('connect', () => {
-    if (hasConnectedBefore) {
-      clearRuntimeCache('reload');
-    }
-    hasConnectedBefore = true;
+    clearRuntimeCache('reload');
+    setRuntimeCacheEnabled(true);
     reconnectAttempt = 0;
   });
 
   nextSocket.on('disconnect', () => {
+    setRuntimeCacheEnabled(false);
+    clearRuntimeCache('reload');
+    cancelRuntimeCacheWarm();
     scheduleRuntimeCacheSocketReconnect(apiUrl);
   });
 
@@ -145,6 +159,9 @@ function bindRuntimeCacheSocketEvents(nextSocket: Socket, apiUrl: string) {
     if (isRuntimeCacheSocketAuthError(err)) {
       stopReconnecting();
     } else {
+      setRuntimeCacheEnabled(false);
+      clearRuntimeCache('reload');
+      cancelRuntimeCacheWarm();
       scheduleRuntimeCacheSocketReconnect(apiUrl);
     }
   });

@@ -6,6 +6,9 @@ import {
   clearRuntimeCacheDomains,
   getRuntimeCache,
   getRuntimeCacheTelemetry,
+  runtimeCacheDomainsForMutationPath,
+  runtimeCacheDomainsForReloadSteps,
+  runtimeCacheGenerationForPath,
   setRuntimeCache,
 } from '../dist/lib/runtime-cache.js';
 import {
@@ -33,6 +36,27 @@ test('runtime cache reports hit rate and timestamped reload recovery without rec
   assert.deepEqual(event?.domains, ['metadata']);
   assert.equal(JSON.stringify(event).includes(path), false);
   assert.match(event?.timestamp || '', /^\d{4}-\d{2}-\d{2}T/);
+});
+
+test('an invalidated in-flight request cannot repopulate stale runtime cache data', () => {
+  clearRuntimeCache();
+  const path = '/metadata?table=orders';
+  const generation = runtimeCacheGenerationForPath(path);
+  clearRuntimeCacheDomains(['metadata'], 'reload');
+  setRuntimeCache(path, { data: [{ name: 'stale' }] }, generation);
+  assert.equal(getRuntimeCache(path), undefined);
+});
+
+test('runtime cache keeps reload dependencies and storage bounded', () => {
+  clearRuntimeCache();
+  assert.deepEqual(runtimeCacheDomainsForReloadSteps(['extension']).sort(), ['extension', 'menu']);
+  assert.ok(runtimeCacheDomainsForMutationPath('/enfyra_role/17').includes('fieldPermission'));
+
+  for (let index = 0; index <= 500; index += 1) {
+    setRuntimeCache(`/metadata?table=table_${index}`, { index });
+  }
+  assert.equal(getRuntimeCache('/metadata?table=table_0'), undefined);
+  assert.deepEqual(getRuntimeCache('/metadata?table=table_500'), { index: 500 });
 });
 
 test('runtime cache socket uses the authenticated Nuxt bridge namespace', () => {

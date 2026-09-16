@@ -100,6 +100,23 @@ test('mcp usage telemetry preserves bounded diagnostic error details without sec
   assert.ok(details.errorMessage.length <= 160);
 });
 
+test('telemetry filesystem failures never escape into tool execution', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'enfyra-mcp-usage-failure-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const blockedPath = join(root, 'not-a-directory');
+  writeFileSync(blockedPath, 'blocked');
+  const originalUsageDir = process.env.ENFYRA_MCP_USAGE_DIR;
+  process.env.ENFYRA_MCP_USAGE_DIR = blockedPath;
+  try {
+    const telemetry = await import(`../dist/lib/mcp-usage-telemetry.js?fs-failure=${Date.now()}`);
+    assert.doesNotThrow(() => telemetry.recordMcpToolUsage('query_table', Date.now(), [{}], { content: [] }));
+    assert.doesNotThrow(() => telemetry.startMcpUsageTelemetry('https://local.enfyra.test/api', 'guided:all'));
+  } finally {
+    if (originalUsageDir === undefined) delete process.env.ENFYRA_MCP_USAGE_DIR;
+    else process.env.ENFYRA_MCP_USAGE_DIR = originalUsageDir;
+  }
+});
+
 test('mcp usage telemetry sends a pending error report immediately despite the scheduled upload cooldown', async () => {
   const usageDir = mkdtempSync(join(tmpdir(), 'enfyra-mcp-usage-test-'));
   const originalUsageDir = process.env.ENFYRA_MCP_USAGE_DIR;

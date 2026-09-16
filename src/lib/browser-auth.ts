@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { exec } from 'node:child_process';
+import { spawn } from 'node:child_process';
 
 const AUTH_TIMEOUT_MS = 120_000;
 
@@ -7,12 +7,11 @@ type BrowserAuthResult = { token: string };
 
 function openBrowser(url: string): void {
   const platform = process.platform;
-  const cmd = platform === 'darwin'
-    ? `open "${url}"`
-    : platform === 'win32'
-      ? `start "" "${url}"`
-      : `xdg-open "${url}"`;
-  exec(cmd, () => {});
+  const command = platform === 'darwin' ? 'open' : platform === 'win32' ? 'rundll32.exe' : 'xdg-open';
+  const args = platform === 'win32' ? ['url.dll,FileProtocolHandler', url] : [url];
+  const child = spawn(command, args, { detached: true, stdio: 'ignore', windowsHide: true });
+  child.on('error', () => {});
+  child.unref();
 }
 
 function isLocalhostCallback(url: string): boolean {

@@ -161,7 +161,7 @@ const GLOBAL_RULES_SECTIONS = [
     id: 'guard-engine-contract',
     rules: [
       'Use the Enfyra guard engine for request gating and abuse controls such as rate limits and IP allow/deny. Guards are not RBAC: use ensure_route_access for authenticated route authority, pre-hooks/handlers for owner or tenant row scope, ensure_field_permission for field visibility, and ensure_column_rule for body validation.',
-      'Before changing guard metadata, audit the live surface with search_runtime_zone(zone="api_runtime", query="guard") and inspect_route({ path }) for the exact route. For a coverage audit, inventory enabled en_fyra_guard/enfyra_guard_rule rows and classify global roots, route roots, position, methods, rule types, and enabled state before creating a new guard.',
+      'Before changing guard metadata, audit the live surface with search_runtime_zone(zone="api_runtime", query="guard") and inspect_route({ path }) for the exact route. For a coverage audit, inventory enabled enfyra_guard/enfyra_guard_rule rows and classify global roots, route roots, position, methods, rule types, and enabled state before creating a new guard.',
       'A route guard root targets one route through routeId/path; isGlobal=true is a route-type root that applies to every detected metadata route. An empty methods list means every HTTP method. Route-specific guards are required when a quota or IP policy must not share one global bucket across unrelated APIs.',
       'pre_auth runs before JWT and may use client-IP or route rules only. post_auth runs after authentication/RoleGuard and is required for rate_limit_by_user. Do not put userIds or rate_limit_by_user in pre_auth guards.',
       'Supported route rule types are rate_limit_by_ip, rate_limit_by_user, rate_limit_by_route, ip_whitelist, and ip_blacklist. rate_limit_by_operation is GraphQL-only. rate_limit_by_ip and rate_limit_by_user buckets are scoped by guard-rule id plus subject, not by route; use a route-specific guard when isolation is required.',
@@ -493,8 +493,8 @@ export function buildRequiredKnowledgePayload(scope: string = 'full') {
     excludedDomains: [...(!includeDynamic ? ['dynamicServerCode'] : []), ...(!includeExtensions ? ['extensions'] : [])],
     note: 'Reading this response acknowledges included domains for the current MCP process session. Write tools accept the returned keys for backward compatibility, but callers may omit them for acknowledged domains. Only includedDomains rules are loaded.',
     globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
-    dynamicCodeAckKey: DYNAMIC_CODE_KNOWLEDGE_ACK_KEY,
-    extensionAckKey: EXTENSION_KNOWLEDGE_ACK_KEY,
+    dynamicCodeAckKey: includeDynamic ? DYNAMIC_CODE_KNOWLEDGE_ACK_KEY : undefined,
+    extensionAckKey: includeExtensions ? EXTENSION_KNOWLEDGE_ACK_KEY : undefined,
     usage: [
       'After this response, omit globalRulesAckKey in the same MCP process session or pass it explicitly for backward compatibility.',
     ],

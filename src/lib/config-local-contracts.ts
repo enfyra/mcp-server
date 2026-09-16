@@ -188,9 +188,22 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 export function normalizeAppUrl(appUrl: unknown) {
-  const raw = String(appUrl || '').trim().replace(/\/+$/, '');
+  const raw = String(appUrl || '').trim();
   if (!raw) return '';
-  return raw.replace(/\/(?:api|enfyra)$/i, '') || raw;
+  if (/[\u0000-\u0020"'`\\]/u.test(raw)) throw new Error('Enfyra app URL contains invalid characters.');
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error('Enfyra app URL must be a valid absolute HTTP(S) URL.');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('Enfyra app URL must use HTTP or HTTPS.');
+  }
+  if (parsed.username || parsed.password) throw new Error('Enfyra app URL must not contain credentials.');
+  if (parsed.search || parsed.hash) throw new Error('Enfyra app URL must not contain a query or fragment.');
+  const trimmedPath = parsed.pathname.replace(/\/+$/u, '').replace(/\/(?:api|enfyra)$/iu, '');
+  return `${parsed.origin}${trimmedPath && trimmedPath !== '/' ? trimmedPath : ''}`;
 }
 
 export function deriveApiUrlFromAppUrl(appUrl: unknown) {

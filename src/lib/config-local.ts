@@ -87,6 +87,7 @@ export async function runLocalConfig(argv: string[]) {
     ...(writeZcode ? [getClientPath('zcode', root)] : []),
   ];
   await assertProjectConfigUntracked(root, selectedPaths);
+  await ensureProjectConfigIgnored(root, selectedPaths);
 
   if (writeCodex) {
     const p = getClientPath('codex', root);
@@ -118,8 +119,6 @@ export async function runLocalConfig(argv: string[]) {
     await mergeZcodeConfig(p, serverEntry);
     written.push({ client: 'zcode', path: p });
   }
-
-  await ensureProjectConfigIgnored(root, written.map((entry) => entry.path));
 
   console.log(`${statusIcon('success')} ${style.bold(style.green('Enfyra MCP config updated'))} ${style.dim('(project)')}\n`);
   for (const entry of written) {

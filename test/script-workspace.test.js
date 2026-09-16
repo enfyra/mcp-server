@@ -80,6 +80,19 @@ test('push previews, validates, rejects changed local/live inputs and verifies s
   await assert.rejects(workspace.push({ apply: true, planId: reviewed.planId }), /consumed|plan/i);
 });
 
+test('push rejects a workspace plan changed after preview', async (t) => {
+  const { root, workspace } = await fixture(t);
+  const prepared = await workspace.prepare({ projectRoot: root, artifacts: [ref] });
+  await writeFile(prepared.artifacts[0].localFile, 'return 2;');
+  const preview = await workspace.push({});
+  const planPath = join(root, 'enfyra', '.state', 'push-plan.json');
+  const plan = JSON.parse(await readFile(planPath, 'utf8'));
+  plan.items[0].sourceHash = '0'.repeat(64);
+  await writeFile(planPath, `${JSON.stringify(plan)}\n`);
+
+  await assert.rejects(workspace.push({ apply: true, planId: preview.planId }), /authentic|tamper|stale|plan/i);
+});
+
 test('validation failure prevents writes and saved-state mismatch is not success', async (t) => {
   const { root, workspace, dependencies, writes } = await fixture(t);
   const prepared = await workspace.prepare({ projectRoot: root, artifacts: [ref] });

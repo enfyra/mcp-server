@@ -36,6 +36,20 @@ function summarizeRecords(records: any[], fields: string[]) {
   return records.map((record) => summarizeRecord(record, fields));
 }
 
+function appliesToRoute(record: any, routeId: string) {
+  return record?.isGlobal === true || String(refId(record?.route)) === String(routeId);
+}
+
+function uniqueRecords(records: any[]) {
+  const seen = new Set<string>();
+  return records.filter((record) => {
+    const key = String(getId(record));
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export async function resolveRouteContext(apiUrl: string, path: string) {
   const normalizedPath = normalizeRestPath(path);
   const startedAt = Date.now();
@@ -52,8 +66,8 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
   };
 
   const [menuResult, routeResult] = await Promise.allSettled([
-    fetchAll(apiUrl, '/enfyra_menu?limit=50&fields=id,label,path,icon,type,isPublic,isEnabled,order,parent.id'),
-    fetchAll(apiUrl, `/enfyra_route?limit=10&filter[path]=${encodeURIComponent(normalizedPath)}&fields=id,path,isEnabled,description,availableMethods.name,publicMethods.name,mainTable.name,mainTable.id`),
+    fetchAll(apiUrl, `/enfyra_menu?limit=10&filter[path]=${encodeURIComponent(normalizedPath)}&fields=id,label,path,icon,type,isPublic,isEnabled,order,parent.id`),
+    fetchAll(apiUrl, `/enfyra_route?limit=10&filter[path]=${encodeURIComponent(normalizedPath)}&fields=id,path,isEnabled,description,availableMethods.name,publicMethods.name,skipRoleGuardMethods.name,mainTable.name,mainTable.id`),
   ]);
 
   if (menuResult.status === 'fulfilled') {
@@ -78,6 +92,7 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
         description: route.description,
         availableMethods: (route.availableMethods || []).map((method: any) => method.name),
         publicMethods: (route.publicMethods || []).map((method: any) => method.name),
+        skipRoleGuardMethods: (route.skipRoleGuardMethods || []).map((method: any) => method.name),
         mainTable: route.mainTable ? { id: refId(route.mainTable), name: route.mainTable.name } : null,
       };
     }
@@ -90,11 +105,11 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
     const [handlersResult, hooksResult, permissionsResult, guardsResult] = await Promise.allSettled([
       fetchAll(apiUrl, `/enfyra_route_handler?limit=50&filter=${routeFilter}&fields=id,method.name,scriptLanguage,timeout,isEnabled`),
       Promise.all([
-        fetchAll(apiUrl, `/enfyra_pre_hook?limit=50&filter=${routeFilter}&fields=id,name,methods.name,priority,isEnabled`),
-        fetchAll(apiUrl, `/enfyra_post_hook?limit=50&filter=${routeFilter}&fields=id,name,methods.name,priority,isEnabled`),
+        fetchAll(apiUrl, '/enfyra_pre_hook?limit=1000&fields=id,name,methods.name,priority,isEnabled,isGlobal,route.id'),
+        fetchAll(apiUrl, '/enfyra_post_hook?limit=1000&fields=id,name,methods.name,priority,isEnabled,isGlobal,route.id'),
       ]),
       fetchAll(apiUrl, `/enfyra_route_permission?limit=50&filter=${routeFilter}&fields=id,role.name,allowedUsers.id,methods.name,isEnabled,description`),
-      fetchAll(apiUrl, `/enfyra_guard?limit=50&filter=${routeFilter}&fields=id,name,type,position,isEnabled,isGlobal,priority,combinator`),
+      fetchAll(apiUrl, '/enfyra_guard?limit=1000&fields=id,name,type,position,isEnabled,isGlobal,priority,combinator,route.id'),
     ]);
 
     if (handlersResult.status === 'fulfilled') {
@@ -104,13 +119,15 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
       }));
     }
     if (hooksResult.status === 'fulfilled') {
-      results.hooks.pre = summarizeRecords(hooksResult.value[0], ['id', 'name', 'priority', 'isEnabled']).map((hook: any, index: number) => ({
+      const preHooks = uniqueRecords(hooksResult.value[0].filter((hook: any) => appliesToRoute(hook, routeId!)));
+      const postHooks = uniqueRecords(hooksResult.value[1].filter((hook: any) => appliesToRoute(hook, routeId!)));
+      results.hooks.pre = summarizeRecords(preHooks, ['id', 'name', 'priority', 'isEnabled', 'isGlobal']).map((hook: any, index: number) => ({
         ...hook,
-        methods: (hooksResult.value[0][index]?.methods || []).map((method: any) => method.name),
+        methods: (preHooks[index]?.methods || []).map((method: any) => method.name),
       }));
-      results.hooks.post = summarizeRecords(hooksResult.value[1], ['id', 'name', 'priority', 'isEnabled']).map((hook: any, index: number) => ({
+      results.hooks.post = summarizeRecords(postHooks, ['id', 'name', 'priority', 'isEnabled', 'isGlobal']).map((hook: any, index: number) => ({
         ...hook,
-        methods: (hooksResult.value[1][index]?.methods || []).map((method: any) => method.name),
+        methods: (postHooks[index]?.methods || []).map((method: any) => method.name),
       }));
     }
     if (permissionsResult.status === 'fulfilled') {
@@ -122,7 +139,10 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
       }));
     }
     if (guardsResult.status === 'fulfilled') {
-      results.guards = summarizeRecords(guardsResult.value, ['id', 'name', 'type', 'position', 'isEnabled', 'isGlobal', 'priority', 'combinator']);
+      results.guards = summarizeRecords(
+        uniqueRecords(guardsResult.value.filter((guard: any) => appliesToRoute(guard, routeId!))),
+        ['id', 'name', 'type', 'position', 'isEnabled', 'isGlobal', 'priority', 'combinator'],
+      );
     }
 
     for (const [zone, result] of [['handlers', handlersResult], ['hooks', hooksResult], ['permissions', permissionsResult], ['guards', guardsResult]] as const) {
@@ -160,6 +180,7 @@ function buildSummary(results: AnyRecord): AnyRecord {
     hasRoute: !!results.route,
     routeEnabled: results.route?.isEnabled ?? null,
     publicMethods: results.route?.publicMethods || [],
+    skipRoleGuardMethods: results.route?.skipRoleGuardMethods || [],
     handlerCount: results.handlers.length,
     preHookCount: results.hooks.pre.length,
     postHookCount: results.hooks.post.length,
@@ -172,11 +193,32 @@ function buildSummary(results: AnyRecord): AnyRecord {
   if (results.menu && !results.menu.isEnabled) blockedReasons.push('menu_disabled');
   if (results.route && !results.route.isEnabled) blockedReasons.push('route_disabled');
   if (results.route && results.route.availableMethods.length === 0) blockedReasons.push('no_available_methods');
-  if (results.permissions.length === 0 && results.route && (results.route.publicMethods || []).length === 0) {
+  const availableMethods = new Set(results.route?.availableMethods || []);
+  const unconditionalAccessMethods = new Set([
+    ...(results.route?.publicMethods || []),
+    ...(results.route?.skipRoleGuardMethods || []),
+  ].filter((method) => availableMethods.has(method)));
+  const permissionMethods = new Set(
+    results.permissions
+      .filter((permission: any) => permission.isEnabled === true)
+      .flatMap((permission: any) => permission.methods || [])
+      .filter((method: string) => availableMethods.has(method)),
+  );
+  const accessMethods = new Set([...unconditionalAccessMethods, ...permissionMethods]);
+  const accessEvidenceFailed = results.errors.some((error: any) => error.zone === 'route' || error.zone === 'permissions');
+  if (accessMethods.size === 0 && results.route && !accessEvidenceFailed) {
     blockedReasons.push('no_permission_and_not_public');
   }
+  if (unconditionalAccessMethods.size === 0 && accessEvidenceFailed) blockedReasons.push('access_indeterminate');
+  if (unconditionalAccessMethods.size === 0 && permissionMethods.size > 0 && !accessEvidenceFailed) {
+    blockedReasons.push('subject_access_indeterminate');
+  }
+  summary.accessMethods = [...accessMethods];
+  summary.unconditionalAccessMethods = [...unconditionalAccessMethods];
   summary.blockedReasons = blockedReasons;
-  summary.isReachable = blockedReasons.length === 0 && !!results.route && results.route.isEnabled;
+  if (accessEvidenceFailed && unconditionalAccessMethods.size === 0) summary.isReachable = null;
+  else if (permissionMethods.size > 0 && unconditionalAccessMethods.size === 0) summary.isReachable = null;
+  else summary.isReachable = Boolean(results.route?.isEnabled && availableMethods.size > 0 && unconditionalAccessMethods.size > 0);
   return summary;
 }
 

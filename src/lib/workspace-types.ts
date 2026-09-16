@@ -74,6 +74,7 @@ export interface WorkspacePushPlan {
   projectRoot: string;
   consumed: boolean;
   items: Array<{ key: string; localRevision: string; remoteRevision: string; sourceHash: string }>;
+  signature: string;
 }
 
 export interface WorkspaceOperationResult {

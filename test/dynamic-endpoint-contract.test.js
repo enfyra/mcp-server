@@ -138,3 +138,40 @@ test('repository table extraction is bounded to explicit secure and trusted repo
     ['orders', 'customers', 'audit_log'],
   );
 });
+
+test('repository review ignores comments and strings but recognizes both main aliases', () => {
+  const inert = `
+    // @REPOS.main.create({ data: @BODY })
+    const example = "#secure.orders.delete({ id: 1 })"
+    return { example }
+  `;
+  const inertReview = reviewDynamicEndpointContract({ routeKind: 'custom', method: 'POST', sourceCode: inert });
+  assert.equal(inertReview.signals.usesMainRepository, false);
+  assert.equal(inertReview.signals.usesMutation, false);
+  assert.deepEqual(extractExplicitRepositoryTableNames(inert), []);
+
+  const aliasReview = reviewDynamicEndpointContract({
+    routeKind: 'custom',
+    method: 'POST',
+    sourceCode: 'return await $ctx.$repos.main.createMany({ data: @BODY })',
+  });
+  assert.equal(aliasReview.status, 'blocked');
+  assert.equal(aliasReview.signals.usesMutation, true);
+  assert.ok(aliasReview.errorCodes.includes('custom_route_main_repository'));
+});
+
+test('canonical route gate requires executable main access and rejects explicit repositories', () => {
+  const route = { path: '/orders', mainTable: { name: 'orders' } };
+  assert.throws(
+    () => assertCreateHandlerRouteBoundary(route, '// @REPOS.main.find()\nreturn await #secure.orders.find()', true),
+    /must use @REPOS\.main/i,
+  );
+  assert.throws(
+    () => assertCreateHandlerRouteBoundary(route, 'const example = /@REPOS.main.find/\nreturn example.test("input")', true),
+    /must use @REPOS\.main/i,
+  );
+  assert.throws(
+    () => assertCreateHandlerRouteBoundary(route, 'return await @REPOS.main.find() || await #secure.audit.find()', true),
+    /explicit-table/i,
+  );
+});

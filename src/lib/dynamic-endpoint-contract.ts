@@ -7,12 +7,145 @@ import type {
 } from './types.js';
 
 const IDENTIFIER = '[A-Za-z_][A-Za-z0-9_]*';
-const SECURE_EXPLICIT_PATTERN = new RegExp(`(?:#secure\\.|@REPOS\\.secure\\.)(${IDENTIFIER})\\s*\\.`, 'g');
-const TRUSTED_EXPLICIT_PATTERN = new RegExp(`(?:#(?!secure\\.)|@REPOS\\.(?!main\\b|secure\\b))(${IDENTIFIER})\\s*\\.`, 'g');
-const MAIN_REPOSITORY_PATTERN = /@REPOS\.main\s*\./u;
+const SECURE_EXPLICIT_PATTERN = new RegExp(`(?:#secure\\.|@REPOS\\.secure\\.|\\$ctx\\.\\$repos\\.secure\\.)(${IDENTIFIER})\\s*\\.`, 'g');
+const TRUSTED_EXPLICIT_PATTERN = new RegExp(`(?:#(?!secure\\.)|@REPOS\\.(?!main\\b|secure\\b)|\\$ctx\\.\\$repos\\.(?!main\\b|secure\\b))(${IDENTIFIER})\\s*\\.`, 'g');
+const MAIN_REPOSITORY_PATTERN = /(?:@REPOS|\$ctx\.\$repos)\.main\s*\./u;
 const RAW_BODY_PATTERN = /\bdata\s*:\s*@BODY\b|\.\.\.\s*@BODY\b/u;
-const MUTATION_PATTERN = /\.(?:create|update|delete)\s*\(/u;
+const MUTATION_PATTERN = /\.(?:create|createMany|update|updateMany|delete|deleteMany)\s*\(/u;
 const DIRECT_REPOSITORY_DATA_RETURN_PATTERN = /\breturn\s+[^;\n]*(?:\.data\b|\.data\?\.\[|\.data\s*\[)/u;
+
+function maskNonExecutable(sourceCode: string) {
+  const output = sourceCode.split('');
+  let state: 'code' | 'single' | 'double' | 'template' | 'regex' | 'line-comment' | 'block-comment' = 'code';
+  let regexCharacterClass = false;
+  const templateExpressionDepths: number[] = [];
+  const mask = (index: number) => {
+    if (output[index] !== '\n' && output[index] !== '\r') output[index] = ' ';
+  };
+  const markValue = (index: number) => {
+    output[index] = '0';
+  };
+  const canStartRegex = (index: number) => {
+    let cursor = index - 1;
+    while (cursor >= 0 && /\s/u.test(output[cursor])) cursor -= 1;
+    if (cursor < 0) return true;
+    if (/[([{,:;=!?&|+*%^~<>-]/u.test(output[cursor])) return true;
+    if (!/[A-Za-z0-9_$]/u.test(output[cursor])) return false;
+    const end = cursor + 1;
+    while (cursor >= 0 && /[A-Za-z0-9_$]/u.test(output[cursor])) cursor -= 1;
+    const word = output.slice(cursor + 1, end).join('');
+    return /^(?:await|case|delete|in|instanceof|of|return|throw|typeof|void|yield)$/u.test(word);
+  };
+  for (let index = 0; index < sourceCode.length; index += 1) {
+    const current = sourceCode[index];
+    const next = sourceCode[index + 1];
+    if (state === 'line-comment') {
+      mask(index);
+      if (current === '\n') state = 'code';
+      continue;
+    }
+    if (state === 'block-comment') {
+      mask(index);
+      if (current === '*' && next === '/') {
+        mask(index + 1);
+        index += 1;
+        state = 'code';
+      }
+      continue;
+    }
+    if (state === 'single' || state === 'double') {
+      mask(index);
+      if (current === '\\') {
+        mask(index + 1);
+        index += 1;
+      } else if ((state === 'single' && current === "'") || (state === 'double' && current === '"')) {
+        state = 'code';
+      }
+      continue;
+    }
+    if (state === 'regex') {
+      mask(index);
+      if (current === '\\') {
+        mask(index + 1);
+        index += 1;
+      } else if (current === '[') {
+        regexCharacterClass = true;
+      } else if (current === ']') {
+        regexCharacterClass = false;
+      } else if (current === '/' && !regexCharacterClass) {
+        while (/[A-Za-z]/u.test(sourceCode[index + 1] || '')) {
+          mask(index + 1);
+          index += 1;
+        }
+        state = 'code';
+      }
+      continue;
+    }
+    if (state === 'template') {
+      mask(index);
+      if (current === '\\') {
+        mask(index + 1);
+        index += 1;
+      } else if (current === '`') {
+        state = 'code';
+      } else if (current === '$' && next === '{') {
+        mask(index + 1);
+        index += 1;
+        templateExpressionDepths.push(1);
+        state = 'code';
+      }
+      continue;
+    }
+    if (current === '/' && next === '/') {
+      mask(index);
+      mask(index + 1);
+      index += 1;
+      state = 'line-comment';
+      continue;
+    }
+    if (current === '/' && next === '*') {
+      mask(index);
+      mask(index + 1);
+      index += 1;
+      state = 'block-comment';
+      continue;
+    }
+    if (current === '/' && canStartRegex(index)) {
+      markValue(index);
+      regexCharacterClass = false;
+      state = 'regex';
+      continue;
+    }
+    if (current === "'") {
+      markValue(index);
+      state = 'single';
+      continue;
+    }
+    if (current === '"') {
+      markValue(index);
+      state = 'double';
+      continue;
+    }
+    if (current === '`') {
+      markValue(index);
+      state = 'template';
+      continue;
+    }
+    if (templateExpressionDepths.length > 0) {
+      const last = templateExpressionDepths.length - 1;
+      if (current === '{') templateExpressionDepths[last] += 1;
+      if (current === '}') {
+        templateExpressionDepths[last] -= 1;
+        if (templateExpressionDepths[last] === 0) {
+          mask(index);
+          templateExpressionDepths.pop();
+          state = 'template';
+        }
+      }
+    }
+  }
+  return output.join('');
+}
 
 function unique(values: string[]) {
   return Array.from(new Set(values));
@@ -29,9 +162,10 @@ function matches(pattern: RegExp, sourceCode: string) {
 }
 
 export function extractExplicitRepositoryTableNames(sourceCode: string) {
+  const executableSource = maskNonExecutable(sourceCode);
   return unique([
-    ...matches(SECURE_EXPLICIT_PATTERN, sourceCode),
-    ...matches(TRUSTED_EXPLICIT_PATTERN, sourceCode),
+    ...matches(SECURE_EXPLICIT_PATTERN, executableSource),
+    ...matches(TRUSTED_EXPLICIT_PATTERN, executableSource),
   ]);
 }
 
@@ -69,18 +203,19 @@ function finding(code: string, message: string): DynamicEndpointReviewFinding {
 
 export function reviewDynamicEndpointContract(input: DynamicEndpointReviewInput): DynamicEndpointContractReview {
   const sourceCode = String(input.sourceCode || '');
+  const executableSource = maskNonExecutable(sourceCode);
   const method = String(input.method || '').toUpperCase();
-  const usesMainRepository = MAIN_REPOSITORY_PATTERN.test(sourceCode);
-  const secureTables = unique(matches(SECURE_EXPLICIT_PATTERN, sourceCode));
-  const trustedTables = unique(matches(TRUSTED_EXPLICIT_PATTERN, sourceCode));
-  const usesRawBody = RAW_BODY_PATTERN.test(sourceCode);
-  const usesMutation = MUTATION_PATTERN.test(sourceCode);
-  const returnsRepositoryDataDirectly = DIRECT_REPOSITORY_DATA_RETURN_PATTERN.test(sourceCode);
+  const usesMainRepository = MAIN_REPOSITORY_PATTERN.test(executableSource);
+  const secureTables = unique(matches(SECURE_EXPLICIT_PATTERN, executableSource));
+  const trustedTables = unique(matches(TRUSTED_EXPLICIT_PATTERN, executableSource));
+  const usesRawBody = RAW_BODY_PATTERN.test(executableSource);
+  const usesMutation = MUTATION_PATTERN.test(executableSource);
+  const returnsRepositoryDataDirectly = DIRECT_REPOSITORY_DATA_RETURN_PATTERN.test(executableSource);
   const errors: DynamicEndpointReviewFinding[] = [];
   const warnings: DynamicEndpointReviewFinding[] = [];
   const info: DynamicEndpointReviewFinding[] = [];
 
-  if (/\bexport\s+default\b|\bmodule\.exports\b|\bexports\s*\./u.test(sourceCode)) {
+  if (/\bexport\s+default\b|\bmodule\.exports\b|\bexports\s*\./u.test(executableSource)) {
     errors.push(finding(
       'module_wrapper_not_supported',
       'Dynamic endpoint sourceCode is the handler body. Remove export default, module.exports, or exports.* wrappers before saving.',
@@ -141,7 +276,7 @@ export function reviewDynamicEndpointContract(input: DynamicEndpointReviewInput)
     ...(usesMutation ? ['Test an invalid business payload because custom handlers do not inherit canonical body validation.'] : []),
     ...(trustedTables.length > 0 ? ['Verify the response contains only explicitly shaped public fields.'] : []),
     ...(usesMutation && hasNonUpdatableDomainFields ? ['Re-inspect live metadata after E2E setup. Do not change isUpdatable merely to seed fixtures or let this custom action write a server-owned field.'] : []),
-    ...(sourceCode.includes('@USER') ? ['Test a second caller or spoofed ownership value against the endpoint-specific row policy.'] : []),
+    ...(executableSource.includes('@USER') ? ['Test a second caller or spoofed ownership value against the endpoint-specific row policy.'] : []),
   ];
   const status = errors.length > 0
     ? 'blocked'
@@ -196,9 +331,15 @@ export function assertCreateHandlerRouteBoundary(
       `create_handler cannot add a handler to canonical table route "${path}" without allowCanonicalRoute=true. Third-party or endpoint-specific behavior belongs on a separate custom route. Use canonical hooks only when behavior is intentionally shared with eApp/admin CRUD.`,
     );
   }
-  if (!/(?:@REPOS\.main|\$ctx\.\$repos\.main)\s*\./u.test(String(sourceCode || ''))) {
+  const executableSource = maskNonExecutable(String(sourceCode || ''));
+  if (!MAIN_REPOSITORY_PATTERN.test(executableSource)) {
     throw new Error(
       `A new handler on canonical table route "${path}" must use @REPOS.main or $ctx.$repos.main. Explicit-table third-party handlers belong on a separate custom route.`,
+    );
+  }
+  if (extractExplicitRepositoryTableNames(executableSource).length > 0) {
+    throw new Error(
+      `A new handler on canonical table route "${path}" cannot use explicit-table repositories. Use @REPOS.main or $ctx.$repos.main only, or move the handler to a separate custom route.`,
     );
   }
 }

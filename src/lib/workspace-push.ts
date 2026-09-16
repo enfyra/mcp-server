@@ -1,13 +1,29 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { writeSourceArtifact } from './source-artifacts.js';
 import { sourceHash, readWorkspaceFile, writeWorkspaceFile } from './workspace-files.js';
 import { observeArtifact, observationSummary, saveWorkspace, selectArtifacts } from './workspace-state.js';
 import type { WorkspaceDependencies, WorkspaceManifest, WorkspaceObservation, WorkspacePaths, WorkspacePushInput, WorkspacePushPlan } from './workspace-types.js';
 
-const planSchema = z.object({ id: z.string().uuid(), target: z.string(), projectRoot: z.string(), consumed: z.boolean(), items: z.array(z.object({ key: z.string(), localRevision: z.string(), remoteRevision: z.string(), sourceHash: z.string() }).strict()).max(500) }).strict();
+const planSchema = z.object({ id: z.string().uuid(), target: z.string(), projectRoot: z.string(), consumed: z.boolean(), items: z.array(z.object({ key: z.string(), localRevision: z.string(), remoteRevision: z.string(), sourceHash: z.string() }).strict()).max(500), signature: z.string().regex(/^[a-f0-9]{64}$/u) }).strict();
+const planSigningKey = randomBytes(32);
+
+function planPayload(plan: Omit<WorkspacePushPlan, 'signature'> | WorkspacePushPlan) {
+  return JSON.stringify({ id: plan.id, target: plan.target, projectRoot: plan.projectRoot, consumed: plan.consumed, items: plan.items });
+}
+
+function signPlan(plan: Omit<WorkspacePushPlan, 'signature'> | WorkspacePushPlan) {
+  return createHmac('sha256', planSigningKey).update(planPayload(plan)).digest('hex');
+}
+
+function isAuthenticPlan(plan: WorkspacePushPlan) {
+  const expected = Buffer.from(signPlan(plan), 'hex');
+  const actual = Buffer.from(plan.signature, 'hex');
+  return expected.length === actual.length && timingSafeEqual(expected, actual);
+}
 
 function savePlan(paths: WorkspacePaths, plan: WorkspacePushPlan) {
+  plan.signature = signPlan(plan);
   writeWorkspaceFile(paths.projectRoot, paths.planPath, `${JSON.stringify(plan, null, 2)}\n`);
 }
 
@@ -32,7 +48,7 @@ export async function pushWorkspace(paths: WorkspacePaths, manifest: WorkspaceMa
       await dependencies.validate(change.artifact, change.localSource!);
       artifacts.push({ ...observationSummary(change), sourceFile: sourceArtifact.tmpFile, diff: diffArtifact(change) });
     }
-    const plan: WorkspacePushPlan = { id: randomUUID(), target: paths.target, projectRoot: paths.projectRoot, consumed: false, items: changes.map((item) => ({ key: item.artifact.key, localRevision: item.localRevision!, remoteRevision: item.remoteRevision!, sourceHash: sourceHash(item.localSource!) })) };
+    const plan: WorkspacePushPlan = { id: randomUUID(), target: paths.target, projectRoot: paths.projectRoot, consumed: false, items: changes.map((item) => ({ key: item.artifact.key, localRevision: item.localRevision!, remoteRevision: item.remoteRevision!, sourceHash: sourceHash(item.localSource!) })), signature: '' };
     savePlan(paths, plan);
     return { action: 'enfyra_workspace_push_previewed', complete: changes.length === 0, planId: plan.id, artifacts, protection: 'optimistic-source-check', guidance: 'Review the diffs, then call push_enfyra_sources with apply=true and this planId. External writers are not locked; each write rechecks and verifies the live source.' };
   }
@@ -40,7 +56,13 @@ export async function pushWorkspace(paths: WorkspacePaths, manifest: WorkspaceMa
   if (!input.planId) throw new Error('A reviewed planId is required when apply=true.');
   if (input.keys) throw new Error('Apply uses the reviewed plan scope; omit keys.');
   const raw = readWorkspaceFile(paths.projectRoot, paths.planPath);
-  const plan = raw ? planSchema.parse(JSON.parse(raw)) as WorkspacePushPlan : null;
+  let plan: WorkspacePushPlan | null = null;
+  try {
+    plan = raw ? planSchema.parse(JSON.parse(raw)) as WorkspacePushPlan : null;
+  } catch {
+    throw new Error('Push plan is invalid or stale. Preview again.');
+  }
+  if (plan && !isAuthenticPlan(plan)) throw new Error('Push plan authenticity check failed. Preview again.');
   if (!plan || plan.id !== input.planId || plan.consumed || plan.target !== paths.target || plan.projectRoot !== paths.projectRoot) throw new Error('Push plan is missing, consumed, stale or belongs to another target. Preview again.');
   const changes: WorkspaceObservation[] = [];
   for (const item of plan.items) {

@@ -13,7 +13,7 @@ import {
   mergeVscodeMcpFile,
   mergeZcodeConfig,
 } from '../dist/lib/config-local-adapters.js';
-import { parseArgs } from '../dist/lib/config-local-contracts.js';
+import { deriveApiUrlFromAppUrl, normalizeAppUrl, parseArgs } from '../dist/lib/config-local-contracts.js';
 
 const EXPECTED_ENV = {
   ENFYRA_API_URL: 'http://localhost:3000/api',
@@ -68,6 +68,15 @@ test('static compatibility mode is explicit and the legacy compact alias remains
     ...EXPECTED_ENV,
     ENFYRA_MCP_DYNAMIC_TOOLS: 'on',
   });
+});
+
+test('app URLs are limited to absolute HTTP origins without credentials, query, or fragment', () => {
+  assert.equal(normalizeAppUrl('https://demo.enfyra.io/enfyra/'), 'https://demo.enfyra.io');
+  assert.equal(deriveApiUrlFromAppUrl('http://localhost:3000/api'), 'http://localhost:3000/api');
+  assert.throws(() => normalizeAppUrl('https://user:secret@demo.enfyra.io'), /credentials/i);
+  assert.throws(() => normalizeAppUrl('https://demo.enfyra.io/?next=/admin'), /query|fragment/i);
+  assert.throws(() => normalizeAppUrl('https://demo.enfyra.io/"; touch /tmp/pwned; #'), /valid|url/i);
+  assert.throws(() => normalizeAppUrl('file:///tmp/enfyra'), /http/i);
 });
 
 test('Codex config preserves existing advanced MCP runtime settings by default', async (t) => {

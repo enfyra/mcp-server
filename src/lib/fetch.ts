@@ -10,7 +10,7 @@ import {
   waitForRateLimitBudget,
   type RateLimitState,
 } from './rate-limit-state.js';
-import { clearRuntimeCacheDomains, getRuntimeCache, isRuntimeCacheableGet, runtimeCacheDomainsForMutationPath, setRuntimeCache } from './runtime-cache.js';
+import { clearRuntimeCacheDomains, getRuntimeCache, isRuntimeCacheableGet, runtimeCacheDomainsForMutationPath, runtimeCacheGenerationForPath, setRuntimeCache } from './runtime-cache.js';
 
 // Timeout configuration
 const FETCH_TIMEOUT = 30000; // 30 seconds
@@ -62,6 +62,7 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
     ? Number(requestedTimeoutMs)
     : FETCH_TIMEOUT;
   const cacheable = isRuntimeCacheableGet(path, method);
+  const cacheGeneration = cacheable ? runtimeCacheGenerationForPath(path) : undefined;
   if (cacheable) {
     const cached = getRuntimeCache(path);
     if (cached !== undefined) return cached;
@@ -131,7 +132,7 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
   }
 
   const result = await res.json();
-  if (cacheable) setRuntimeCache(path, result);
+  if (cacheable) setRuntimeCache(path, result, cacheGeneration);
   if (method !== 'GET') {
     clearRuntimeCacheDomains(runtimeCacheDomainsForMutationPath(path), 'mutation');
   }

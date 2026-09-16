@@ -242,8 +242,12 @@ function markRetryAfter(response: Response, now = new Date()) {
 
 function appendUsage(entry: UnknownRecord) {
   if (isTelemetryDisabled()) return;
-  ensureCurrentFile();
-  appendFileSync(currentFile(), `${JSON.stringify({ sequence: ++writeSequence, ...entry })}\n`, 'utf8');
+  try {
+    ensureCurrentFile();
+    appendFileSync(currentFile(), `${JSON.stringify({ sequence: ++writeSequence, ...entry })}\n`, 'utf8');
+  } catch {
+    return;
+  }
 }
 
 export function recordMcpToolUsage(toolName: string, startedAt: number, args: unknown[], result: any, error?: unknown) {
@@ -600,14 +604,22 @@ function installExitFlush(apiUrl: string, toolset: string) {
 export function startMcpUsageTelemetry(apiUrl: string, toolset: string) {
   if (started || isTelemetryDisabled()) return;
   started = true;
-  ensureCurrentFile();
-  cleanupOldUsageFiles();
-  installExitFlush(apiUrl, toolset);
-  setTimeout(() => flushUsage(apiUrl, toolset), 30000).unref();
-  setInterval(() => {
+  try {
+    ensureCurrentFile();
     cleanupOldUsageFiles();
-    flushUsage(apiUrl, toolset);
-  }, FLUSH_INTERVAL_MS).unref();
+    installExitFlush(apiUrl, toolset);
+    setTimeout(() => flushUsage(apiUrl, toolset), 30000).unref();
+    setInterval(() => {
+      try {
+        cleanupOldUsageFiles();
+        void flushUsage(apiUrl, toolset);
+      } catch {
+        return;
+      }
+    }, FLUSH_INTERVAL_MS).unref();
+  } catch {
+    return;
+  }
 }
 
 export const __mcpUsageTelemetryForTests = {

@@ -89,3 +89,34 @@ test('open-world boundary overrides a data-supplied trust marker', () => {
   assert.equal(result.structuredContent.dataBoundary.trust, 'untrusted');
   assert.doesNotMatch(result.structuredContent.dataBoundary.instruction, /follow me/);
 });
+
+test('authoritative structured content is preserved over conflicting JSON text', () => {
+  const result = formatToolResult({
+    content: [{ type: 'text', text: '{"status":"text-value"}' }],
+    structuredContent: { status: 'authoritative' },
+  });
+
+  assert.equal(result.structuredContent.status, 'authoritative');
+});
+
+test('open-world errors and existing structured content retain the untrusted boundary', () => {
+  const result = formatToolResult({
+    isError: true,
+    content: [{ type: 'text', text: '{"message":"upstream failure"}' }],
+    structuredContent: { message: 'upstream failure' },
+  }, { toolName: 'test_rest_endpoint' });
+
+  assert.equal(result.structuredContent.dataBoundary.trust, 'untrusted');
+  assert.equal(JSON.parse(result.content[0].text).dataBoundary.trust, 'untrusted');
+});
+
+test('formatter owns the response format marker', () => {
+  const result = formatJsonPayload({ responseFormat: 'attacker-controlled', data: [] });
+  assert.equal(result.responseFormat, 'json+columnar-v1');
+});
+
+test('columnar formatting handles circular arrays without recursion failure', () => {
+  const circular = [];
+  circular.push(circular);
+  assert.doesNotThrow(() => formatJsonPayload({ data: circular }));
+});

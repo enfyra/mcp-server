@@ -1,6 +1,7 @@
 type CacheEntry = {
   domain: RuntimeCacheDomain;
   value: unknown;
+  expiresAt: number;
 };
 
 type CacheEventKind = 'mutation_invalidation' | 'auth_invalidation' | 'reload_invalidation' | 'warm_failure';
@@ -14,6 +15,9 @@ type CacheEvent = {
 
 const entries = new Map<string, CacheEntry>();
 const MAX_CACHE_EVENTS = 20;
+const MAX_CACHE_ENTRIES = 500;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let runtimeCacheEnabled = true;
 const cacheStats = {
   hits: 0,
   misses: 0,
@@ -71,6 +75,9 @@ export type RuntimeCacheDomain =
   | 'extension'
   | 'graphql';
 
+const ALL_RUNTIME_CACHE_DOMAINS = [...new Set(PATH_DOMAIN_PREFIXES.map(([, domain]) => domain))];
+const domainGenerations = new Map<RuntimeCacheDomain, number>();
+
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
@@ -103,11 +110,14 @@ export function runtimeCacheDomainForPath(path: string): RuntimeCacheDomain | nu
 }
 
 export function getRuntimeCache(path: string) {
+  if (!runtimeCacheEnabled) return undefined;
   const entry = entries.get(path);
   const domain = runtimeCacheDomainForPath(path);
+  const validEntry = entry && entry.expiresAt > Date.now() ? entry : undefined;
+  if (entry && !validEntry) entries.delete(path);
   if (domain) {
     const stats = domainStats(domain);
-    if (entry) {
+    if (validEntry) {
       cacheStats.hits += 1;
       stats.hits += 1;
     } else {
@@ -115,13 +125,32 @@ export function getRuntimeCache(path: string) {
       stats.misses += 1;
     }
   }
-  return entry ? clone(entry.value) : undefined;
+  if (!validEntry) return undefined;
+  entries.delete(path);
+  entries.set(path, validEntry);
+  return clone(validEntry.value);
 }
 
-export function setRuntimeCache(path: string, value: unknown) {
+export function runtimeCacheGenerationForPath(path: string) {
   const domain = runtimeCacheDomainForPath(path);
-  if (!domain) return;
-  entries.set(path, { domain, value: clone(value) });
+  return domain ? domainGenerations.get(domain) || 0 : 0;
+}
+
+export function setRuntimeCache(path: string, value: unknown, expectedGeneration?: number) {
+  const domain = runtimeCacheDomainForPath(path);
+  if (!domain || !runtimeCacheEnabled) return;
+  if (expectedGeneration !== undefined && expectedGeneration !== (domainGenerations.get(domain) || 0)) return;
+  entries.delete(path);
+  entries.set(path, { domain, value: clone(value), expiresAt: Date.now() + CACHE_TTL_MS });
+  while (entries.size > MAX_CACHE_ENTRIES) {
+    const oldest = entries.keys().next().value;
+    if (oldest === undefined) break;
+    entries.delete(oldest);
+  }
+}
+
+export function setRuntimeCacheEnabled(enabled: boolean) {
+  runtimeCacheEnabled = enabled;
 }
 
 export function runtimeCacheKeysForDomains(domains: Iterable<RuntimeCacheDomain>) {
@@ -133,6 +162,9 @@ export function runtimeCacheKeysForDomains(domains: Iterable<RuntimeCacheDomain>
 
 export function clearRuntimeCache(reason?: 'mutation' | 'auth' | 'reload') {
   const removed = [...entries.values()];
+  for (const domain of ALL_RUNTIME_CACHE_DOMAINS) {
+    domainGenerations.set(domain, (domainGenerations.get(domain) || 0) + 1);
+  }
   if (reason) {
     cacheStats.invalidations[reason] += removed.length;
     for (const entry of removed) domainStats(entry.domain).invalidations += 1;
@@ -143,6 +175,9 @@ export function clearRuntimeCache(reason?: 'mutation' | 'auth' | 'reload') {
 
 export function clearRuntimeCacheDomains(domains: Iterable<RuntimeCacheDomain>, reason?: 'mutation' | 'auth' | 'reload') {
   const allowed = new Set(domains);
+  for (const domain of allowed) {
+    domainGenerations.set(domain, (domainGenerations.get(domain) || 0) + 1);
+  }
   const removedDomains: RuntimeCacheDomain[] = [];
   for (const [path, entry] of entries) {
     if (!allowed.has(entry.domain)) continue;
@@ -193,7 +228,10 @@ export function runtimeCacheDomainsForReloadSteps(steps: string[]): RuntimeCache
       domains.add('menu');
       domains.add('extension');
     }
-    if (step === 'extension') domains.add('extension');
+    if (step === 'extension') {
+      domains.add('extension');
+      domains.add('menu');
+    }
     if (step === 'storage' || step === 'storage_config' || step === 'enfyra_storage_config') domains.add('storage');
     if (step === 'graphql') domains.add('graphql');
     if (step === 'guard') domains.add('guard');
@@ -231,5 +269,10 @@ export function runtimeCacheDomainsForMutationPath(path: string) {
     extension: ['extension'],
     graphql: ['graphql'],
   };
-  return runtimeCacheDomainsForReloadSteps(stepsByDomain[domain]);
+  const domains = runtimeCacheDomainsForReloadSteps(stepsByDomain[domain]);
+  const normalizedPath = path.split('?')[0];
+  if (normalizedPath === '/enfyra_role' || normalizedPath.startsWith('/enfyra_role/')) {
+    domains.push('fieldPermission');
+  }
+  return [...new Set(domains)];
 }
