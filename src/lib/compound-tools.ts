@@ -37,7 +37,10 @@ function summarizeRecords(records: any[], fields: string[]) {
 }
 
 function appliesToRoute(record: any, routeId: string) {
-  return record?.isGlobal === true || String(refId(record?.route)) === String(routeId);
+  if (String(refId(record?.route)) === String(routeId)) return true;
+  if (record?.isGlobal !== true) return false;
+  const excluded = Array.isArray(record?.excludeRoutes) ? record.excludeRoutes : [];
+  return !excluded.some((excludedRoute) => String(refId(excludedRoute)) === String(routeId));
 }
 
 function uniqueRecords(records: any[]) {
@@ -109,7 +112,7 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
         fetchAll(apiUrl, '/enfyra_post_hook?limit=1000&fields=id,name,methods.name,priority,isEnabled,isGlobal,route.id'),
       ]),
       fetchAll(apiUrl, `/enfyra_route_permission?limit=50&filter=${routeFilter}&fields=id,role.name,allowedUsers.id,methods.name,isEnabled,description`),
-      fetchAll(apiUrl, '/enfyra_guard?limit=1000&fields=id,name,type,position,isEnabled,isGlobal,priority,combinator,route.id'),
+      fetchAll(apiUrl, '/enfyra_guard?limit=1000&fields=id,name,type,position,isEnabled,isGlobal,priority,combinator,route.id,excludeRoutes.id'),
     ]);
 
     if (handlersResult.status === 'fulfilled') {

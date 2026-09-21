@@ -89,7 +89,7 @@ export async function collectRestDefinitionState(tableRef?: unknown) {
     fetchAll('/enfyra_pre_hook?limit=1000'),
     fetchAll('/enfyra_post_hook?limit=1000'),
     fetchAll('/enfyra_route_permission?limit=1000'),
-    fetchAll('/enfyra_guard?limit=1000'),
+    fetchAll('/enfyra_guard?limit=1000&fields=id,_id,name,type,position,isEnabled,isGlobal,priority,combinator,route.id,route.path,methods.id,methods.name,excludeRoutes.id,excludeRoutes.path'),
     fetchAll('/enfyra_guard_rule?limit=1000'),
     fetchAll('/enfyra_field_permission?limit=1000'),
     fetchAll('/enfyra_column_rule?limit=1000'),
@@ -119,7 +119,7 @@ export async function collectFeatureSearchState() {
   const preHooksResult = await discoveryFetch('/enfyra_pre_hook?limit=500');
   const postHooksResult = await discoveryFetch('/enfyra_post_hook?limit=500');
   const routePermissionsResult = await discoveryFetch('/enfyra_route_permission?limit=500');
-  const guardsResult = await discoveryFetch('/enfyra_guard?limit=500');
+  const guardsResult = await discoveryFetch('/enfyra_guard?limit=500&fields=id,_id,name,type,position,isEnabled,isGlobal,priority,combinator,route.id,route.path,methods.id,methods.name,excludeRoutes.id,excludeRoutes.path');
   const guardRulesResult = await discoveryFetch('/enfyra_guard_rule?limit=500');
   const fieldPermissionsResult = await discoveryFetch('/enfyra_field_permission?limit=500');
   const columnRulesResult = await discoveryFetch('/enfyra_column_rule?limit=500');
@@ -183,7 +183,12 @@ export function enrichRoute(route, state) {
     state.methodIdNameMap,
   );
   const routeGuards = withMethodNames(
-    state.guards.filter((item) => item.isGlobal || sameId(refId(item.route), routeId)),
+    state.guards.filter((item) => {
+      if (sameId(refId(item.route), routeId)) return true;
+      if (!item.isGlobal) return false;
+      const excluded = Array.isArray(item.excludeRoutes) ? item.excludeRoutes : [];
+      return !excluded.some((excludedRoute) => sameId(refId(excludedRoute), routeId));
+    }),
     state.methodIdNameMap,
   ).map((guard) => ({
     ...guard,
