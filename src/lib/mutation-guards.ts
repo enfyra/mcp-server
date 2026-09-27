@@ -283,7 +283,7 @@ export function validatePortableScriptSource(sourceCode) {
   validateSocketContract(sourceCode);
   validateTriggerContract(sourceCode);
   validateAwaitedRepositoryCalls(sourceCode);
-  validateNumericThrowDetails(sourceCode);
+  validateThrowContract(sourceCode);
 }
 
 function validateTriggerContract(sourceCode) {
@@ -323,22 +323,115 @@ function validateAwaitedRepositoryCalls(sourceCode) {
   }
 }
 
-function validateNumericThrowDetails(sourceCode) {
-  const macroPattern = /@THROW(?:400|401|403|404|409|422|429|500|503)\s*\(([\s\S]*?)\)/g;
-  const ctxPattern = /\$ctx\.\$throw\[['"](?:400|401|403|404|409|422|429|500|503)['"]\]\s*\(([\s\S]*?)\)/g;
+function validateThrowContract(sourceCode) {
+  if (/\$ctx\.\$throw\s*\[|@THROW\s*\.(?!(?:http|json)\b)|\$ctx\.\$throw\s*\.(?!(?:http|json)\b)/u.test(sourceCode)) {
+    throw new Error(
+      '$throw exposes only .http(statusCode, message?) and .json(body, options?). Use @THROW.json(...) for custom error fields inside the server-owned root success/statusCode envelope, and @RES.json(...) for a fully custom success response.'
+    );
+  }
 
-  for (const pattern of [macroPattern, ctxPattern]) {
+  const callPatterns = [
+    /@THROW(?:400|401|403|404|409|422|429|500|503)\s*\(([\s\S]*?)\)/g,
+    /(?:@THROW|\$ctx\.\$throw)\s*\.\s*http\s*\(([\s\S]*?)\)/g,
+    /(?:@THROW|\$ctx\.\$throw)\s*\.\s*json\s*\(([\s\S]*?)\)/g,
+  ];
+  for (const pattern of callPatterns) {
     let match;
     while ((match = pattern.exec(sourceCode)) !== null) {
       const args = splitTopLevelArguments(match[1]);
-      if (args.length <= 1) continue;
-      const secondArg = args[1]?.trim() || '';
-      if (!secondArg || /^[{\[]/.test(secondArg) || /^(null|undefined)$/u.test(secondArg)) continue;
-      throw new Error(
-        'Numeric @THROW helpers are raw HTTP message helpers. If you pass details, pass an object/array such as @THROW404("Project not found", { id }); for Enfyra-formatted semantic messages use @THROW.notFound(resource, id) or @THROW.duplicate(resource, field, value).'
-      );
+      const isAlias = pattern === callPatterns[0];
+      const isJson = pattern === callPatterns[2];
+      if (isAlias && args.length !== 1) {
+        throw new Error('@THROW status aliases require exactly one message.');
+      }
+      if (!isAlias && args.length >= 1 && args.length <= 2) {
+        if (isJson) validateThrowJsonLiteral(args[0]);
+        continue;
+      }
+      if (!isAlias) {
+        throw new Error(
+          isJson
+            ? '$throw.json accepts only body and optional options.'
+            : '$throw.http accepts only statusCode and optional message.'
+        );
+      }
     }
   }
+}
+
+function validateThrowJsonLiteral(bodySource) {
+  const body = bodySource.trim();
+  if (
+    body.startsWith('[')
+    || body.startsWith('"')
+    || body.startsWith("'")
+    || body.startsWith('`')
+    || /^(?:true|false|null|[-+]?\d)/u.test(body)
+  ) {
+    throw new Error('$throw.json body must be a JSON object.');
+  }
+  if (!body.startsWith('{') || !body.endsWith('}')) return;
+
+  const properties = splitTopLevelArguments(body.slice(1, -1));
+  for (const property of properties) {
+    const separator = findTopLevelSeparator(property, ':');
+    if (separator < 0) continue;
+    const key = property.slice(0, separator).trim().replace(/^["']|["']$/g, '');
+    if (key === 'success' || key === 'statusCode') {
+      throw new Error(
+        '$throw.json body.success and body.statusCode are server-owned.',
+      );
+    }
+    if (key !== 'error') continue;
+    const value = property.slice(separator + 1).trim();
+    if (
+      value.startsWith('[')
+      || value.startsWith('"')
+      || value.startsWith("'")
+      || value.startsWith('`')
+      || /^(?:true|false|null|[-+]?\d)/u.test(value)
+    ) {
+      throw new Error('$throw.json body.error must be a JSON object.');
+    }
+    if (value.startsWith('{') && value.endsWith('}')) {
+      const errorProperties = splitTopLevelArguments(value.slice(1, -1));
+      if (errorProperties.some((entry) => {
+        const propertySeparator = findTopLevelSeparator(entry, ':');
+        if (propertySeparator < 0) return false;
+        return entry
+          .slice(0, propertySeparator)
+          .trim()
+          .replace(/^["']|["']$/g, '') === 'statusCode';
+      })) {
+        throw new Error(
+          '$throw.json body.error.statusCode is not allowed; use options.statusCode.',
+        );
+      }
+    }
+  }
+}
+
+function findTopLevelSeparator(source, separator) {
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const char = source[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = null;
+      continue;
+    }
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '(' || char === '{' || char === '[') depth += 1;
+    else if (char === ')' || char === '}' || char === ']') depth = Math.max(0, depth - 1);
+    else if (char === separator && depth === 0) return index;
+  }
+  return -1;
 }
 
 function splitTopLevelArguments(argsSource) {

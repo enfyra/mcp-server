@@ -631,33 +631,57 @@ test('dynamic script guard requires awaiting repository calls', () => {
   );
 });
 
-test('dynamic script guard locks numeric throw helper details contract', () => {
+test('dynamic script guard locks the quick throw and custom JSON contract', () => {
   assert.doesNotThrow(
     () => validatePortableScriptSource('if (!request) @THROW404("Request not found")'),
   );
-  assert.doesNotThrow(
-    () => validatePortableScriptSource('if (!request) @THROW404("Request not found", { requestId })'),
+  assert.throws(
+    () => validatePortableScriptSource('if (!request) @THROW404()'),
+    /require exactly one message/,
   );
   assert.doesNotThrow(
-    () => validatePortableScriptSource('if (!request) $ctx.$throw["404"]("Request not found", { requestId })'),
+    () => validatePortableScriptSource('if (!request) @THROW.http(404, "Request not found")'),
   );
   assert.doesNotThrow(
-    () => validatePortableScriptSource('if (!request) @THROW.notFound("Request", requestId)'),
+    () => validatePortableScriptSource('@THROW.json({ error: { code: "not_found" } }, { statusCode: 404 })'),
   );
   assert.doesNotThrow(
-    () => validatePortableScriptSource('if (exists) @THROW.duplicate("User", "email", email)'),
+    () => validatePortableScriptSource('@THROW.json({ error: errorDetails }, { statusCode: 500 })'),
+  );
+  assert.throws(
+    () => validatePortableScriptSource('@THROW.json([], { statusCode: 500 })'),
+    /body must be a JSON object/,
+  );
+  assert.throws(
+    () => validatePortableScriptSource('@THROW.json({ error: "failed" }, { statusCode: 500 })'),
+    /body\.error must be a JSON object/,
+  );
+  assert.throws(
+    () => validatePortableScriptSource('@THROW.json({ success: true, error: {} }, { statusCode: 500 })'),
+    /body\.success and body\.statusCode are server-owned/,
+  );
+  assert.throws(
+    () => validatePortableScriptSource('@THROW.json({ statusCode: 200, error: {} }, { statusCode: 500 })'),
+    /body\.success and body\.statusCode are server-owned/,
+  );
+  assert.throws(
+    () => validatePortableScriptSource('@THROW.json({ error: { statusCode: 200 } }, { statusCode: 500 })'),
+    /body\.error\.statusCode is not allowed/,
+  );
+  assert.doesNotThrow(
+    () => validatePortableScriptSource('return await @RES.json({ data: { id: "project-1" } }, { statusCode: 200 })'),
   );
 
   for (const source of [
-    'if (!project) @THROW404("Project", projectId)',
-    'if (!project) @THROW404("Project", "p_123")',
-    'if (exists) @THROW409("User", email)',
-    'if (!project) $ctx.$throw["404"]("Project", projectId)',
-    'if (!valid) $ctx.$throw[\'422\']("Invalid value", "email")',
+    'if (!request) @THROW404("Request not found", { requestId })',
+    'if (!request) @THROW.notFound("Request", requestId)',
+    'if (exists) @THROW.duplicate("User", "email", email)',
+    'if (!project) $ctx.$throw["404"]("Project")',
+    'if (!valid) @THROW.http(422, "Invalid value", { param: "email" })',
   ]) {
     assert.throws(
       () => validatePortableScriptSource(source),
-      /Numeric @THROW helpers are raw HTTP message helpers/,
+      /only \.http.*\.json|accepts? only|require exactly one message/,
     );
   }
 });

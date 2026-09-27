@@ -822,19 +822,26 @@ test('dynamic throw contract is consistently documented and ack-versioned', () =
   const payloadText = JSON.stringify(payload);
 
   assert.match(GLOBAL_RULES_ACK_KEY, /20260717M$/);
-  assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /DYNAMIC-REPOSITORY-CONTRACT/);
+  assert.match(DYNAMIC_CODE_KNOWLEDGE_ACK_KEY, /QUICK-HTTP-TRACED-JSON/);
   assert.equal(payload.version, REQUIRED_KNOWLEDGE_VERSION);
   assert.match(payloadText, /internal navigation triggered by an extension action.*navigateTo/);
 
-  for (const text of [entry, requiredKnowledge, examples, payloadText]) {
-    assert.match(text, /numeric helpers? (are|is) raw HTTP message|use numeric @THROW helpers for raw HTTP messages/i);
-    assert.match(text, /details.*object\/array|object or array/i);
-    assert.match(text, /notFound\(resource, id\?\)|notFound\(\.\.\.\)|notFound\(resource, identifier\)/);
-    assert.match(text, /duplicate\(resource, field, value\)|duplicate\(\.\.\.\)/);
+  for (const text of [entry, requiredKnowledge, payloadText]) {
+    assert.match(text, /quick fixed-status HTTP error|quick fixed-status helpers|quick fixed-status helpers?/i);
+    assert.match(text, /@THROW\.http\(statusCode, message\?\)/);
+    assert.match(text, /@THROW\.json\(body, \{ statusCode, headers \}\)/);
+    assert.match(text, /return await @RES\.json\(body, \{ statusCode, headers \}\)/);
+    assert.match(text, /root success=false and root statusCode equal to the HTTP status/i);
+    assert.match(text, /removes error\.statusCode/i);
+    assert.match(text, /server-owned timestamp, pathname-only path, method, and correlationId/i);
+    assert.match(text, /success-only|success response/i);
+    assert.doesNotMatch(text, /@THROW\.notFound|@THROW\.duplicate/);
   }
 
-  assert.match(entry, /do not use @THROW404\("Project", id\) as a semantic shortcut/);
-  assert.ok(payloadText.includes('do not use @THROW404(\\"Project\\", id) as a semantic shortcut'));
+  assert.match(examples, /@THROW404\("Request not found"\)/);
+  assert.doesNotMatch(examples, /@THROW(?:400|401|403|404|409|422|429|500|503)\([^\n)]*,\s*\{/);
+  assert.match(entry, /There is no \.error, semantic throw method, details argument, or raw numeric property call/);
+  assert.ok(payloadText.includes('The source contract has no @THROW.error'));
 });
 
 test('connect examples are SDK-first with framework selection guide', () => {

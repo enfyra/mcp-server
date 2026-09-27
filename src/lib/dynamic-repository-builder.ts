@@ -86,7 +86,7 @@ return result`;
 })
 
 const record = result.data?.[0] ?? null
-if (!record) @THROW404("Record not found", { ${idField}: ${idExpression} })
+if (!record) @THROW404("Record not found")
 return record`;
   } else if (input.operation === 'create') {
     code = `const result = await ${repository}.create({

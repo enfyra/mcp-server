@@ -297,7 +297,7 @@ export const TOOL_WORKFLOWS = [
       {
         tool: 'throw new Error for intentional user/domain failures',
         when: 'writing generated dynamic server code',
-        useInstead: '@THROW400-style macros or native $ctx.$throw helpers',
+        useInstead: '@THROW400-style one-message helpers or $ctx.$throw.http(statusCode, message?)',
         reason: 'Intentional domain errors should use the platform error contract.',
       },
     ],

@@ -1,8 +1,8 @@
 export const GLOBAL_RULES_ACK_KEY = 'EFYRA::GLOBAL-RULES::RUNTIME-ZONE-INVENTORY::SCHEMA-DESIGN-CONTEXT::20260717M';
-export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::ASYNC-HELPER-BRIDGE::20260720A';
+export const DYNAMIC_CODE_KNOWLEDGE_ACK_KEY = 'EFYRA::DYNAMIC-REPOSITORY-CONTRACT::SCRIPT-RUNTIME-TYPES::QUICK-HTTP-TRACED-JSON::20260928A';
 export const EXTENSION_KNOWLEDGE_ACK_KEY = 'EFYRA::EXTENSION-APP-COMPOSABLE-CONTRACT::20260716B';
 
-export const REQUIRED_KNOWLEDGE_VERSION = '2026-09-17.package-stream-consumption';
+export const REQUIRED_KNOWLEDGE_VERSION = '2026-09-28.quick-http-traced-json';
 
 type KnowledgeDomain = 'globalRules' | 'dynamicServerCode' | 'extensions';
 
@@ -382,9 +382,10 @@ const DYNAMIC_CODE_SECTIONS = [
       'For test_flow_step, pass runtime @FLOW_PAYLOAD values through the payload object. mockFlow is only for advanced $last/$meta flow context.',
       'MCP test tools always send an explicit timeout. Their default execution timeout is 60000 ms; pass a positive timeout only when the test needs a different bound. The test transport waits slightly longer than the requested execution bound so it can receive the completed response.',
       'Flow deletion is preview-first. Use delete_flow for physical flow cleanup only after the exact flow has been disabled; use delete_flow_step for one step. Never confirm deletion of an enabled flow, and do not use generic delete_records for flow metadata.',
-      'For intentional HTTP errors, numeric helpers are raw HTTP message helpers: @THROW400(message), @THROW404(message), @THROW409(message), @THROW422(message, detailsObject?), @THROW500(message).',
-      'When numeric helpers include details, pass an object or array such as @THROW404("Project not found", { id }); do not use @THROW404("Project", id) as a semantic shortcut.',
-      'Use @THROW.http(status, message, details?) for dynamic status codes. Use @THROW.notFound(resource, id?) and @THROW.duplicate(resource, field, value) only when you intentionally want Enfyra-formatted semantic messages.',
+      'For a quick fixed-status HTTP error, use the retained public helpers such as @THROW400(message), @THROW404(message), or @THROW503(message). Each alias requires exactly one message and ESV compiles it to .http(theFixedStatusCode, message). Use @THROW.http(statusCode, message?) when the status is dynamic.',
+      'The source contract has no @THROW.error, semantic throw methods, details argument, or numeric property calls. Quick throws intentionally delegate the generic error envelope to ESV.',
+      'For custom JSON error fields, use @THROW.json(body, { statusCode, headers }). The body and body.error must be objects. ESV preserves non-reserved custom fields, writes root success=false and root statusCode equal to the HTTP status, removes error.statusCode, and merges body.error with server-owned timestamp, pathname-only path, method, and correlationId. Script source must not declare body.success, body.statusCode, or body.error.statusCode; select the status only through options.statusCode. The call terminates synchronously, defaults to status 500, and accepts only 400-599.',
+      'For a fully custom success response, use return await @RES.json(body, { statusCode, headers }) as the terminal handler statement. It accepts only 200-399 and must not be used for errors.',
     ],
   },
 ];

@@ -16,6 +16,8 @@ test('dynamic repository builder defaults explicit user-facing access to secure 
   assert.match(result.code, /await #secure\.project\.find/);
   assert.match(result.code, /fields: \["id", "name"\]/);
   assert.match(result.code, /result\.data\?\.\[0\]/);
+  assert.match(result.code, /@THROW404\("Record not found"\)/);
+  assert.doesNotMatch(result.code, /@THROW404\([^\n]*,\s*\{/);
   assert.equal(result.fieldPermissionsEnforced, true);
 });
 

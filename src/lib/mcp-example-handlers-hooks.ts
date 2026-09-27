@@ -151,7 +151,7 @@ return { id: user.id, email: user.email }`,
         notes: [
           'create/update return { data: [...] }, not a bare row.',
           'The trusted user repository is intentional for registration internals. Shape the response explicitly and never return the raw trusted row.',
-          'Use numeric @THROW helpers for raw HTTP messages. If you pass details, pass an object/array such as @THROW404("Request not found", { requestId }). Use @THROW.notFound(resource, id?) or @THROW.duplicate(resource, field, value) only when you want Enfyra-formatted semantic messages.',
+          'Use a fixed-status helper such as @THROW404(message), or @THROW.http(statusCode, message?) when the status is dynamic. Both use the generic Enfyra error envelope. For custom error fields, status, and headers, use @THROW.json(body, { statusCode, headers }); ESV writes root success=false and root statusCode equal to the HTTP status, removes error.statusCode, and merges server-owned timestamp, pathname-only path, method, and correlationId into body.error. Use return await @RES.json(...) only for a complete custom success response.',
           'Prefer macros over raw $ctx when a macro exists.',
         ],
       },
@@ -216,7 +216,7 @@ const found = await #secure.app_reports.find({
 })
 
 const report = found.data?.[0]
-if (!report) @THROW404("Report not found", { reportId })
+if (!report) @THROW404("Report not found")
 
 return {
   id: report.id,
