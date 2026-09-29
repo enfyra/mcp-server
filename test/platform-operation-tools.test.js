@@ -522,15 +522,14 @@ test('extension component builders enforce drawer and modal contracts', async ()
 
   const list = buildExtensionResourceListSnippet({
     itemsExpression: 'notes',
-    itemName: 'note',
-    titleExpression: "note.title || 'Untitled'",
-    descriptionExpression: 'note.content',
-    onClick: 'openEdit(note)',
+    columnsExpression: 'noteColumns',
+    rowClickExpression: 'openEdit',
     emptyTitle: 'No notes yet',
   });
-  assert.match(list.snippet, /<CommonResourceListFrame/);
-  assert.match(list.snippet, /<CommonResourceListItem/);
-  assert.match(list.snippet, /v-for="note in notes"/);
+  assert.match(list.snippet, /<DataTable/);
+  assert.match(list.snippet, /:data="notes"/);
+  assert.match(list.snippet, /:columns="noteColumns"/);
+  assert.match(list.snippet, /@row-click="openEdit"/);
 
   const grid = buildExtensionResourceGridSnippet({
     itemsExpression: 'notes',

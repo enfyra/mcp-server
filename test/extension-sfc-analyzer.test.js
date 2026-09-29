@@ -29,7 +29,8 @@ test('Vue SFC analyzer ignores fake tags in comments and reads multiline bound a
   assert.equal(frame.attributes.some((attribute) => attribute.name === 'page' && attribute.directive === 'model'), true);
 
   const review = reviewExtensionUiContract(code, { pattern: 'resource_list' });
-  assert.equal(review.valid, true);
+  assert.equal(review.valid, false);
+  assert.equal(review.issues.some((issue) => issue.rule === 'resource-list-table-required'), true);
   assert.equal(review.issues.some((issue) => issue.rule === 'resource-list-ad-hoc-cards'), false);
   assert.equal(review.issues.some((issue) => issue.rule === 'native-button-type'), false);
 });

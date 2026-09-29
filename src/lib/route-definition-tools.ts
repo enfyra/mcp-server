@@ -166,7 +166,7 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         sourceFile: z.string().optional().describe('Previously returned route handler source artifact tmpFile.'),
         sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the route handler.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language for compiler. Default javascript.'),
-        timeout: z.number().optional().describe('Timeout in ms for each route+method handler row (not a route-level setting; default system timeout is usually 30000).'),
+        timeout: z.number().int().positive().optional().describe('Dynamic execution timeout in ms for each enfyra_route_method_config; default 30000.'),
         globalRulesAckKey: globalRulesAckParam(z),
         knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
         allowCanonicalRoute: z.boolean().optional().default(false).describe('Explicit acknowledgement for adding a new handler to a canonical main-table route. Use only when the new method intentionally belongs to the shared eApp/admin CRUD surface; third-party endpoint-specific behavior must use a separate custom route.'),
@@ -199,19 +199,30 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
           if (!methodId) throw new Error(`Unknown method: ${methodName}. Valid: ${Object.keys(methodMap).join(', ')}`);
     
           const body: RouteHandlerBody = { route: { id: routeId }, method: { id: methodId }, sourceCode, scriptLanguage };
-          if (timeout) body.timeout = timeout;
-    
           const result = await fetchAPI(ENFYRA_API_URL, '/enfyra_route_handler', {
             method: 'POST',
             body: JSON.stringify(body),
           });
           const created = firstDataRecord(result);
+          const configFilter = encodeURIComponent(JSON.stringify({
+            route: { id: { _eq: routeId } },
+            method: { id: { _eq: methodId } },
+          }));
+          const configResult = await fetchAPI(ENFYRA_API_URL, `/enfyra_route_method_config?filter=${configFilter}&limit=1&fields=id,_id,timeout`);
+          const config = unwrapData(configResult)[0];
+          if (!config) throw new Error(`Route method configuration is missing for ${methodName}.`);
+          if (timeout !== undefined && Number(config.timeout) !== timeout) {
+            await fetchAPI(ENFYRA_API_URL, `/enfyra_route_method_config/${encodeURIComponent(String(getId(config)))}`, {
+              method: 'PATCH',
+              body: JSON.stringify({ timeout }),
+            });
+          }
           results.push({
             id: getId(created),
             routeId,
             method: methodName,
             scriptLanguage,
-            timeout: created?.timeout ?? timeout ?? null,
+            timeout: timeout ?? config.timeout,
           });
         }
     

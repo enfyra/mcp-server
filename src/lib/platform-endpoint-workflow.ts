@@ -19,6 +19,7 @@ import {
 import {
   fetchAll,
   findHandler,
+  findRouteMethodConfig,
   getId,
   getMethodContext,
   methodNamesFromRecords,
@@ -26,6 +27,7 @@ import {
   normalizeRestPath,
   refId,
   reloadRoutes,
+  routeConfiguredMethods,
   resolveMethodRefs,
   summarizeWorkflowOperation,
   uniqueMethodNames,
@@ -70,11 +72,10 @@ export async function reviewCustomEndpointSource(apiUrl: string, method: string,
   });
 }
 
-function sourceMatches(existingHandler, sourceCode, scriptLanguage, timeout) {
+function sourceMatches(existingHandler, sourceCode, scriptLanguage) {
   if (!existingHandler) return false;
   if (String(existingHandler.sourceCode ?? '') !== String(sourceCode ?? '')) return false;
   if (scriptLanguage && String(existingHandler.scriptLanguage || 'javascript') !== String(scriptLanguage)) return false;
-  if (timeout !== undefined && Number(existingHandler.timeout) !== Number(timeout)) return false;
   return true;
 }
 
@@ -108,7 +109,7 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
   if (!methodId) throw new Error(`Unknown method "${methodName}". Valid methods: ${Object.keys(methodMap).sort().join(', ')}`);
 
   const [routes, scriptValidation, contractReview] = await Promise.all([
-    fetchAll(apiUrl, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,description,availableMethods.*,publicMethods.*,mainTable.name'),
+    fetchAll(apiUrl, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,description,methodConfigs.id,methodConfigs.method.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,mainTable.name'),
     validateScriptSourceIfPresent(fetchAPI, apiUrl, 'enfyra_route_handler', {
       sourceCode: opts.sourceCode,
       scriptLanguage: opts.scriptLanguage || 'javascript',
@@ -119,8 +120,8 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
   const route = routes.find((item) => item.path === normalizedPath) || null;
   assertCustomEndpointRoute(route);
   const routeId = getId(route);
-  const availableMethods = methodNamesFromRecords(route?.availableMethods || [], methodIdNameMap);
-  const publicMethods = methodNamesFromRecords(route?.publicMethods || [], methodIdNameMap);
+  const availableMethods = routeConfiguredMethods(route, 'available');
+  const publicMethods = routeConfiguredMethods(route, 'isPublic');
   const methodAvailable = availableMethods.includes(methodName);
   const routeNeedsUpdate = !!route && (
     route.isEnabled === false
@@ -130,8 +131,10 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
     || (opts.description !== undefined && route.description !== opts.description)
   );
   const handler = route ? await findHandler(apiUrl, routeId, methodId) : null;
-  const handlerMatches = sourceMatches(handler, opts.sourceCode, opts.scriptLanguage || 'javascript', opts.timeout);
+  const methodConfig = route ? await findRouteMethodConfig(apiUrl, routeId, methodId) : null;
+  const handlerMatches = sourceMatches(handler, opts.sourceCode, opts.scriptLanguage || 'javascript');
   const handlerNeedsOverwrite = !!handler && !handlerMatches;
+  const timeoutNeedsUpdate = opts.timeout !== undefined && Number(methodConfig?.timeout) !== Number(opts.timeout);
 
   let permission = null;
   let role = null;
@@ -181,6 +184,12 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
       : step(route && methodAvailable ? 'pending' : 'waiting', 'save_handler', 'Create route handler', {
         reason: !route ? 'Route must exist first.' : methodAvailable ? undefined : 'Route method must be available first.',
       }),
+    ...(opts.timeout !== undefined ? [step(
+      !route || !methodConfig || routeNeedsUpdate ? 'waiting' : timeoutNeedsUpdate ? 'pending' : 'completed',
+      'set_method_timeout',
+      'Set route method execution timeout',
+      { configId: getId(methodConfig), timeout: opts.timeout },
+    )] : []),
   ];
 
   if (opts.roleName || opts.roleId || opts.allowedUserIds?.length) {
@@ -277,8 +286,8 @@ async function applyApiEndpointWorkflowStep(apiUrl, state, opts, stepId) {
   }
 
   if (selectedStep.id === 'sync_route') {
-    const availableMethods = methodNamesFromRecords(state.route.availableMethods, state.methodIdNameMap);
-    const publicMethods = methodNamesFromRecords(state.route.publicMethods, state.methodIdNameMap);
+    const availableMethods = routeConfiguredMethods(state.route, 'available');
+    const publicMethods = routeConfiguredMethods(state.route, 'isPublic');
     const finalAvailable = uniqueMethodNames([...availableMethods, endpoint.method]);
     const finalPublic = endpoint.anonymousAccess === 'public'
       ? uniqueMethodNames([...publicMethods, endpoint.method])
@@ -301,7 +310,6 @@ async function applyApiEndpointWorkflowStep(apiUrl, state, opts, stepId) {
     const body = {
       sourceCode: opts.sourceCode,
       scriptLanguage: opts.scriptLanguage || 'javascript',
-      ...(opts.timeout !== undefined ? { timeout: opts.timeout } : {}),
     };
     if (state.handler) {
       const result = await fetchAPI(apiUrl, `/enfyra_route_handler/${encodeURIComponent(String(getId(state.handler)))}`, {
@@ -319,6 +327,16 @@ async function applyApiEndpointWorkflowStep(apiUrl, state, opts, stepId) {
       }),
     });
     return { action: 'handler_created', result, routeReload: await reloadRoutes(apiUrl) };
+  }
+
+  if (selectedStep.id === 'set_method_timeout') {
+    const config = await findRouteMethodConfig(apiUrl, endpoint.routeId, state.methodId);
+    if (!config) throw new Error('Route method configuration is missing. Retry after the route is available.');
+    const result = await fetchAPI(apiUrl, `/enfyra_route_method_config/${encodeURIComponent(String(getId(config)))}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ timeout: opts.timeout }),
+    });
+    return { action: 'method_timeout_updated', result, routeReload: await reloadRoutes(apiUrl) };
   }
 
   if (selectedStep.id === 'ensure_route_access') {

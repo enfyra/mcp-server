@@ -337,7 +337,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /Generate page-header and shell-header-action script setup code/);
   assert.match(platformTools, /Generate a PermissionGate wrapper snippet/);
   assert.match(platformTools, /Generate an EmptyState snippet/);
-  assert.match(platformTools, /Generate a CommonResourceListFrame\/CommonResourceListItem snippet/);
+  assert.match(platformTools, /Generate a DataTable snippet for Enfyra admin information lists/);
   assert.match(platformTools, /Generate a constrained responsive CommonResourceListFrame card grid/);
   assert.match(platformTools, /Generate a FormEditor\/FormEditorLazy snippet/);
   assert.match(platformTools, /Generate a Widget snippet/);
@@ -686,18 +686,17 @@ test('ensure_guard exposes GraphQL target fields and pre-validates the conflict 
   assert.doesNotMatch(requiredKnowledge, /current ensure_guard route tool does not expose GraphQL target fields/);
 });
 
-test('dynamic handler timeout guidance is method-scoped', () => {
+test('dynamic execution timeout belongs to the route method configuration', () => {
   const requiredKnowledge = readSourceFiles('lib/required-knowledge.ts');
   const dynamicSkill = readFileSync(new URL('../.codex/skills/enfyra-mcp-dynamic-code/SKILL.md', import.meta.url), 'utf8');
   const routeTools = readSourceFiles('lib/route-definition-tools.ts');
   const platformRouteTools = readSourceFiles('lib/platform-route-tools.ts');
 
-  assert.match(requiredKnowledge, /Handler timeout is method-scoped/);
-  assert.match(requiredKnowledge, /enfyra_route_handler\.timeout/);
-  assert.match(dynamicSkill, /individual `\(route, method\)` handler row/);
-  assert.match(dynamicSkill, /not a route-level setting/);
-  assert.match(routeTools, /for each route\+method handler row/);
-  assert.match(platformRouteTools, /timeout in ms for this method handler row/);
+  assert.match(requiredKnowledge, /enfyra_route_method_config\.timeout/);
+  assert.match(dynamicSkill, /enfyra_route_method_config\.timeout/);
+  assert.match(routeTools, /enfyra_route_method_config/);
+  assert.match(platformRouteTools, /enfyra_route_method_config/);
+  assert.doesNotMatch(platformRouteTools, /timeout in ms for this method handler row/);
 });
 
 test('guidance rejects sql-like filter operators', () => {

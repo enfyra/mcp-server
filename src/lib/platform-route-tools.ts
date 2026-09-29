@@ -16,16 +16,17 @@ import {
   deleteRoute,
   fetchAll,
   findHandler,
+  findRouteMethodConfig,
   findRecord,
   firstDataRecord,
   getId,
   getMethodContext,
   jsonText,
-  methodNamesFromRecords,
   normalizeMethodName,
   normalizeRestPath,
   reloadBestEffort,
   reloadRoutes,
+  routeConfiguredMethods,
   resolveMethodRefs,
   reviewCustomEndpointSource,
   runApiEndpointWorkflow,
@@ -295,8 +296,8 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
         allowedUserIds: z.array(z.union([z.string(), z.number()])).optional().describe('Optional user id scope for authenticated route permission.'),
         routePermissionDescription: z.string().optional().describe('Optional admin note for created/updated route permission.'),
         description: z.string().optional().describe('Route description.'),
-        timeout: z.number().int().positive().optional().describe('Optional timeout in ms for this method handler row; timeout is not stored on the route.'),
-        overwrite: z.boolean().optional().default(false).describe('Required to update an existing handler whose sourceCode/scriptLanguage/timeout differs.'),
+        timeout: z.number().int().positive().optional().describe('Optional dynamic execution timeout in ms on enfyra_route_method_config.timeout for this route and method.'),
+        overwrite: z.boolean().optional().default(false).describe('Required to update an existing handler whose sourceCode or scriptLanguage differs.'),
         smokeTestQuery: z.string().optional().describe('Optional query JSON object for a smoke test, e.g. {"a":"1","b":"2"}.'),
         smokeTestBody: z.string().optional().describe('Optional body JSON object for a smoke test.'),
         apply: z.boolean().optional().default(false).describe('false returns plan only; true applies exactly the next pending step.'),
@@ -328,7 +329,7 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
         public: z.preprocess(normalizeStrictBoolean, z.boolean()).optional().default(false).describe('When true, the method is added to publicMethods for anonymous access. Exact string "true"/"false" is normalized for weak clients.'),
         description: z.string().optional().describe('Route description.'),
-        timeout: z.number().int().positive().optional().describe('Optional timeout in ms for this method handler row; timeout is not stored on the route.'),
+        timeout: z.number().int().positive().optional().describe('Optional dynamic execution timeout in ms on enfyra_route_method_config.timeout for this route and method.'),
         overwrite: z.boolean().optional().default(false).describe('If a handler already exists for route+method, false fails; true updates its sourceCode.'),
         smokeTestQuery: z.string().optional().describe('Optional query JSON object for a smoke test after save, e.g. {"a":"1","b":"2"}.'),
         smokeTestBody: z.string().optional().describe('Optional body JSON object for a smoke test after save.'),
@@ -347,9 +348,9 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
           method: methodName,
           sourceCode,
         }));
-        const [{ methodMap, methodIdNameMap }, routes, scriptValidation, contractReview] = await Promise.all([
+        const [{ methodMap }, routes, scriptValidation, contractReview] = await Promise.all([
           getMethodContext(ENFYRA_API_URL),
-          fetchAll(ENFYRA_API_URL, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,availableMethods.*,publicMethods.*,mainTable.name'),
+          fetchAll(ENFYRA_API_URL, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,methodConfigs.id,methodConfigs.method.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,mainTable.name'),
           validateScriptSourceIfPresent(fetchAPI, ENFYRA_API_URL, 'enfyra_route_handler', {
             sourceCode,
             scriptLanguage,
@@ -376,8 +377,8 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
           route = firstDataRecord(createRouteResult);
           routeAction = 'created';
         } else {
-          const availableMethods = methodNamesFromRecords(route.availableMethods, methodIdNameMap);
-          const publicMethods = methodNamesFromRecords(route.publicMethods, methodIdNameMap);
+          const availableMethods = routeConfiguredMethods(route, 'available');
+          const publicMethods = routeConfiguredMethods(route, 'isPublic');
           const finalAvailable = uniqueMethodNames([...availableMethods, methodName]);
           const finalPublic = makePublic ? uniqueMethodNames([...publicMethods, methodName]) : publicMethods;
           const patchRouteResult = await fetchAPI(ENFYRA_API_URL, `/enfyra_route/${encodeURIComponent(String(getId(route)))}`, {
@@ -402,7 +403,6 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
           }
           handlerAction = 'updated';
           const body: HandlerBody = { sourceCode, scriptLanguage };
-          if (timeout !== undefined) body.timeout = timeout;
           handlerResult = await fetchAPI(ENFYRA_API_URL, `/enfyra_route_handler/${encodeURIComponent(String(getId(existingHandler)))}`, {
             method: 'PATCH',
             body: JSON.stringify(body),
@@ -415,13 +415,21 @@ export function registerPlatformRouteTools(server, ENFYRA_API_URL) {
             sourceCode,
             scriptLanguage,
           };
-          if (timeout !== undefined) body.timeout = timeout;
           handlerResult = await fetchAPI(ENFYRA_API_URL, '/enfyra_route_handler', {
             method: 'POST',
             body: JSON.stringify(body),
           });
         }
   
+        let methodConfig = await findRouteMethodConfig(ENFYRA_API_URL, routeId, methodId);
+        if (!methodConfig) throw new Error(`Route method configuration is missing for ${methodName} ${normalizedPath}.`);
+        if (timeout !== undefined && Number(methodConfig.timeout) !== timeout) {
+          const configResult = await fetchAPI(ENFYRA_API_URL, `/enfyra_route_method_config/${encodeURIComponent(String(getId(methodConfig)))}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ timeout }),
+          });
+          methodConfig = firstDataRecord(configResult) || { ...methodConfig, timeout };
+        }
         const routeReload = await reloadRoutes(ENFYRA_API_URL);
         let smokeTest = null;
         if (smokeTestQuery !== undefined || smokeTestBody !== undefined) {

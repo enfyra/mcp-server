@@ -284,7 +284,7 @@ test('startup instructions remain a compact router because hosts may repeat them
   assert.doesNotMatch(instructions, /### Operating Model/);
 });
 
-test('resource-list policy rejects ad hoc inventory markup and accepts the common list contract', () => {
+test('resource-list policy requires DataTable instead of ad hoc or shared resource rows', () => {
   const adHoc = [
     '<template>',
     '  <section class="space-y-4">',
@@ -294,8 +294,8 @@ test('resource-list policy rejects ad hoc inventory markup and accepts the commo
   ].join('\n');
   const rejected = reviewExtensionUiContract(adHoc, { pattern: 'resource_list' });
   assert.equal(rejected.valid, false);
-  assert.match(JSON.stringify(rejected.issues), /resource-list-frame-required/);
-  assert.match(JSON.stringify(rejected.issues), /resource-list-item-required/);
+  assert.match(JSON.stringify(rejected.issues), /resource-list-table-required/);
+  assert.match(JSON.stringify(rejected.issues), /resource-list-ad-hoc-cards/);
   assert.throws(
     () => validateExtensionCodeLocally(adHoc, { uiPattern: 'resource_list' }),
     /Invalid extension UI contract/,
@@ -311,9 +311,15 @@ test('resource-list policy rejects ad hoc inventory markup and accepts the commo
     '  </section>',
     '</template>',
   ].join('\n');
-  const approved = reviewExtensionUiContract(accepted, { pattern: 'resource_list' });
-  assert.equal(approved.valid, true);
-  assert.equal(approved.issues.length, 0);
+  const sharedRows = reviewExtensionUiContract(accepted, { pattern: 'resource_list' });
+  assert.equal(sharedRows.valid, false);
+  assert.match(JSON.stringify(sharedRows.issues), /resource-list-table-required/);
+
+  const tableCode = '<template><section class="eapp-page-constrained-wide"><DataTable :data="items" :columns="columns" :loading="pending" /></section></template>';
+  assert.equal(reviewExtensionUiContract(tableCode, { pattern: 'resource_list' }).valid, true);
+  assert.doesNotThrow(() => validateExtensionCodeLocally(tableCode, { uiPattern: 'resource_list' }));
+  const missingColumns = tableCode.replace(' :columns="columns"', '');
+  assert.match(JSON.stringify(reviewExtensionUiContract(missingColumns, { pattern: 'resource_list' }).issues), /resource-list-table-contract/);
 
   const paginated = buildExtensionUiSnippet('resource_list', {
     itemsExpression: 'items',
@@ -328,9 +334,7 @@ test('extension verification distinguishes compiler and contract checks from bro
   const code = [
     '<template>',
     '  <section class="eapp-page-constrained-wide">',
-    '    <CommonResourceListFrame :loading="pending" :has-items="items.length > 0" :total="items.length" :items-per-page="0" empty-title="No items">',
-    '      <CommonResourceListItem v-for="item in items" :key="item.id" :title="item.name" />',
-    '    </CommonResourceListFrame>',
+    '    <DataTable :data="items" :columns="columns" :loading="pending" />',
     '  </section>',
     '</template>',
   ].join('\n');
@@ -352,7 +356,7 @@ test('verifyExtensionRuntime reads the saved extension and compiles that exact s
   const originalFetch = globalThis.fetch;
   const apiUrl = 'http://mcp-extension-verifier.test/api';
   const calls = [];
-  const code = '<template><section class="eapp-page-constrained-wide"><CommonResourceListFrame :loading="pending" :has-items="items.length > 0" :total="items.length" :items-per-page="0" empty-title="No items"><CommonResourceListItem v-for="item in items" :key="item.id" :title="item.name" /></CommonResourceListFrame></section></template>';
+  const code = '<template><section class="eapp-page-constrained-wide"><DataTable :data="items" :columns="columns" :loading="pending" /></section></template>';
   initAuth(apiUrl, 'pat_test');
   resetTokens();
   globalThis.fetch = async (url, options = {}) => {

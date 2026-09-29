@@ -130,21 +130,29 @@ export async function reloadRoutes(apiUrl) {
 export async function resolveRoute(apiUrl, { path, routeId }) {
   if (!path && !routeId) throw new Error('Provide path or routeId.');
   if (path && routeId) throw new Error('Provide path or routeId, not both.');
-  const routes = await fetchAll(apiUrl, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,isSystem,availableMethods.*,publicMethods.*,mainTable.name');
+  const routes = await fetchAll(apiUrl, '/enfyra_route?limit=1000&fields=id,_id,path,isEnabled,isSystem,methodConfigs.id,methodConfigs.method.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,mainTable.name');
   const normalizedPath = path ? normalizeRestPath(path) : null;
   const route = routes.find((item) => (routeId ? sameId(getId(item), routeId) : item.path === normalizedPath));
   if (!route) throw new Error(`Route not found: ${routeId || normalizedPath}`);
   return { route, routes, path: route.path };
 }
 
+export function routeConfiguredMethods(route, field: 'available' | 'isPublic'): string[] {
+  return (route?.methodConfigs || [])
+    .filter((config) => config.available === true && (field === 'available' || config.isPublic === true))
+    .map((config) => config.method?.name)
+    .filter(Boolean)
+    .map(normalizeMethodName);
+}
+
 export async function updateRouteMethods(apiUrl, { path, routeId, methods, mode, isEnabled, globalRulesAckKey }) {
   assertGlobalRulesAck(globalRulesAckKey);
-  const [{ route }, { methodMap, methodIdNameMap }] = await Promise.all([
+  const [{ route }, { methodMap }] = await Promise.all([
     resolveRoute(apiUrl, { path, routeId }),
     getMethodContext(apiUrl),
   ]);
-  const existingAvailable = methodNamesFromRecords(route.availableMethods, methodIdNameMap);
-  const existingPublic = methodNamesFromRecords(route.publicMethods, methodIdNameMap);
+  const existingAvailable = routeConfiguredMethods(route, 'available');
+  const existingPublic = routeConfiguredMethods(route, 'isPublic');
   const finalAvailable = mergeMethods(existingAvailable, methods, mode);
   const finalPublic = existingPublic.filter((method) => finalAvailable.includes(method));
   const body: RouteMethodBody = {
@@ -170,12 +178,12 @@ export async function updateRouteMethods(apiUrl, { path, routeId, methods, mode,
 
 export async function updateRoutePublicMethods(apiUrl, { path, routeId, methods, mode, globalRulesAckKey }) {
   assertGlobalRulesAck(globalRulesAckKey);
-  const [{ route }, { methodMap, methodIdNameMap }] = await Promise.all([
+  const [{ route }, { methodMap }] = await Promise.all([
     resolveRoute(apiUrl, { path, routeId }),
     getMethodContext(apiUrl),
   ]);
-  const availableMethods = methodNamesFromRecords(route.availableMethods, methodIdNameMap);
-  const existingPublic = methodNamesFromRecords(route.publicMethods, methodIdNameMap);
+  const availableMethods = routeConfiguredMethods(route, 'available');
+  const existingPublic = routeConfiguredMethods(route, 'isPublic');
   const requestedMethods = uniqueMethodNames(methods);
   const unavailable = requestedMethods.filter((method) => !availableMethods.includes(method));
   if (unavailable.length > 0) {
@@ -507,6 +515,15 @@ export async function deleteRouteChild(apiUrl, { kind, id, expectedId, confirm, 
     postcondition,
     routeReload,
   };
+}
+
+export async function findRouteMethodConfig(apiUrl, routeId, methodId) {
+  const filter = encodeURIComponent(JSON.stringify({
+    route: { id: { _eq: routeId } },
+    method: { id: { _eq: methodId } },
+  }));
+  const result = await fetchAPI(apiUrl, `/enfyra_route_method_config?filter=${filter}&limit=1&fields=id,_id,route.id,method.id,timeout,available,isPublic,skipRoleGuard`);
+  return unwrapData(result)[0] || null;
 }
 
 export async function findHandler(apiUrl, routeId, methodId) {

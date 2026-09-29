@@ -58,17 +58,26 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
 
   if (pattern === 'resource_list') {
     const frames = byTag('CommonResourceListFrame');
-    if (frames.length === 0) {
-      push('error', 'resource-list-frame-required', 'Operational resource lists must use CommonResourceListFrame.', 'Use build_extension_ui kind=resource_list so loading, empty state, total, and pagination stay list-owned.');
+    const tables = byTag('DataTable');
+    if (tables.length === 0) {
+      push('error', 'resource-list-table-required', 'Lists of records with information fields must use DataTable.', 'Use build_extension_ui kind=resource_list and bind data, columns, and loading; put server pagination inside #footer.');
     }
-    if (byTag('CommonResourceListItem').length === 0) {
-      push('error', 'resource-list-item-required', 'Operational resource rows must use CommonResourceListItem.', 'Move title, description, badge, stats, metadata, navigation, and row actions into CommonResourceListItem.');
+    if (byTag('CommonResourceListItem').some((element) => extensionElementHasAttribute(element, 'for', 'for'))) {
+      push('error', 'resource-list-non-tabular-rows', 'A record list still renders repeated CommonResourceListItem rows.', 'Move record information into DataTable columns and named cell slots; reserve non-tabular rows for a different UI pattern.');
     }
     if (elements.some((element) => ['UCard', 'article'].includes(element.tag) && extensionElementHasAttribute(element, 'for', 'for'))) {
-      push('error', 'resource-list-ad-hoc-cards', 'A resource-list screen still renders inventory rows as repeated cards.', 'Use CommonResourceListItem for homogeneous operational rows; reserve resource_grid for workboards and catalogs.');
+      push('error', 'resource-list-ad-hoc-cards', 'A resource-list screen still renders inventory rows as repeated cards.', 'Use DataTable columns for record information; reserve resource_grid for genuine workboards and visual catalogs.');
     }
     if (elements.some((element) => ['table', 'UTable'].includes(element.tag))) {
-      push('error', 'resource-list-ad-hoc-table', 'A resource-list screen still renders its primary inventory as a table.', 'Use CommonResourceListItem so row metadata and actions remain responsive on narrow screens.');
+      push('error', 'resource-list-ad-hoc-table', 'A resource-list screen renders an unmanaged table.', 'Use DataTable with bounded server pages and rows-per-page, range, and UPagination inside #footer.');
+    }
+    for (const table of tables) {
+      if (!hasStaticOrBound(table, 'data') || !hasStaticOrBound(table, 'columns')) {
+        push('error', 'resource-list-table-contract', 'DataTable needs record data and column definitions.', 'Bind :data and :columns to the table.');
+      }
+      if (!hasStaticOrBound(table, 'loading')) {
+        push('error', 'resource-list-table-loading', 'DataTable needs a first-load state.', 'Bind :loading to the initial request state.');
+      }
     }
     const frame = frames[0];
     if (frame && !hasStaticOrBound(frame, 'loading')) {
@@ -89,7 +98,7 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
     if (!allClasses.has('eapp-page-constrained-wide')) {
       push('warning', 'resource-list-width', 'The operational list is not constrained for wide admin viewports.', 'Wrap the page inventory in eapp-page-constrained-wide unless this extension intentionally owns a full-bleed canvas.');
     }
-    const frameIndex = frame ? elements.indexOf(frame) : elements.length;
+    const frameIndex = frame ? elements.indexOf(frame) : tables[0] ? elements.indexOf(tables[0]) : elements.length;
     const beforeFrame = elements.slice(0, frameIndex);
     const hasSearchOrFilterControl = beforeFrame.some((element) => (
       ['UInput', 'UInputMenu', 'USelect', 'USelectMenu'].includes(element.tag)

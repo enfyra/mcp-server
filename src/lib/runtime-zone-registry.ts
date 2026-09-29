@@ -23,7 +23,8 @@ export type ZoneTable = {
 
 export const ZONE_TABLES: Record<Exclude<RuntimeZone, 'admin_ui' | 'schema_data'>, ZoneTable[]> = {
   api_runtime: [
-    { tableName: 'enfyra_route', fields: 'id,_id,path,description,isEnabled,mainTable.name,availableMethods.name,publicMethods.name', labelFields: ['path', 'description'], pathFields: ['path'] },
+    { tableName: 'enfyra_route', fields: 'id,_id,path,description,isEnabled,mainTable.name,methodConfigs.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,methodConfigs.timeout', labelFields: ['path', 'description'], pathFields: ['path'] },
+    { tableName: 'enfyra_route_method_config', fields: 'id,_id,route.id,route.path,method.name,available,isPublic,skipRoleGuard,timeout,requestBodyType,description', labelFields: ['route.path', 'method.name'], pathFields: ['route.path'] },
     { tableName: 'enfyra_route_handler', fields: 'id,_id,name,key,sourceCode,scriptLanguage,route.id,route.path,method.name', sourceFields: ['sourceCode'], labelFields: ['name', 'key', 'route.path', 'method.name'], pathFields: ['route.path'] },
     { tableName: 'enfyra_pre_hook', fields: 'id,_id,name,key,sourceCode,scriptLanguage,isGlobal,route.id,route.path,methods.name', sourceFields: ['sourceCode'], labelFields: ['name', 'key', 'route.path'], pathFields: ['route.path'] },
     { tableName: 'enfyra_post_hook', fields: 'id,_id,name,key,sourceCode,scriptLanguage,isGlobal,route.id,route.path,methods.name', sourceFields: ['sourceCode'], labelFields: ['name', 'key', 'route.path'], pathFields: ['route.path'] },

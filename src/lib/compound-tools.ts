@@ -70,7 +70,7 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
 
   const [menuResult, routeResult] = await Promise.allSettled([
     fetchAll(apiUrl, `/enfyra_menu?limit=10&filter[path]=${encodeURIComponent(normalizedPath)}&fields=id,label,path,icon,type,isPublic,isEnabled,order,parent.id`),
-    fetchAll(apiUrl, `/enfyra_route?limit=10&filter[path]=${encodeURIComponent(normalizedPath)}&fields=id,path,isEnabled,description,availableMethods.name,publicMethods.name,skipRoleGuardMethods.name,mainTable.name,mainTable.id`),
+    fetchAll(apiUrl, `/enfyra_route?limit=10&filter[path]=${encodeURIComponent(normalizedPath)}&fields=id,path,isEnabled,description,methodConfigs.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,methodConfigs.skipRoleGuard,methodConfigs.timeout,mainTable.name,mainTable.id`),
   ]);
 
   if (menuResult.status === 'fulfilled') {
@@ -93,9 +93,10 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
         path: route.path,
         isEnabled: route.isEnabled,
         description: route.description,
-        availableMethods: (route.availableMethods || []).map((method: any) => method.name),
-        publicMethods: (route.publicMethods || []).map((method: any) => method.name),
-        skipRoleGuardMethods: (route.skipRoleGuardMethods || []).map((method: any) => method.name),
+        methodConfigs: (route.methodConfigs || []).map((config: any) => ({ id: config.id, method: config.method?.name, available: config.available, isPublic: config.isPublic, skipRoleGuard: config.skipRoleGuard, timeout: config.timeout })),
+        availableMethods: (route.methodConfigs || []).filter((config: any) => config.available).map((config: any) => config.method?.name),
+        publicMethods: (route.methodConfigs || []).filter((config: any) => config.available && config.isPublic).map((config: any) => config.method?.name),
+        skipRoleGuardMethods: (route.methodConfigs || []).filter((config: any) => config.available && config.skipRoleGuard).map((config: any) => config.method?.name),
         mainTable: route.mainTable ? { id: refId(route.mainTable), name: route.mainTable.name } : null,
       };
     }
@@ -106,7 +107,7 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
   if (routeId) {
     const routeFilter = encodeURIComponent(JSON.stringify({ route: { _eq: routeId } }));
     const [handlersResult, hooksResult, permissionsResult, guardsResult] = await Promise.allSettled([
-      fetchAll(apiUrl, `/enfyra_route_handler?limit=50&filter=${routeFilter}&fields=id,method.name,scriptLanguage,timeout,isEnabled`),
+      fetchAll(apiUrl, `/enfyra_route_handler?limit=50&filter=${routeFilter}&fields=id,method.name,scriptLanguage,routeMethodConfig.timeout,isEnabled`),
       Promise.all([
         fetchAll(apiUrl, '/enfyra_pre_hook?limit=1000&fields=id,name,methods.name,priority,isEnabled,isGlobal,route.id'),
         fetchAll(apiUrl, '/enfyra_post_hook?limit=1000&fields=id,name,methods.name,priority,isEnabled,isGlobal,route.id'),
@@ -116,8 +117,9 @@ export async function resolveRouteContext(apiUrl: string, path: string) {
     ]);
 
     if (handlersResult.status === 'fulfilled') {
-      results.handlers = summarizeRecords(handlersResult.value, ['id', 'scriptLanguage', 'timeout', 'isEnabled']).map((handler: any, index: number) => ({
+      results.handlers = summarizeRecords(handlersResult.value, ['id', 'scriptLanguage', 'isEnabled']).map((handler: any, index: number) => ({
         ...handler,
+        timeout: handlersResult.value[index]?.routeMethodConfig?.timeout ?? null,
         method: (handlersResult.value[index]?.method as any)?.name || null,
       }));
     }

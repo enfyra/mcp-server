@@ -45,15 +45,13 @@ function installFetchMock() {
           path: '/support',
           isEnabled: true,
           description: 'Support API',
-          availableMethods: [{ name: 'GET' }],
-          publicMethods: [],
-          skipRoleGuardMethods: [],
+          methodConfigs: [{ id: 21, method: { name: 'GET' }, available: true, isPublic: false, skipRoleGuard: false, timeout: 5000 }],
           mainTable: { id: 12, name: 'support_ticket' },
         }],
       });
     }
     if (url.includes('/enfyra_route_handler?')) {
-      return jsonResponse({ data: [{ id: 11, method: { name: 'GET' }, scriptLanguage: 'javascript', timeout: 5000, isEnabled: true }] });
+      return jsonResponse({ data: [{ id: 11, method: { name: 'GET' }, scriptLanguage: 'javascript', routeMethodConfig: { timeout: 5000 }, isEnabled: true }] });
     }
     if (url.includes('/enfyra_pre_hook?')) {
       return jsonResponse({ data: [{ id: 13, name: 'tenant-scope', methods: [{ name: 'GET' }], priority: 1, isEnabled: true, isGlobal: false, route: { id: 9 } }] });
@@ -100,6 +98,7 @@ test('resolveRouteContext returns a compact cross-surface route diagnosis', asyn
       path: '/support',
       isEnabled: true,
       description: 'Support API',
+      methodConfigs: [{ id: 21, method: 'GET', available: true, isPublic: false, skipRoleGuard: false, timeout: 5000 }],
       availableMethods: ['GET'],
       publicMethods: [],
       skipRoleGuardMethods: [],
@@ -170,9 +169,7 @@ test('resolveRouteContext can prove public reachability despite a permission rea
           id: 9,
           path: '/support',
           isEnabled: true,
-          availableMethods: [{ name: 'GET' }],
-          publicMethods: [{ name: 'GET' }],
-          skipRoleGuardMethods: [],
+          methodConfigs: [{ id: 21, method: { name: 'GET' }, available: true, isPublic: true, skipRoleGuard: false, timeout: 5000 }],
         }] });
       }
       return originalFetch(input, init);

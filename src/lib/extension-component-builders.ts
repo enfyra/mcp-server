@@ -2,6 +2,7 @@
 const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
   'CommonDrawer',
   'CommonModal',
+  'DataTable',
   'EmptyState',
   'FormEditor',
   'FormEditorLazy',
@@ -319,54 +320,63 @@ export function buildExtensionEmptyStateSnippet(input) {
 
 export function buildExtensionResourceListSnippet(input) {
   const itemsExpression = input.itemsExpression || 'items';
-  const itemName = input.itemName || 'item';
-  const keyExpression = input.keyExpression || `${itemName}.id`;
-  const titleExpression = input.titleExpression || `${itemName}.title || ${quoteJsString('Untitled')}`;
-  const descriptionExpression = input.descriptionExpression || `${itemName}.description`;
-  const iconExpression = input.iconExpression || quoteJsString(input.icon || 'lucide:file-text');
-  const onClick = input.onClick ? `\n      :on-click="() => ${input.onClick}"` : '';
-  const stats = input.statsExpression ? `\n      :stats="${input.statsExpression}"` : '';
-  const actions = input.actionsExpression ? `\n      :actions="${input.actionsExpression}"` : '';
-  const topBadge = input.topBadgeExpression ? `\n      :top-badge="${input.topBadgeExpression}"` : '';
-  const itemsPerPageExpression = input.itemsPerPageExpression || '0';
-  const pageModel = String(itemsPerPageExpression) !== '0'
-    ? `\n  v-model:page="${input.pageExpression || 'page'}"`
-    : '';
-  const frame = [
-    `<CommonResourceListFrame${pageModel}`,
+  const pageExpression = input.pageExpression || 'page';
+  const totalExpression = input.totalExpression || 'total';
+  const itemsPerPageExpression = input.itemsPerPageExpression ?? 'pageSize';
+  const paginated = String(itemsPerPageExpression) !== '0';
+  const rowClick = input.rowClickExpression ? `  @row-click="${input.rowClickExpression}"` : '';
+  const table = [
+    '<DataTable',
+    `  :data="${itemsExpression}"`,
+    `  :columns="${input.columnsExpression || 'columns'}"`,
     `  :loading="${input.loadingExpression || 'pending'}"`,
-    `  :has-items="${itemsExpression}.length > 0"`,
-    `  :total="${input.totalExpression || `${itemsExpression}.length`}"`,
-    `  :items-per-page="${itemsPerPageExpression}"`,
-    `  empty-title="${String(input.emptyTitle || 'No items found').replace(/"/g, '&quot;')}"`,
-    `  empty-description="${String(input.emptyDescription || '').replace(/"/g, '&quot;')}"`,
-    `  empty-icon="${input.emptyIcon || 'lucide:inbox'}"`,
+    ...(rowClick ? [rowClick] : []),
     '>',
-    `  <CommonResourceListItem`,
-    `    v-for="${itemName} in ${itemsExpression}"`,
-    `    :key="${keyExpression}"`,
-    `    :title="${titleExpression}"`,
-    `    :description="${descriptionExpression}"`,
-    `    :icon="${iconExpression}"`,
-    '    icon-color="primary"',
-    `${stats}${actions}${topBadge}${onClick}`,
-    '  />',
-    '</CommonResourceListFrame>',
+    '  <template #empty>',
+    '    <EmptyState',
+    `      title="${String(input.emptyTitle || 'No items found').replace(/"/g, '&quot;')}"`,
+    `      description="${String(input.emptyDescription || '').replace(/"/g, '&quot;')}"`,
+    `      icon="${input.emptyIcon || 'lucide:inbox'}"`,
+    '      variant="naked"',
+    '      size="sm"',
+    '    />',
+    '  </template>',
+    ...(paginated ? [
+      '  <template #footer>',
+      '    <div class="grid grid-cols-2 items-center gap-x-2 gap-y-3 sm:flex sm:flex-wrap sm:justify-between sm:gap-3">',
+      `      <span class="whitespace-nowrap text-xs tabular-nums eapp-text-secondary">{{ ${totalExpression} > 0 ? Math.min((${pageExpression} - 1) * ${itemsPerPageExpression} + 1, ${totalExpression}) : 0 }}–{{ Math.min(${pageExpression} * ${itemsPerPageExpression}, ${totalExpression}) }} / {{ ${totalExpression} }}</span>`,
+      '      <label class="flex items-center justify-end gap-2 whitespace-nowrap text-xs eapp-text-secondary sm:ml-auto">',
+      '        Rows per page',
+      `        <USelect v-model="${itemsPerPageExpression}" :items="[10, 20, 50, 100]" size="sm" class="w-18" data-compact aria-label="Rows per page" />`,
+      '      </label>',
+      '      <UPagination',
+      `        v-model:page="${pageExpression}"`,
+      `        :total="${totalExpression}"`,
+      `        :items-per-page="${itemsPerPageExpression}"`,
+      '        size="sm"',
+      '        :ui="{ root: \'!w-full col-span-2 justify-self-end border-t eapp-divider pt-3 sm:!w-auto sm:col-auto sm:border-0 sm:pt-0\', list: \'flex-nowrap justify-end\', first: \'max-md:!hidden\', last: \'max-md:!hidden\' }"',
+      '      />',
+      '    </div>',
+      '  </template>',
+    ] : []),
+    '</DataTable>',
   ].join('\n');
   const snippet = input.constrained === false
-    ? frame
-    : ['<section class="eapp-page-constrained-wide space-y-4">', indentLines(frame, 2), '</section>'].join('\n');
+    ? table
+    : ['<section class="eapp-page-constrained-wide space-y-4">', indentLines(table, 2), '</section>'].join('\n');
   return {
     action: 'extension_resource_list_built',
-    components: ['CommonResourceListFrame', 'CommonResourceListItem'],
+    components: ['DataTable', 'EmptyState', ...(paginated ? ['USelect', 'UPagination'] : [])],
     snippet,
     contract: [
-      'Use CommonResourceListFrame and CommonResourceListItem for operational lists instead of ad hoc cards.',
-      'CommonResourceListFrame supports extension default slots. It renders rows when loading is false and hasItems is true; inspect the source artifact, hasItems/items expressions, and API response shape before replacing it.',
-      'Keep first-load skeleton, empty state, and pagination owned by the frame.',
-      'Keep search and filter controls in a separate compact surface before the list; do not wrap filters and all rows in one oversized card.',
-      'Keep operational list pages constrained with eapp-page-constrained-wide unless the workflow intentionally owns a full-bleed canvas.',
-      'Use explicit bounded list data and natural pagination/search outside this snippet when the domain list can grow.',
+      'Lists of records with information fields must use DataTable, not raw UTable, HTML tables, repeated cards, or CommonResourceListItem rows. Review/save with uiPattern="resource_list".',
+      'Define columns with accessorKey/id and header; size ID, status, date/count, and action columns explicitly, and leave descriptive columns flexible. Numeric IDs use 88px; long string IDs use 224px with ellipsis.',
+      'Bind data, columns, and loading. DataTable owns first-load skeletons, the empty slot, and native horizontal scrolling; keep existing rows mounted during refresh.',
+      'Columns visibility defaults to enabled for extensions and /data. Only built-in Settings tables explicitly disable showColumnVisibility.',
+      'Fetch one bounded server page with explicit display fields and ID. Bind page/pageSize to the API query, reset page to 1 when filters or pageSize change, and use meta.filterCount for filtered totals or meta.totalCount for unfiltered totals. Do not add client pagination to a server page.',
+      'Keep rows-per-page, range, and UPagination inside DataTable #footer; persist bounded 10/20/50/100 choices per list with one stable semantic key. The caller owns setup refs, persistence, and query wiring; use itemsPerPageExpression=0 only for a known bounded non-paginated dataset.',
+      'Show status as a badge; put Enable/Disable and destructive actions in a row ellipsis menu using named cell slots such as #actions-cell with row.original. row-click emits the original record.',
+      'Keep search/filter controls in a separate compact surface and constrain list pages with eapp-page-constrained-wide unless the extension intentionally owns a full-bleed canvas.',
     ],
   };
 }
@@ -409,7 +419,7 @@ export function buildExtensionResourceGridSnippet(input) {
     snippet: constrained,
     normalizedBodyChanges: normalized.changes,
     contract: [
-      'Use this card grid for dashboard/workboard/catalog collections; use resource_list for dense operational rows.',
+      'Use this card grid only for genuine visual dashboards/workboards/catalogs, not information lists; record lists must use the resource_list DataTable builder.',
       'The default desktop layout uses three columns only at xl because the admin sidebar consumes viewport width.',
       'Keep the page constrained unless the workflow intentionally owns a canvas or other full-bleed surface.',
       'Keep card actions inside cardBody and align them with flex layout rather than floating them at the viewport edge.',

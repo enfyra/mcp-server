@@ -84,7 +84,7 @@ export async function collectRestDefinitionState(tableRef?: unknown) {
     methodIdNameMap,
   ] = await Promise.all([
     getMetadataTables(tableRef),
-    fetchAll('/enfyra_route?limit=1000'),
+    fetchAll('/enfyra_route?limit=1000&fields=*,mainTable.*,methodConfigs.id,methodConfigs.method.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,methodConfigs.skipRoleGuard,methodConfigs.timeout,methodConfigs.requestBodyType,methodConfigs.description'),
     fetchAll('/enfyra_route_handler?limit=1000'),
     fetchAll('/enfyra_pre_hook?limit=1000'),
     fetchAll('/enfyra_post_hook?limit=1000'),
@@ -161,10 +161,23 @@ export async function collectFeatureSearchState() {
 
 export function enrichRoute(route, state) {
   const routeId = getId(route);
+  const methodConfigs = Array.isArray(route.methodConfigs)
+    ? route.methodConfigs.map((config) => ({
+        ...config,
+        method: config.method ? {
+          ...config.method,
+          name: config.method.name || state.methodIdNameMap[String(getId(config.method))] || null,
+        } : config.method,
+      }))
+    : [];
+  const configuredMethods = (field: 'available' | 'isPublic' | 'skipRoleGuard') => methodConfigs
+    .filter((config) => config.available === true && (field === 'available' || config[field] === true))
+    .map((config) => config.method);
   const routeHandlers = state.handlers
     .filter((item) => sameId(refId(item.route), routeId))
     .map((item) => pickCodeSummary({
       ...item,
+      timeout: methodConfigs.find((config) => sameId(refId(config.method), refId(item.method)))?.timeout ?? null,
       method: item.method ? {
         ...item.method,
         name: state.methodIdNameMap[String(getId(item.method))] || item.method.name || null,
@@ -197,24 +210,10 @@ export function enrichRoute(route, state) {
 
   return {
     ...route,
-    availableMethods: Array.isArray(route.availableMethods)
-      ? route.availableMethods.map((method) => ({
-          ...method,
-          name: method.name || state.methodIdNameMap[String(getId(method))] || null,
-        }))
-      : route.availableMethods,
-    publicMethods: Array.isArray(route.publicMethods)
-      ? route.publicMethods.map((method) => ({
-          ...method,
-          name: method.name || state.methodIdNameMap[String(getId(method))] || null,
-        }))
-      : route.publicMethods,
-    skipRoleGuardMethods: Array.isArray(route.skipRoleGuardMethods)
-      ? route.skipRoleGuardMethods.map((method) => ({
-          ...method,
-          name: method.name || state.methodIdNameMap[String(getId(method))] || null,
-        }))
-      : route.skipRoleGuardMethods,
+    methodConfigs,
+    availableMethods: configuredMethods('available'),
+    publicMethods: configuredMethods('isPublic'),
+    skipRoleGuardMethods: configuredMethods('skipRoleGuard'),
     handlers: routeHandlers,
     preHooks: routePreHooks,
     postHooks: routePostHooks,
