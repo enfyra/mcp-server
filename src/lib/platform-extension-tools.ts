@@ -254,7 +254,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
           'theme_review',
           'review',
         ]).describe('Which extension UI contract builder/reviewer to run.'),
-        input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=resource_list, pass { itemsExpression?, columnsExpression?, loadingExpression?, pageExpression?, totalExpression?, itemsPerPageExpression? } to generate DataTable with server pagination in #footer. For kind=api_usage, pass { path, resource, method? }; for kind=confirm, pass { resource, executeName?, refreshName?, recordName?, idExpression? }; for kind=notify, pass { kind, title, description? }. For kind=theme_classes, pass { intent }. For kind=runtime_review/theme_review/review, pass { code?, sourceFile?, sourceResourceUri?, pattern? }, where pattern may be resource_list or resource_grid for deterministic layout policy.'),
+        input: z.record(z.any()).optional().default({}).describe('Builder input object. For kind=resource_list, pass { itemsExpression?, columnsExpression?, loadingExpression?, pageExpression?, totalExpression?, itemsPerPageExpression?, paginationMode?: offset|cursor, hasMoreExpression?, loadMoreExpression?, pageSizeChangeExpression? } to generate DataTable with shared paginationConfig and offset/cursor events. For kind=api_usage, pass { path, resource, method? }; for kind=confirm, pass { resource, executeName?, refreshName?, recordName?, idExpression? }; for kind=notify, pass { kind, title, description? }. For kind=theme_classes, pass { intent }. For kind=runtime_review/theme_review/review, pass { code?, sourceFile?, sourceResourceUri?, pattern? }, where pattern may be resource_list or resource_grid for deterministic layout policy.'),
         extensionKnowledgeAckKey: extensionKnowledgeAckParam(z),
       },
       async ({ kind, input, extensionKnowledgeAckKey }) => {
@@ -444,7 +444,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
       'build_extension_resource_list',
       [
         'Generate a DataTable snippet for Enfyra admin information lists.',
-        'Record lists must use DataTable with data, columns, loading, and bounded server pagination inside #footer; do not substitute repeated cards or resource-list rows.',
+        'Record lists must use DataTable with data, columns, loading, and shared paginationConfig for offset/cursor footers; do not substitute repeated cards or resource-list rows.',
       ].join(' '),
       {
         itemsExpression: z.string().optional().default('items').describe('Vue expression for one server page of records.'),
@@ -453,6 +453,10 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
         totalExpression: z.string().optional().default('total').describe('Query-scoped server total: meta.filterCount when filtered, otherwise meta.totalCount.'),
         pageExpression: z.string().optional().default('page').describe('Writable page ref wired to the server query.'),
         itemsPerPageExpression: z.string().optional().default('pageSize').describe('Writable persisted 10/20/50/100 page-size ref; use 0 only for a known bounded non-paginated dataset.'),
+        paginationMode: z.enum(['offset', 'cursor']).optional().default('offset').describe('Offset uses numbered pages; cursor replaces only page controls with centered Load more.'),
+        hasMoreExpression: z.string().optional().default('hasMore').describe('Cursor-only boolean expression indicating more server rows.'),
+        loadMoreExpression: z.string().optional().default('loadMore').describe('Cursor-only handler that fetches and appends the next bounded chunk.'),
+        pageSizeChangeExpression: z.string().optional().describe('Handler or expression that persists the new size and resets page/cursor state. Cursor defaults to setPageSize.'),
         rowClickExpression: z.string().optional().describe('DataTable row-click handler expression receiving the original record, e.g. openEdit.'),
         constrained: z.boolean().optional().default(true).describe('Wrap in eapp-page-constrained-wide. Disable only for intentional full-bleed surfaces.'),
         emptyTitle: z.string().optional().describe('Empty title.'),

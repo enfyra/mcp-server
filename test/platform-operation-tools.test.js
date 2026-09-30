@@ -530,6 +530,16 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.match(list.snippet, /:data="notes"/);
   assert.match(list.snippet, /:columns="noteColumns"/);
   assert.match(list.snippet, /@row-click="openEdit"/);
+  assert.match(list.snippet, /:pagination-config=/);
+  assert.match(list.snippet, /v-model:page="page"/);
+  assert.match(list.snippet, /@page-size-change="pageSize = \$event; page = 1"/);
+  assert.doesNotMatch(list.snippet, /<UPagination|<USelect|max-md:!hidden|border-t/);
+  const cursorList = buildExtensionResourceListSnippet({ paginationMode: 'cursor', itemsExpression: 'notes' });
+  assert.match(cursorList.snippet, /mode: 'cursor'/);
+  assert.match(cursorList.snippet, /hasMore: hasMore, loadedCount: notes.length/);
+  assert.match(cursorList.snippet, /@load-more="loadMore"/);
+  assert.match(cursorList.snippet, /@page-size-change="setPageSize"/);
+  assert.doesNotMatch(cursorList.snippet, /v-model:page|total:|<UPagination|<USelect/);
 
   const grid = buildExtensionResourceGridSnippet({
     itemsExpression: 'notes',

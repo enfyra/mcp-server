@@ -11,7 +11,9 @@ function asExtension(template) {
 test('extension knowledge requires DataTable for information lists and describes its current footer contract', () => {
   const knowledge = JSON.stringify(buildRequiredKnowledgePayload('extension'));
   assert.match(knowledge, /must use DataTable/);
-  assert.match(knowledge, /#footer/);
+  assert.match(knowledge, /paginationConfig/);
+  assert.match(knowledge, /@load-more/);
+  assert.match(knowledge, /mobile-only border-top/);
   assert.match(knowledge, /showColumnVisibility/);
   assert.match(knowledge, /10\/20\/50\/100/);
   assert.doesNotMatch(knowledge, /Reserve build_extension_ui kind=resource_list and CommonResourceListFrame\/Item/);
@@ -30,14 +32,23 @@ test('resource_list builder generates DataTable with server pagination inside it
   assert.match(result.snippet, /:data="orders"/);
   assert.match(result.snippet, /:columns="orderColumns"/);
   assert.match(result.snippet, /:loading="pending"/);
-  assert.match(result.snippet, /<template #footer>/);
-  assert.match(result.snippet, /<USelect[^>]*v-model="pageSize"/);
+  assert.match(result.snippet, /:pagination-config="\{ total: filteredTotal, itemsPerPage: pageSize, showPageSize: true, loading: pending \}"/);
+  assert.match(result.snippet, /@page-size-change="pageSize = \$event; currentPage = 1"/);
   assert.match(result.snippet, /v-model:page="currentPage"/);
-  assert.match(result.snippet, /:total="filteredTotal"/);
-  assert.match(result.snippet, /:items-per-page="pageSize"/);
+  assert.doesNotMatch(result.snippet, /<USelect|<UPagination|border-t|max-md:!hidden/);
   assert.doesNotMatch(result.snippet, /CommonResourceList(?:Frame|Item)|<UTable/);
   assert.equal(reviewExtensionUiContract(asExtension(result.snippet), { pattern: 'resource_list' }).valid, true);
   assert.doesNotThrow(() => validateExtensionCodeLocally(asExtension(result.snippet), { uiPattern: 'resource_list' }));
+});
+
+test('resource_list cursor mode keeps page size and emits only Load more pagination actions', () => {
+  const result = buildExtensionUiSnippet('resource_list', { paginationMode: 'cursor', itemsExpression: 'orders', hasMoreExpression: 'canLoadMore', loadMoreExpression: 'fetchNext', pageSizeChangeExpression: 'resetCursorSize' });
+  assert.match(result.snippet, /mode: 'cursor'/);
+  assert.match(result.snippet, /hasMore: canLoadMore/);
+  assert.match(result.snippet, /@load-more="fetchNext"/);
+  assert.match(result.snippet, /@page-size-change="resetCursorSize"/);
+  assert.doesNotMatch(result.snippet, /v-model:page|<UPagination|<USelect/);
+  assert.equal(reviewExtensionUiContract(asExtension(result.snippet), { pattern: 'resource_list' }).valid, true);
 });
 
 test('resource_list rejects record rows even when they use the shared non-tabular frame', () => {

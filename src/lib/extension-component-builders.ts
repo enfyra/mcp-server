@@ -324,12 +324,23 @@ export function buildExtensionResourceListSnippet(input) {
   const totalExpression = input.totalExpression || 'total';
   const itemsPerPageExpression = input.itemsPerPageExpression ?? 'pageSize';
   const paginated = String(itemsPerPageExpression) !== '0';
+  const cursor = input.paginationMode === 'cursor';
+  const paginationBindings = cursor ? [
+    `  :pagination-config="{ mode: 'cursor', itemsPerPage: ${itemsPerPageExpression}, showPageSize: true, loading: ${input.loadingExpression || 'pending'}, hasMore: ${input.hasMoreExpression || 'hasMore'}, loadedCount: ${itemsExpression}.length }"`,
+    `  @load-more="${input.loadMoreExpression || 'loadMore'}"`,
+    `  @page-size-change="${input.pageSizeChangeExpression || 'setPageSize'}"`,
+  ] : [
+    `  v-model:page="${pageExpression}"`,
+    `  :pagination-config="{ total: ${totalExpression}, itemsPerPage: ${itemsPerPageExpression}, showPageSize: true, loading: ${input.loadingExpression || 'pending'} }"`,
+    `  @page-size-change="${input.pageSizeChangeExpression || `${itemsPerPageExpression} = $event; ${pageExpression} = 1`}"`,
+  ];
   const rowClick = input.rowClickExpression ? `  @row-click="${input.rowClickExpression}"` : '';
   const table = [
     '<DataTable',
     `  :data="${itemsExpression}"`,
     `  :columns="${input.columnsExpression || 'columns'}"`,
     `  :loading="${input.loadingExpression || 'pending'}"`,
+    ...(paginated ? paginationBindings : []),
     ...(rowClick ? [rowClick] : []),
     '>',
     '  <template #empty>',
@@ -341,24 +352,6 @@ export function buildExtensionResourceListSnippet(input) {
     '      size="sm"',
     '    />',
     '  </template>',
-    ...(paginated ? [
-      '  <template #footer>',
-      '    <div class="grid grid-cols-2 items-center gap-x-2 gap-y-3 sm:flex sm:flex-wrap sm:justify-between sm:gap-3">',
-      `      <span class="whitespace-nowrap text-xs tabular-nums eapp-text-secondary">{{ ${totalExpression} > 0 ? Math.min((${pageExpression} - 1) * ${itemsPerPageExpression} + 1, ${totalExpression}) : 0 }}–{{ Math.min(${pageExpression} * ${itemsPerPageExpression}, ${totalExpression}) }} / {{ ${totalExpression} }}</span>`,
-      '      <label class="flex items-center justify-end gap-2 whitespace-nowrap text-xs eapp-text-secondary sm:ml-auto">',
-      '        Rows per page',
-      `        <USelect v-model="${itemsPerPageExpression}" :items="[10, 20, 50, 100]" size="sm" class="w-18" data-compact aria-label="Rows per page" />`,
-      '      </label>',
-      '      <UPagination',
-      `        v-model:page="${pageExpression}"`,
-      `        :total="${totalExpression}"`,
-      `        :items-per-page="${itemsPerPageExpression}"`,
-      '        size="sm"',
-      '        :ui="{ root: \'!w-full col-span-2 justify-self-end border-t eapp-divider pt-3 sm:!w-auto sm:col-auto sm:border-0 sm:pt-0\', list: \'flex-nowrap justify-end\', first: \'max-md:!hidden\', last: \'max-md:!hidden\' }"',
-      '      />',
-      '    </div>',
-      '  </template>',
-    ] : []),
     '</DataTable>',
   ].join('\n');
   const snippet = input.constrained === false
@@ -366,7 +359,7 @@ export function buildExtensionResourceListSnippet(input) {
     : ['<section class="eapp-page-constrained-wide space-y-4">', indentLines(table, 2), '</section>'].join('\n');
   return {
     action: 'extension_resource_list_built',
-    components: ['DataTable', 'EmptyState', ...(paginated ? ['USelect', 'UPagination'] : [])],
+    components: ['DataTable', 'EmptyState'],
     snippet,
     contract: [
       'Lists of records with information fields must use DataTable, not raw UTable, HTML tables, repeated cards, or CommonResourceListItem rows. Review/save with uiPattern="resource_list".',
@@ -374,7 +367,7 @@ export function buildExtensionResourceListSnippet(input) {
       'Bind data, columns, and loading. DataTable owns first-load skeletons, the empty slot, and native horizontal scrolling; keep existing rows mounted during refresh.',
       'Columns visibility defaults to enabled for extensions and /data. Only built-in Settings tables explicitly disable showColumnVisibility.',
       'Fetch one bounded server page with explicit display fields and ID. Bind page/pageSize to the API query, reset page to 1 when filters or pageSize change, and use meta.filterCount for filtered totals or meta.totalCount for unfiltered totals. Do not add client pagination to a server page.',
-      'Keep rows-per-page, range, and UPagination inside DataTable #footer; persist bounded 10/20/50/100 choices per list with one stable semantic key. The caller owns setup refs, persistence, and query wiring; use itemsPerPageExpression=0 only for a known bounded non-paginated dataset.',
+      'Use DataTable paginationConfig plus v-model:page and @page-size-change for the shared footer; never copy pagination/selector CSS into extensions. Numbered pages stay right-aligned, cursor mode centers Load more with hasMore/loading/loadedCount and @load-more. Both retain 10/20/50/100 page sizes; the caller owns query/cursor state and stable-key persistence. Use itemsPerPageExpression=0 only for known bounded non-paginated data.',
       'Show status as a badge; put Enable/Disable and destructive actions in a row ellipsis menu using named cell slots such as #actions-cell with row.original. row-click emits the original record.',
       'Keep search/filter controls in a separate compact surface and constrain list pages with eapp-page-constrained-wide unless the extension intentionally owns a full-bleed canvas.',
     ],
