@@ -31,7 +31,7 @@ test('information-list guidance uses the shared footer and all request states', 
   assert.doesNotMatch(JSON.stringify(review.issues), /inside #footer/);
 });
 
-test('visual grids inherit transparent native card chrome instead of duplicating its frame', () => {
+test('visual grids inherit native card chrome instead of duplicating its frame', () => {
   const built = buildExtensionUiSnippet('resource_grid', {});
   assert.match(built.snippet, /<UCard[^>]*class="h-full">/);
   assert.doesNotMatch(built.snippet, /eapp-surface-card|eapp-radius-panel|border eapp-divider/);

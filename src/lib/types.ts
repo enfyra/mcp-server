@@ -189,8 +189,15 @@ export interface ExtensionSfcAttributeAnalysis {
   modifiers: string[];
 }
 
+export interface ExtensionSfcAncestorAnalysis {
+  tag: string;
+  classes: string[];
+  slot: string | null;
+}
+
 export interface ExtensionSfcElementAnalysis {
   tag: string;
+  ancestors: ExtensionSfcAncestorAnalysis[];
   attributes: ExtensionSfcAttributeAnalysis[];
   classes: string[];
   source: string;

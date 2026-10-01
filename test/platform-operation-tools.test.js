@@ -141,7 +141,7 @@ test('extension local validation rejects manual component resolution mistakes', 
     /Invalid extension theme contract/,
   );
   assert.deepEqual(
-    validateExtensionCodeLocally('<template><section class="eapp-surface-card eapp-divider border"><p class="eapp-text-primary">Ok</p></section></template>'),
+    validateExtensionCodeLocally('<template><section class="eapp-bordered-region p-5"><p class="eapp-text-primary">Ok</p></section></template>'),
     { vueSfcAst: 'passed', componentCasing: 'passed', fieldWidth: 'passed', themeContract: 'passed', runtimeContract: 'passed' },
   );
   assert.throws(

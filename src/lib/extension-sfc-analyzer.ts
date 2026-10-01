@@ -12,6 +12,7 @@ import { parse as parseSfc } from '@vue/compiler-sfc';
 
 import type {
   ExtensionSfcAnalysis,
+  ExtensionSfcAncestorAnalysis,
   ExtensionSfcAttributeAnalysis,
   ExtensionSfcElementAnalysis,
 } from './types.js';
@@ -59,25 +60,32 @@ function descendantText(node: TemplateChildNode): string {
 
 function collectElements(root: RootNode): ExtensionSfcElementAnalysis[] {
   const elements: ExtensionSfcElementAnalysis[] = [];
-  const visit = (node: TemplateChildNode) => {
+  const visit = (node: TemplateChildNode, ancestors: ExtensionSfcAncestorAnalysis[] = []) => {
     if (node.type === NodeTypes.ELEMENT) {
       const element = node as ElementNode;
+      const attributes = element.props.map(analyzeAttribute);
+      const classValue = attributes.find((attribute) => attribute.directive === null && attribute.name === 'class')?.value || '';
+      const classes = classValue.split(/\s+/).filter(Boolean);
       if (element.tagType !== ElementTypes.TEMPLATE) {
-        const attributes = element.props.map(analyzeAttribute);
-        const classValue = attributes.find((attribute) => attribute.directive === null && attribute.name === 'class')?.value || '';
         elements.push({
           tag: element.tag,
+          ancestors,
           attributes,
-          classes: classValue.split(/\s+/).filter(Boolean),
+          classes,
           source: element.loc.source.slice(0, 240),
           text: element.children.map((child) => descendantText(child)).join(' ').replace(/\s+/g, ' ').trim(),
         });
       }
-      for (const child of element.children) visit(child);
+      const nextAncestors = [...ancestors, {
+        tag: element.tag,
+        classes,
+        slot: attributes.find((attribute) => attribute.directive === 'slot')?.name ?? null,
+      }];
+      for (const child of element.children) visit(child, nextAncestors);
       return;
     }
     if ('children' in node && Array.isArray(node.children)) {
-      for (const child of node.children) visit(child as TemplateChildNode);
+      for (const child of node.children) visit(child as TemplateChildNode, ancestors);
     }
   };
   for (const child of root.children) visit(child);

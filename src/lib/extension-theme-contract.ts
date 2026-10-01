@@ -29,7 +29,7 @@ import {
 const THEME_CLASS_INTENTS = {
   neutral_surface: {
     classes: 'eapp-bordered-region',
-    use: 'One neutral border with app radius, transparent background and no elevation for standalone forms, KPI containers and framed tools; keep padding caller-owned and avoid wrapping already framed DataTable/TabbedPanel.',
+    use: 'One neutral border with app radius, default content background and no elevation for standalone forms, KPI containers and framed tools; keep padding caller-owned and avoid wrapping already framed DataTable/TabbedPanel.',
   },
   muted_surface: {
     classes: 'eapp-surface-muted eapp-radius-panel',
@@ -308,14 +308,15 @@ export function getExtensionThemeContract() {
       'Use build_extension_ui kind=account_panel_item for account panel row registration snippets.',
       'For narrower centered detail/form bodies use eapp-page-constrained (1000px) or eapp-page-constrained-wide (1200px); the shell supplies the overall 80rem cap.',
       'Card/list grids inside the default shell must account for the 256px desktop sidebar. Use md:grid-cols-2 xl:grid-cols-3 unless a local container proves three columns have enough width.',
-      'Use one neutral border with the app radius and transparent background for a standalone form or data region. DataTable and TabbedPanel own their frame; nested content stays flat without duplicate cards or shadows.',
-      'Use TabbedPanel for top-level tabs so the tab strip sits in its muted header and shares the divider with the active indicator. Secondary tabs inside it use a flat native pill UTabs strip.',
+      'The main workspace is a quiet neutral surface in both themes; centered framed content retains bg-default. Use one neutral border with the app radius and the default content background for a standalone form or data region. DataTable and TabbedPanel own their frame; nested content stays flat without duplicate cards or shadows.',
+      'Use TabbedPanel for top-level sections: native link tabs sit in its muted header and share the divider with a theme-colored underline. Secondary navigation belongs in the content body: build_extension_ui kind=tabs input.placement=secondary returns native pill UTabs with a rounded neutral tray, a solid primary active surface and theme-owned on-primary text/icons. Use content=false only when the caller owns panels. eApp owns pill chrome globally; never add extension ui/color/radius/indicator overrides or copy header underline styles into pills.',
       'Page-form Save/Reset actions belong in the shell header for the active editable tab. Drawer/modal forms retain managed footer actions.',
     ],
     theme: [
       'Do not choose theme classes from memory. Decide the UI intent, then call build_extension_ui kind=theme_classes with that intent to receive the exact class/prop contract.',
       'Call build_extension_ui kind=theme_review or kind=review before saving extension UI; validate_extension_code and extension write tools also reject hard theme violations.',
       'Never fix one extension by injecting global CSS, redefining the app palette, or adding theme guards.',
+      'eapp-surface-card is a flat semantic wrapper inside the admin shell: CSS flattens its border, background and horizontal padding. Do not combine it with border/radius utilities to build filters, metrics or forms. Use neutral_surface (eapp-bordered-region) for a real standalone frame; DataTable and TabbedPanel already own theirs.',
       'Use get_theme_class_reference only when debugging theme internals or when the user explicitly asks for the full theme/class map.',
     ],
     themeIntents: [
@@ -341,6 +342,9 @@ export function getExtensionThemeContract() {
       'Use Nuxt UI/eApp components for normal controls: UButton, UInput, UTextarea, USelectMenu/USelect, USwitch, UCheckbox, UTabs, UBadge, UProgress, UModal, and CommonDrawer when available. UProgress is exposed by the eApp dynamic extension registry for token/quota progress indicators.',
       'Use auto-injected components directly in the template with PascalCase names. Do not call resolveComponent() to manually resolve Nuxt UI/eApp components inside extension SFCs; it can compile but render unresolved lowercase DOM tags such as <ubutton>.',
       'Buttons should have stable geometry: hover may change color, border, or shadow but must not move the button or resize its content. Disabled buttons keep disabled cursor/visual state.',
+      'Create/Add/Send/Save and page-wide Refresh belong in shell header actions. Table search and row actions stay with the table; drawer/modal mutation actions stay in managed footers. Registry loading, disabled and visibility must stay reactive, not capture a ref.value snapshot during registration.',
+      'DataTable toolbar: a single dataset uses a bounded search group on the left and its native Columns control on the right. Do not repeat the shell title and a guidance paragraph beside the search input. Use size="sm" for the input/button, UFieldGroup for their shared geometry, and a form for Enter submission. Separate dataset titles are appropriate for multiple tables; complex filters use one compact neutral region. Generate this with resource_list searchExpression/searchSubmitExpression/searchPlaceholder/searchLabel.',
+      'App UInput keeps a 44px base height even at size="sm". In compact DataTable search only, use the native ui.base slot "h-7 py-1" to match the 28px Columns button; retain theme-owned border/background/focus and normal form field geometry.',
       'Inputs and textareas should not add hover movement or decorative hover states; focus, invalid, disabled, and loading states must be explicit.',
       'For drawers, modals, page shell headers/actions, permission gates, empty states, resource lists, resource grids, form editors, widgets, menu/account panel registries, tabs, upload modals, api_usage, notify, and runtime/theming reviews, call build_extension_ui with the matching kind after extension acknowledgement before patching raw Vue.',
       'Use build_extension_ui kind=theme_classes for theme classes by intent, and kind=runtime_review, theme_review, or review before saving generated snippets that include composables, theme classes, high-contract UI, or native buttons.',
@@ -359,6 +363,7 @@ export function getExtensionThemeContract() {
       CommonDrawer: [
         'Use build_extension_ui kind=drawer for generated drawer/editing snippets.',
         'The builder owns slots, managed footer actions, full-width fields, native button types, and loading/error/body structure. CommonDrawer disables drag dismissal globally; do not add handle-only, drag handlers, or swipe-to-close behavior.',
+        'A controlled drawer can emit a closed state during initialization. Ignore close requests while already closed; only compare drafts and ask to discard after the editor actually opened. Initialize the dirty baseline when opening and preserve it on failed writes.',
       ],
       CommonModal: [
         'Use build_extension_ui kind=modal for generated modal/confirmation snippets.',

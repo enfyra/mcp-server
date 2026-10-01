@@ -24,6 +24,35 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
   const drawers = byTag('CommonDrawer');
   const modals = [...byTag('CommonModal'), ...byTag('UModal')];
   const allClasses = new Set(elements.flatMap((element) => element.classes));
+  const overlayTags = ['CommonDrawer', 'CommonModal', 'UModal'];
+
+  for (const element of elements) {
+    if (element.classes.includes('eapp-surface-card') && element.classes.some((name) => /^border(?:-\d+)?$/.test(name))) {
+      push('error', 'flattened-surface-frame', 'eapp-surface-card is flattened by the admin shell; adding border and padding does not create a framed region.', 'Use eapp-bordered-region with caller-owned padding for standalone filters, metrics and forms. Keep nested overlay content flat and leave DataTable/TabbedPanel frames component-owned.');
+    }
+    if (element.tag === 'UTabs') {
+      const inOverlay = element.ancestors.some((ancestor) => overlayTags.includes(ancestor.tag));
+      const panelIndex = element.ancestors.map((ancestor) => ancestor.tag).lastIndexOf('TabbedPanel');
+      const inPanelHeader = panelIndex >= 0 && element.ancestors.slice(panelIndex + 1).some((ancestor) => ancestor.slot === 'header');
+      const secondary = extensionElementHasAttribute(element, 'data-secondary-navigation', null)
+        && extensionElementAttributeValue(element, 'variant', null) === 'pill';
+      if (secondary && hasStaticOrBound(element, 'ui')) {
+        push('error', 'tabs-chrome-ownership', 'Secondary tab chrome is overridden in extension source.', 'Remove the UTabs ui override. eApp owns pill colors, radius, indicator geometry and focus globally; extensions choose variant="pill" color="primary" and own only tab state/content. Fix shared chrome in eApp rather than generating per-extension styling.');
+      }
+      if (!inOverlay && !inPanelHeader && !secondary) {
+        push('error', 'tabs-panel-header', 'Top-level UTabs are outside the shared panel header.', 'Use TabbedPanel with items and named content slots, or put externally controlled UTabs in its #header. Mark genuine secondary navigation with variant="pill" and data-secondary-navigation.');
+      }
+    }
+    if (element.tag === 'DataTable' && element.ancestors.some((ancestor) => ancestor.classes.includes('eapp-bordered-region') || ancestor.tag === 'CommonResourceListFrame')) {
+      push('error', 'duplicate-data-frame', 'DataTable is wrapped in another framed data region.', 'Render DataTable directly in its page or tab content; it owns its border, background, scroll containment and footer.');
+    }
+    if (element.tag === 'UButton' && !element.ancestors.some((ancestor) => [...overlayTags, 'DataTable'].includes(ancestor.tag))) {
+      const label = extensionElementAttributeValue(element, 'label', null) || element.text;
+      if (/^(?:new|add|create|save|send|publish)\b/i.test(label.trim())) {
+        push('warning', 'page-action-header', 'A page-level mutation action is rendered in the content body.', 'Register it through useHeaderActionRegistry in onMounted. Keep loading/disabled/show reactive and leave overlay mutations in managed footer actions.');
+      }
+    }
+  }
 
   if (!analysis.valid) {
     push('error', 'vue-sfc-parse', `Vue SFC parsing failed: ${analysis.errors[0]}`, 'Fix the malformed SFC/template before reviewing UI policy.');
@@ -34,7 +63,7 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
   if (modals.some((element) => hasStaticOrBound(element, 'title'))) {
     push('error', 'common-modal-slots', 'CommonModal/UModal should not use title/:title props in generated extensions.', 'Use #header with a heading, and #body for content.');
   }
-  if (drawers.some((element) => !hasStaticOrBound(element, 'primary-action') && !hasStaticOrBound(element, 'primaryAction'))) {
+  if (drawers.some((element) => !extensionElementHasAttribute(element, 'data-readonly', null) && !hasStaticOrBound(element, 'primary-action') && !hasStaticOrBound(element, 'primaryAction'))) {
     push('warning', 'drawer-primary-action', 'CommonDrawer has no primaryAction.', 'Editing/create drawers should wire Save/Create through primaryAction.');
   }
   if (drawers.some((element) => !hasStaticOrBound(element, 'cancel-action') && !hasStaticOrBound(element, 'cancelAction'))) {

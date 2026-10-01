@@ -236,8 +236,8 @@ function buildHeaderActionLiteral(action) {
     action.icon ? `icon: ${quoteJsString(action.icon)}` : null,
     `color: ${quoteJsString(action.color || 'neutral')}`,
     `variant: ${quoteJsString(action.variant || 'outline')}`,
-    action.loading ? `loading: ${action.loading}` : null,
-    action.disabled ? `disabled: ${action.disabled}` : null,
+    action.loading ? (/\.value\b/.test(String(action.loading)) ? `get loading() { return ${action.loading}; }` : `loading: ${action.loading}`) : null,
+    action.disabled ? (/\.value\b/.test(String(action.disabled)) ? `get disabled() { return ${action.disabled}; }` : `disabled: ${action.disabled}`) : null,
     action.to ? `to: ${quoteJsString(action.to)}` : null,
     action.onClick ? `onClick: ${action.onClick}` : null,
     typeof action.order === 'number' ? `order: ${action.order}` : null,
@@ -272,6 +272,7 @@ export function buildExtensionPageShellSnippet(input) {
       'The native shell owns inset geometry, fixed headers, scrolling and a centered 80rem content container. Use eapp-page-constrained (1000px) or eapp-page-constrained-wide (1200px) only for a narrower centered body; do not add root page padding or a duplicate outer card.',
       'Use useHeaderActionRegistry for toolbar actions instead of rendering duplicate page headers or local top bars; register dynamic extension actions in onMounted after setup state exists.',
       'Place page-form Save/Reset actions in the shell header and target the active editable tab; keep drawer/modal mutation actions in their managed footer.',
+      'Pass refs/computed values for loading and disabled, or reactive expressions containing .value; the builder emits getters for expressions so header state does not freeze at registration.',
       'Use primary solid only for the main scope action; secondary actions default to neutral outline.',
     ],
   };
@@ -338,6 +339,16 @@ export function buildExtensionResourceListSnippet(input) {
     `  @page-size-change="${input.pageSizeChangeExpression || `${itemsPerPageExpression} = $event; ${pageExpression} = 1`}"`,
   ];
   const rowClick = input.rowClickExpression ? `  @row-click="${input.rowClickExpression}"` : '';
+  const searchToolbar = input.searchExpression ? [
+    '  <template #toolbar>',
+    `    <form class="w-full min-w-0 sm:w-96" @submit.prevent="${input.searchSubmitExpression || 'applySearch'}">`,
+    '      <UFieldGroup class="w-full">',
+    `        <UInput v-model="${input.searchExpression}" icon="lucide:search" size="sm" :ui="{ base: 'h-7 py-1' }" class="w-full min-w-0 flex-1" placeholder="${String(input.searchPlaceholder || 'Search records').replace(/"/g, '&quot;')}" aria-label="${String(input.searchLabel || 'Search records').replace(/"/g, '&quot;')}" />`,
+    `        <UButton type="submit" size="sm" color="neutral" variant="outline" :loading="${input.loadingExpression || 'pending'}">Search</UButton>`,
+    '      </UFieldGroup>',
+    '    </form>',
+    '  </template>',
+  ] : [];
   const table = [
     '<DataTable',
     `  :data="${itemsExpression}"`,
@@ -346,6 +357,7 @@ export function buildExtensionResourceListSnippet(input) {
     ...(paginated ? paginationBindings : []),
     ...(rowClick ? [rowClick] : []),
     '>',
+    ...searchToolbar,
     '  <template #empty>',
     '    <EmptyState',
     `      title="${String(input.emptyTitle || 'No items found').replace(/"/g, '&quot;')}"`,
@@ -362,7 +374,7 @@ export function buildExtensionResourceListSnippet(input) {
     : ['<section class="eapp-page-constrained-wide space-y-4">', indentLines(table, 2), '</section>'].join('\n');
   return {
     action: 'extension_resource_list_built',
-    components: ['DataTable', 'EmptyState'],
+    components: ['DataTable', 'EmptyState', ...(input.searchExpression ? ['UFieldGroup', 'UInput', 'UButton'] : [])],
     snippet,
     contract: [
       'Lists of records with information fields must use DataTable, not raw UTable, HTML tables, repeated cards, or CommonResourceListItem rows. Review/save with uiPattern="resource_list".',
@@ -373,6 +385,9 @@ export function buildExtensionResourceListSnippet(input) {
       'Use DataTable paginationConfig plus v-model:page and @page-size-change for the shared footer; never copy pagination/selector CSS into extensions. Main numbered controls are centered on mobile and right-aligned on desktop; cursor mode centers Load more with hasMore/loading/loadedCount and @load-more. The main footer stays in-flow; offset mode retains its mini pager by default, with controls left/range right on one line. Set paginationConfig.floating=false to disable it. Raw UPagination outside DataTable keeps Nuxt UI defaults. Both modes retain 10/20/50/100 page sizes; the caller owns query/cursor state and stable-key persistence. Use itemsPerPageExpression=0 only for known bounded non-paginated data.',
       'Show status as a badge; put Enable/Disable and destructive actions in a row ellipsis menu using named cell slots such as #actions-cell with row.original. row-click emits the original record.',
       'The shell centers and constrains every page. Use eapp-page-constrained-wide for an optional narrower list; keep search/filter controls compact and avoid a second border around DataTable.',
+      'A single-dataset toolbar starts with a bounded search group on the left; native Columns stays on the right. Do not repeat the shell title and instruction paragraph next to search. Use size=sm for input and Search button to match Columns, keep widths responsive, and submit on Enter. Pass searchExpression/searchSubmitExpression/searchPlaceholder/searchLabel for this scaffold; callers own the query and first-page reset.',
+      'The app input base is 44px even with size=sm. Compact table search uses its native ui.base slot (h-7 py-1) to match the 28px Columns button; preserve all theme-owned border/background/focus styling and do not change page-form field geometry.',
+      'A distinct dataset title is useful when a page has multiple tables. Put long guidance in the page description, concise scope/count in the shared footer or dataset toolbar, and complex filters in one eapp-bordered-region outside the table. Avoid arbitrary height, alignment or padding overrides on the native toolbar.',
     ],
   };
 }
@@ -455,7 +470,7 @@ export function buildExtensionFormEditorSnippet(input) {
       'Use v-model for record state and v-model:errors for validation errors.',
       'Use includes/sections to keep generated forms focused; do not expose compiledCode or unrelated system fields.',
       'Use fieldMap only for behavior/renderer overrides such as code fields or custom labels.',
-      'Centered standalone page forms use one neutral border with the app radius and transparent background. Use eapp-form-region for a custom page form; inside TabbedPanel, drawers and modals keep forms flat rather than nesting another card.',
+      'Centered standalone page forms use one neutral border with the app radius and the default content background against the neutral workspace. Use eapp-form-region for a custom page form; inside TabbedPanel, drawers and modals keep forms flat rather than nesting another card.',
       'Register page-form Save/Reset in useHeaderActionRegistry for the active tab; drawer/modal forms use their managed footer actions.',
     ],
   };
@@ -545,6 +560,24 @@ export function buildExtensionTabsSnippet(input) {
   const model = input.model || 'activeTab';
   const items = input.itemsExpression || 'tabs';
   const body = input.body || '<div>{{ item.label }}</div>';
+  if (input.placement === 'secondary') {
+    const snippet = [
+      `<UTabs v-model="${model}" :items="${items}" variant="pill" color="primary" data-secondary-navigation`,
+      '  :unmount-on-hide="false"',
+      ...(input.content === false ? ['  :content="false"'] : []),
+      ...(input.content === false ? ['/>' ] : ['>', '  <template #content="{ item }">', indentLines(normalizeVueBodySnippet(body).code, 4), '  </template>', '</UTabs>']),
+    ].join('\n');
+    return {
+      action: 'extension_tabs_built',
+      component: 'UTabs',
+      snippet,
+      contract: [
+        'Secondary navigation belongs in the content body: native pill UTabs use a neutral rounded tray, a solid primary active surface and theme-owned on-primary text/icon contrast.',
+        'Keep native keyboard, indicator measurement, and panel context. When the caller owns panels, set content=false and retain its visibility/draft ownership.',
+        'eApp owns pill chrome globally through app.config.ts: do not generate ui/style overrides for tab colors, radius, indicators, focus, or spacing. Extensions only choose native variant/color and own their state and content.',
+      ],
+    };
+  }
   const snippet = [
     `<TabbedPanel v-model="${model}" :items="${items}" class="w-full">`,
     '  <template #content="{ item }">',
@@ -561,7 +594,7 @@ export function buildExtensionTabsSnippet(input) {
       'The panel owns gutters, the divider aligned with the active indicator, and the app radius; do not copy tab CSS or add another card/border around its content.',
       'Keep tab items data-driven and render panel content through #content.',
       'Hidden tab panels stay mounted by default to preserve drafts. Bind the selected tab to the URL query in the caller when navigation state must survive reloads.',
-      'Use a flat native pill UTabs strip for secondary navigation inside a tabbed panel instead of nesting another framed TabbedPanel.',
+      'For secondary navigation in the content body, call this builder with placement=secondary. It generates native pill UTabs with a neutral rounded tray, a solid theme-primary active surface and on-primary text/icons instead of another framed TabbedPanel.',
     ],
   };
 }

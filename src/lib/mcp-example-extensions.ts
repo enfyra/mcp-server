@@ -51,7 +51,7 @@ ensure_page_extension({
   name: "ReportsPage",
   description: "Reports dashboard",
   menuId: "<created-menu-id>",
-  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-2 xl:grid-cols-3\\"><article class=\\"eapp-surface-card p-4\\"><div class=\\"flex items-start justify-between gap-3\\"><div><p class=\\"text-sm font-medium eapp-text-tertiary\\">Total</p><p class=\\"mt-2 text-2xl font-semibold eapp-text-primary\\">0</p></div><span class=\\"eapp-primary-soft eapp-icon-tile\\"><span class=\\"eapp-primary-text\\">◆</span></span></div><div class=\\"mt-3 h-1.5 overflow-hidden eapp-radius-pill eapp-surface-muted\\"><div class=\\"eapp-primary-solid h-full w-1/2\\"></div></div></article><article class=\\"eapp-primary-surface eapp-radius-panel border p-4\\"><p class=\\"text-sm font-semibold eapp-text-primary\\">Selected report</p><p class=\\"mt-1 text-sm eapp-text-tertiary\\">Only selected/current identity blocks use identity surface.</p></article></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); const { register: registerHeaderActions } = useHeaderActionRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'none', variant: 'minimal' }); registerHeaderActions([{ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', color: 'neutral', variant: 'outline', onClick: () => {}, order: 80 }])</script>",
+  code: "<template><section class=\\"min-h-full w-full space-y-4\\"><div class=\\"grid gap-4 md:grid-cols-2 xl:grid-cols-3\\"><article class=\\"eapp-bordered-region p-4\\"><div class=\\"flex items-start justify-between gap-3\\"><div><p class=\\"text-sm font-medium eapp-text-tertiary\\">Total</p><p class=\\"mt-2 text-2xl font-semibold eapp-text-primary\\">0</p></div><span class=\\"eapp-primary-soft eapp-icon-tile\\"><span class=\\"eapp-primary-text\\">◆</span></span></div><div class=\\"mt-3 h-1.5 overflow-hidden eapp-radius-pill eapp-surface-muted\\"><div class=\\"eapp-primary-solid h-full w-1/2\\"></div></div></article><article class=\\"eapp-primary-surface eapp-radius-panel border p-4\\"><p class=\\"text-sm font-semibold eapp-text-primary\\">Selected report</p><p class=\\"mt-1 text-sm eapp-text-tertiary\\">Only selected/current identity blocks use identity surface.</p></article></div></section></template><script setup>const { registerPageHeader } = usePageHeaderRegistry(); const { register: registerHeaderActions } = useHeaderActionRegistry(); registerPageHeader({ title: 'Reports', description: 'Operational report overview.', leadingIcon: 'lucide:bar-chart-3', gradient: 'none', variant: 'minimal' }); onMounted(() => registerHeaderActions([{ id: 'refresh-reports', label: 'Refresh', icon: 'lucide:refresh-cw', color: 'neutral', variant: 'outline', onClick: () => {}, order: 80 }]))</script>",
   isEnabled: true,
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>",
   extensionKnowledgeAckKey: "<extensionAckKey from get_enfyra_required_knowledge>"
@@ -67,10 +67,10 @@ ensure_page_extension({
           'Call get_enfyra_required_knowledge before saving extension code, pass globalRulesAckKey as globalRulesAckKey, and pass extensionAckKey as extensionKnowledgeAckKey.',
           'Page extensions must register the app-shell PageHeader with usePageHeaderRegistry instead of rendering a custom top header.',
           'Put page-level actions in useHeaderActionRegistry or useSubHeaderActionRegistry, destructure register first, then call it with one action or an array.',
-          'Page extensions should be full-bleed and responsive from the first version; the extension root is already inside the Enfyra admin page main.',
+          'Page extensions inherit the centered shell container; use eapp-page-constrained-wide only for a narrower body and keep root padding shell-owned.',
           'Render ordinary metrics and lists in the body, not PageHeader.stats, unless the user explicitly wants a compact overview header.',
           'Use app theme tokens and Nuxt UI semantic colors by intent; do not hard-code concrete palettes or redefine the app palette inside extension code.',
-          'Use app-owned primitives such as UTabs, CommonModal, CommonDrawer, Widget, useMenuNotificationRegistry, and useAccountPanelRegistry when the workflow matches them.',
+          'Use app-owned primitives such as TabbedPanel, CommonModal, CommonDrawer, Widget, useMenuNotificationRegistry, and useAccountPanelRegistry when the workflow matches them.',
           'Keep list selection local and fetch detail rows only; do not refetch the whole list after a row click unless the list data changed.',
           'Page extension paths are admin app UI routes. Do not verify them with test_rest_endpoint against ENFYRA_API_URL unless inspect_route shows an API route with the same path.',
           'After saving, open Enfyra admin tabs should update through the server/Enfyra admin UI realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',
@@ -81,7 +81,7 @@ ensure_page_extension({
         code: `// Create reusable/bulky sections as widget extension records first.
 const reportStatusWidgetCode = \`
 <template>
-  <section class="eapp-surface-card p-4">
+  <section class="eapp-bordered-region p-4">
     <div class="flex items-start justify-between gap-3">
       <div>
         <p class="text-sm font-medium eapp-text-tertiary">Total reports</p>
@@ -566,31 +566,28 @@ ensure_menu_access({
       {
         name: 'Extension fetches Enfyra data',
         code: `<script setup>
+const page = ref(1)
+const pageSize = ref(20)
 const { data, pending, execute: fetchOrders } = useApi('/order', {
-  query: {
-    fields: 'id,status,total,createdAt',
-    limit: 10,
-    sort: '-createdAt'
-  },
+  query: computed(() => ({ fields: 'id,status,total,createdAt', limit: pageSize.value, page: page.value, sort: '-createdAt', meta: 'totalCount' })),
   errorContext: 'Fetch orders'
 })
-
 const orders = computed(() => data.value?.data ?? [])
-
-onMounted(() => fetchOrders())
+const total = computed(() => Number(data.value?.meta?.totalCount || 0))
+const columns = [{ accessorKey: 'id', header: 'ID', size: 88 }, { accessorKey: 'status', header: 'Status' }, { accessorKey: 'total', header: 'Total' }, { accessorKey: 'createdAt', header: 'Created' }]
+const { register: registerHeaderActions } = useHeaderActionRegistry()
+onMounted(() => {
+  registerHeaderActions({ id: 'orders-refresh', label: 'Refresh', icon: 'lucide:refresh-cw', color: 'neutral', variant: 'outline', get loading() { return pending.value }, onClick: fetchOrders })
+  void fetchOrders()
+})
+watch([page, pageSize], () => fetchOrders())
+function changePageSize(value) { pageSize.value = value; page.value = 1 }
 </script>
-
 <template>
-  <section class="space-y-3">
-    <UButton type="button" color="neutral" variant="outline" :loading="pending" @click="fetchOrders">
-      Refresh
-    </UButton>
-    <div class="eapp-surface-card eapp-divide-y">
-      <div v-for="order in orders" :key="order.id" class="px-4 py-3">
-        <p class="text-sm font-medium eapp-text-primary">{{ order.status }}</p>
-        <p class="text-xs eapp-text-tertiary">{{ order.createdAt }}</p>
-      </div>
-    </div>
+  <section class="eapp-page-constrained-wide">
+    <DataTable v-model:page="page" :data="orders" :columns="columns" :loading="pending" :pagination-config="{ total, itemsPerPage: pageSize, showPageSize: true, loading: pending }" @page-size-change="changePageSize">
+      <template #status-cell="{ row }"><UBadge color="neutral" variant="soft">{{ row.original.status }}</UBadge></template>
+    </DataTable>
   </section>
 </template>`,
         notes: [
