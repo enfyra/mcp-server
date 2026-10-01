@@ -327,7 +327,7 @@ test('resource-list policy requires DataTable instead of ad hoc or shared resour
     pageExpression: 'currentPage',
   });
   assert.match(paginated.snippet, /v-model:page="currentPage"/);
-  assert.match(paginated.snippet, /:items-per-page="pageSize"/);
+  assert.match(paginated.snippet, /:pagination-config="\{ total: total, itemsPerPage: pageSize/);
 });
 
 test('extension verification distinguishes compiler and contract checks from browser coverage', () => {

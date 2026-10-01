@@ -581,7 +581,7 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
   server.tool(
       'build_extension_tabs',
       [
-        'Generate a UTabs snippet for Enfyra extension page sections.',
+        'Generate a UTabs snippet inside the shared TabbedPanel header for Enfyra extension page sections.',
         'Use this instead of custom tab bars so app-wide tab chrome owns active indicators, focus rings, spacing, and theme contrast.',
       ].join(' '),
       {

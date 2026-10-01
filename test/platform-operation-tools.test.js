@@ -598,7 +598,7 @@ test('extension component builders enforce drawer and modal contracts', async ()
     itemsExpression: 'tabs',
     body: '<div>{{ item.label }}</div>',
   });
-  assert.match(tabs.snippet, /<UTabs v-model="activeTab" :items="tabs" class="w-full">/);
+  assert.match(tabs.snippet, /<TabbedPanel v-model="activeTab" :items="tabs" class="w-full">/);
   assert.match(tabs.snippet, /<template #content="\{ item \}">/);
 
   const upload = buildExtensionUploadModalSnippet({

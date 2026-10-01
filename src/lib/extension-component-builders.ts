@@ -8,6 +8,7 @@ const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
   'FormEditorLazy',
   'NuxtLink',
   'PermissionGate',
+  'TabbedPanel',
   'UBadge',
   'UButton',
   'UCheckbox',
@@ -268,7 +269,9 @@ export function buildExtensionPageShellSnippet(input) {
     snippet: lines.join('\n'),
     contract: [
       'Use usePageHeaderRegistry so the app shell renders the page header.',
+      'The native shell owns inset geometry, fixed headers, scrolling and a centered 80rem content container. Use eapp-page-constrained (1000px) or eapp-page-constrained-wide (1200px) only for a narrower centered body; do not add root page padding or a duplicate outer card.',
       'Use useHeaderActionRegistry for toolbar actions instead of rendering duplicate page headers or local top bars; register dynamic extension actions in onMounted after setup state exists.',
+      'Place page-form Save/Reset actions in the shell header and target the active editable tab; keep drawer/modal mutation actions in their managed footer.',
       'Use primary solid only for the main scope action; secondary actions default to neutral outline.',
     ],
   };
@@ -364,12 +367,12 @@ export function buildExtensionResourceListSnippet(input) {
     contract: [
       'Lists of records with information fields must use DataTable, not raw UTable, HTML tables, repeated cards, or CommonResourceListItem rows. Review/save with uiPattern="resource_list".',
       'Define columns with accessorKey/id and header; size ID, status, date/count, and action columns explicitly, and leave descriptive columns flexible. Numeric IDs use 88px; long string IDs use 224px with ellipsis.',
-      'Bind data, columns, and loading. DataTable owns first-load skeletons, the empty slot, and native horizontal scrolling; keep existing rows mounted during refresh.',
+      'Bind data, columns, and loading for every request. DataTable owns native UTable loading through header progress, with no default row skeletons and no empty message while pending. Keep existing rows mounted during same-dataset refreshes; hide stale rows when changing datasets.',
       'Columns visibility defaults to enabled for extensions and /data. Only built-in Settings tables explicitly disable showColumnVisibility.',
       'Fetch one bounded server page with explicit display fields and ID. Bind page/pageSize to the API query, reset page to 1 when filters or pageSize change, and use meta.filterCount for filtered totals or meta.totalCount for unfiltered totals. Do not add client pagination to a server page.',
-      'Use DataTable paginationConfig plus v-model:page and @page-size-change for the shared footer; never copy pagination/selector CSS into extensions. Numbered pages stay right-aligned, cursor mode centers Load more with hasMore/loading/loadedCount and @load-more. Both retain 10/20/50/100 page sizes; the caller owns query/cursor state and stable-key persistence. Use itemsPerPageExpression=0 only for known bounded non-paginated data.',
+      'Use DataTable paginationConfig plus v-model:page and @page-size-change for the shared footer; never copy pagination/selector CSS into extensions. Main numbered controls are centered on mobile and right-aligned on desktop; cursor mode centers Load more with hasMore/loading/loadedCount and @load-more. The main footer stays in-flow; offset mode retains its mini pager by default, with controls left/range right on one line. Set paginationConfig.floating=false to disable it. Raw UPagination outside DataTable keeps Nuxt UI defaults. Both modes retain 10/20/50/100 page sizes; the caller owns query/cursor state and stable-key persistence. Use itemsPerPageExpression=0 only for known bounded non-paginated data.',
       'Show status as a badge; put Enable/Disable and destructive actions in a row ellipsis menu using named cell slots such as #actions-cell with row.original. row-click emits the original record.',
-      'Keep search/filter controls in a separate compact surface and constrain list pages with eapp-page-constrained-wide unless the extension intentionally owns a full-bleed canvas.',
+      'The shell centers and constrains every page. Use eapp-page-constrained-wide for an optional narrower list; keep search/filter controls compact and avoid a second border around DataTable.',
     ],
   };
 }
@@ -395,7 +398,7 @@ export function buildExtensionResourceGridSnippet(input) {
     `  empty-icon="${input.emptyIcon || 'lucide:inbox'}"`,
     '>',
     '  <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">',
-    `    <UCard v-for="${itemName} in ${itemsExpression}" :key="${keyExpression}" class="h-full eapp-surface-card eapp-radius-panel border eapp-divider">`,
+    `    <UCard v-for="${itemName} in ${itemsExpression}" :key="${keyExpression}" class="h-full">`,
     '      <div class="flex h-full flex-col gap-4">',
     indentLines(normalized.code, 8),
     '      </div>',
@@ -414,7 +417,7 @@ export function buildExtensionResourceGridSnippet(input) {
     contract: [
       'Use this card grid only for genuine visual dashboards/workboards/catalogs, not information lists; record lists must use the resource_list DataTable builder.',
       'The default desktop layout uses three columns only at xl because the admin sidebar consumes viewport width.',
-      'Keep the page constrained unless the workflow intentionally owns a canvas or other full-bleed surface.',
+      'Keep the grid within the centered shell content; use eapp-page-constrained-wide for a narrower workboard.',
       'Keep card actions inside cardBody and align them with flex layout rather than floating them at the viewport edge.',
     ],
   };
@@ -452,6 +455,8 @@ export function buildExtensionFormEditorSnippet(input) {
       'Use v-model for record state and v-model:errors for validation errors.',
       'Use includes/sections to keep generated forms focused; do not expose compiledCode or unrelated system fields.',
       'Use fieldMap only for behavior/renderer overrides such as code fields or custom labels.',
+      'Centered standalone page forms use one neutral border with the app radius and transparent background. Use eapp-form-region for a custom page form; inside TabbedPanel, drawers and modals keep forms flat rather than nesting another card.',
+      'Register page-form Save/Reset in useHeaderActionRegistry for the active tab; drawer/modal forms use their managed footer actions.',
     ],
   };
 }
@@ -541,20 +546,22 @@ export function buildExtensionTabsSnippet(input) {
   const items = input.itemsExpression || 'tabs';
   const body = input.body || '<div>{{ item.label }}</div>';
   const snippet = [
-    `<UTabs v-model="${model}" :items="${items}" class="w-full">`,
+    `<TabbedPanel v-model="${model}" :items="${items}" class="w-full">`,
     '  <template #content="{ item }">',
     indentLines(normalizeVueBodySnippet(body).code, 4),
     '  </template>',
-    '</UTabs>',
+    '</TabbedPanel>',
   ].join('\n');
   return {
     action: 'extension_tabs_built',
-    component: 'UTabs',
+    component: 'TabbedPanel',
     snippet,
     contract: [
-      'Use app-level UTabs chrome instead of custom tab bars.',
-      'Do not add local full-width bottom borders/dividers to tab lists.',
+      'TabbedPanel is the registered app-owned wrapper around native UTabs with one neutral frame and a muted header containing the tab strip.',
+      'The panel owns gutters, the divider aligned with the active indicator, and the app radius; do not copy tab CSS or add another card/border around its content.',
       'Keep tab items data-driven and render panel content through #content.',
+      'Hidden tab panels stay mounted by default to preserve drafts. Bind the selected tab to the URL query in the caller when navigation state must survive reloads.',
+      'Use a flat native pill UTabs strip for secondary navigation inside a tabbed panel instead of nesting another framed TabbedPanel.',
     ],
   };
 }

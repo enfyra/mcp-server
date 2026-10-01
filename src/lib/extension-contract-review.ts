@@ -60,7 +60,7 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
     const frames = byTag('CommonResourceListFrame');
     const tables = byTag('DataTable');
     if (tables.length === 0) {
-      push('error', 'resource-list-table-required', 'Lists of records with information fields must use DataTable.', 'Use build_extension_ui kind=resource_list and bind data, columns, and loading; put server pagination inside #footer.');
+      push('error', 'resource-list-table-required', 'Lists of records with information fields must use DataTable.', 'Use build_extension_ui kind=resource_list and bind data, columns, loading and paginationConfig for the shared server-pagination footer.');
     }
     if (byTag('CommonResourceListItem').some((element) => extensionElementHasAttribute(element, 'for', 'for'))) {
       push('error', 'resource-list-non-tabular-rows', 'A record list still renders repeated CommonResourceListItem rows.', 'Move record information into DataTable columns and named cell slots; reserve non-tabular rows for a different UI pattern.');
@@ -69,14 +69,14 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
       push('error', 'resource-list-ad-hoc-cards', 'A resource-list screen still renders inventory rows as repeated cards.', 'Use DataTable columns for record information; reserve resource_grid for genuine workboards and visual catalogs.');
     }
     if (elements.some((element) => ['table', 'UTable'].includes(element.tag))) {
-      push('error', 'resource-list-ad-hoc-table', 'A resource-list screen renders an unmanaged table.', 'Use DataTable with bounded server pages and rows-per-page, range, and UPagination inside #footer.');
+      push('error', 'resource-list-ad-hoc-table', 'A resource-list screen renders an unmanaged table.', 'Use DataTable with bounded server pages and paginationConfig for the shared rows-per-page, range and pagination controls.');
     }
     for (const table of tables) {
       if (!hasStaticOrBound(table, 'data') || !hasStaticOrBound(table, 'columns')) {
         push('error', 'resource-list-table-contract', 'DataTable needs record data and column definitions.', 'Bind :data and :columns to the table.');
       }
       if (!hasStaticOrBound(table, 'loading')) {
-        push('error', 'resource-list-table-loading', 'DataTable needs a first-load state.', 'Bind :loading to the initial request state.');
+        push('error', 'resource-list-table-loading', 'DataTable needs a request loading state.', 'Bind :loading for initial load and refresh so native header progress remains table-owned.');
       }
     }
     const frame = frames[0];
@@ -95,18 +95,15 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
     if (itemsPerPage && itemsPerPage !== '0' && !extensionElementHasAttribute(frame, 'page', 'model')) {
       push('error', 'resource-list-pagination-owned', 'A paginated CommonResourceListFrame is missing its page model.', 'Bind v-model:page on the frame so pagination state stays list-owned.');
     }
-    if (!allClasses.has('eapp-page-constrained-wide')) {
-      push('warning', 'resource-list-width', 'The operational list is not constrained for wide admin viewports.', 'Wrap the page inventory in eapp-page-constrained-wide unless this extension intentionally owns a full-bleed canvas.');
-    }
     const frameIndex = frame ? elements.indexOf(frame) : tables[0] ? elements.indexOf(tables[0]) : elements.length;
     const beforeFrame = elements.slice(0, frameIndex);
     const hasSearchOrFilterControl = beforeFrame.some((element) => (
       ['UInput', 'UInputMenu', 'USelect', 'USelectMenu'].includes(element.tag)
       && element.attributes.some((attribute) => /search|filter/i.test(`${attribute.name} ${attribute.value || ''}`))
     ));
-    const hasFilterSurface = beforeFrame.some((element) => element.classes.some((name) => ['eapp-surface-card', 'eapp-surface-muted'].includes(name)));
+    const hasFilterSurface = beforeFrame.some((element) => element.classes.some((name) => ['eapp-bordered-region', 'eapp-surface-card', 'eapp-surface-muted'].includes(name)));
     if (hasSearchOrFilterControl && !hasFilterSurface) {
-      push('warning', 'resource-list-filter-surface', 'Search or filter controls are not in a separate compact surface before the list.', 'Place controls in a compact eapp-surface-card or eapp-surface-muted block, separate from CommonResourceListFrame.');
+      push('warning', 'resource-list-filter-surface', 'Search or filter controls are not in a separate compact surface before the list.', 'Place controls in a compact eapp-bordered-region block, separate from the already framed DataTable.');
     }
   }
 
@@ -119,7 +116,7 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
       push('error', 'resource-grid-breakpoints', 'Resource grids must use the admin-shell one/two/three-column breakpoints.', 'Use one column by default, md:grid-cols-2, and xl:grid-cols-3.');
     }
     if (!allClasses.has('eapp-page-constrained-wide')) {
-      push('warning', 'resource-grid-width', 'The resource grid is not constrained for the admin shell.', 'Keep eapp-page-constrained-wide unless the workflow intentionally owns a full-bleed canvas.');
+      push('warning', 'resource-grid-width', 'The resource grid does not use the standard narrower workboard width.', 'Use eapp-page-constrained-wide for a 1200px centered workboard, or inherit the shell 80rem content cap.');
     }
   }
 

@@ -13,7 +13,12 @@ test('extension knowledge requires DataTable for information lists and describes
   assert.match(knowledge, /must use DataTable/);
   assert.match(knowledge, /paginationConfig/);
   assert.match(knowledge, /@load-more/);
-  assert.match(knowledge, /mobile-only border-top/);
+  assert.match(knowledge, /built-in DataTable footer owns its mobile-only separator/);
+  assert.match(knowledge, /raw UPagination outside DataTable keeps Nuxt UI defaults/);
+  assert.match(knowledge, /main footer stays in-flow/);
+  assert.match(knowledge, /mini keeps controls left and range right on one line/);
+  assert.match(knowledge, /paginationConfig\.floating=false/);
+  assert.match(knowledge, /table on every device, never cards/);
   assert.match(knowledge, /showColumnVisibility/);
   assert.match(knowledge, /10\/20\/50\/100/);
   assert.doesNotMatch(knowledge, /Reserve build_extension_ui kind=resource_list and CommonResourceListFrame\/Item/);

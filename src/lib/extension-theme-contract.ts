@@ -28,8 +28,8 @@ import {
 
 const THEME_CLASS_INTENTS = {
   neutral_surface: {
-    classes: 'eapp-surface-card eapp-radius-panel border eapp-divider',
-    use: 'Ordinary cards, panels, KPI containers, list containers, detail blocks, and status blocks that should stay neutral.',
+    classes: 'eapp-bordered-region',
+    use: 'One neutral border with app radius, transparent background and no elevation for standalone forms, KPI containers and framed tools; keep padding caller-owned and avoid wrapping already framed DataTable/TabbedPanel.',
   },
   muted_surface: {
     classes: 'eapp-surface-muted eapp-radius-panel',
@@ -299,15 +299,18 @@ export function getExtensionThemeContract() {
       'Then call validate_extension_code or an ensure_*_extension tool before saving.',
     ],
     layout: [
-      'The extension is already mounted inside the Enfyra app shell. Do not add a duplicate page header, centered page wrapper, or root-level page padding.',
-      'Page extensions should be full-bleed, responsive, and split large operations into focused pages or UTabs.',
+      'The native dashboard shell owns inset geometry, stationary main/header borders and the scrolling body. Page extensions inherit a centered native UContainer capped at 80rem; do not add duplicate shell/header chrome or root-level page padding.',
+      'Keep every page constrained and centered; split long operations into focused pages or TabbedPanel sections.',
       'Use usePageHeaderRegistry for the shell title and useHeaderActionRegistry/useSubHeaderActionRegistry for page actions.',
       'Register dynamic extension header actions inside onMounted after setup refs and handlers exist; build_extension_ui kind=page_shell generates this lifecycle shape.',
       'Use build_extension_ui kind=menu_notification for sidebar menu notification registration snippets.',
       'For shell menu notifications, first decide the signal source. Use a count only when the source already owns an exact count, such as a notification summary endpoint or bounded unread-notification query. Use a dot when a realtime event only proves that something new exists. Do not poll a domain list such as messages, tickets, orders, or jobs solely to decorate the menu; the destination page owns domain fetching.',
       'Use build_extension_ui kind=account_panel_item for account panel row registration snippets.',
-      'For detail/form workflows that should stay left-aligned with empty space on the right, wrap the body in eapp-page-constrained; use eapp-page-constrained-wide only when the workflow genuinely needs more width.',
-      'Card/list grids inside the default shell must account for the 280px desktop sidebar. Do not switch general card grids to three columns at lg; use md:grid-cols-2 xl:grid-cols-3 unless a local container proves three columns have enough width.',
+      'For narrower centered detail/form bodies use eapp-page-constrained (1000px) or eapp-page-constrained-wide (1200px); the shell supplies the overall 80rem cap.',
+      'Card/list grids inside the default shell must account for the 256px desktop sidebar. Use md:grid-cols-2 xl:grid-cols-3 unless a local container proves three columns have enough width.',
+      'Use one neutral border with the app radius and transparent background for a standalone form or data region. DataTable and TabbedPanel own their frame; nested content stays flat without duplicate cards or shadows.',
+      'Use TabbedPanel for top-level tabs so the tab strip sits in its muted header and shares the divider with the active indicator. Secondary tabs inside it use a flat native pill UTabs strip.',
+      'Page-form Save/Reset actions belong in the shell header for the active editable tab. Drawer/modal forms retain managed footer actions.',
     ],
     theme: [
       'Do not choose theme classes from memory. Decide the UI intent, then call build_extension_ui kind=theme_classes with that intent to receive the exact class/prop contract.',
@@ -375,10 +378,10 @@ export function getExtensionThemeContract() {
       ],
     },
     loadingAndLists: [
-      'For first load of card/list pages, render calm skeleton cards with a slow pulse. Use USkeleton or shared loading components so the app-owned skeleton theme controls contrast and accent matching. For subsequent pagination/filter refreshes, keep the card shells mounted and skeletonize card content until the new list is ready.',
-      'Keep pagination inside the same transition/loading branch as the list. Do not show pagination before the list content has left loading.',
+      'Information lists use DataTable native UTable loading: animated header progress, no default row skeletons, and no empty message until loading finishes. Bind loading for initial and subsequent requests; retain existing rows during same-dataset refreshes.',
+      'For non-tabular visual catalogs or workboards, use shared skeleton/empty components for first load and retain mounted content during refresh. Do not replace a mounted table or its footer with a separate loading branch.',
       'Use bounded pagination for operational lists. Do not replace pagination with arbitrary fixed caps such as 30 or 50.',
-      'Empty states should use an app-matched card surface with compact icon tile, title, and description; do not use huge blank white panels or naked UEmpty chrome on page surfaces.',
+      'Empty states inside an already framed table/panel stay flat; use the EmptyState runtime alias without another decorative card.',
     ],
     interaction: [
       'Every mutating button needs pending/disabled state, success/error feedback, and must close or update its modal when the operation completes.',
