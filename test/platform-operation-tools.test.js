@@ -536,10 +536,17 @@ test('extension component builders enforce drawer and modal contracts', async ()
   assert.doesNotMatch(list.snippet, /<UPagination|<USelect|max-md:!hidden|border-t/);
   const cursorList = buildExtensionResourceListSnippet({ paginationMode: 'cursor', itemsExpression: 'notes' });
   assert.match(cursorList.snippet, /mode: 'cursor'/);
-  assert.match(cursorList.snippet, /hasMore: hasMore, loadedCount: notes.length/);
-  assert.match(cursorList.snippet, /@load-more="loadMore"/);
+  assert.match(cursorList.snippet, /hasNextPage: hasNextPage/);
+  assert.match(cursorList.snippet, /:page="page"/);
+  assert.match(cursorList.snippet, /@update:page="setPage"/);
   assert.match(cursorList.snippet, /@page-size-change="setPageSize"/);
-  assert.doesNotMatch(cursorList.snippet, /v-model:page|total:|<UPagination|<USelect/);
+  assert.doesNotMatch(cursorList.snippet, /v-model:page|total:|@load-more|loadedCount|<UPagination|<USelect/);
+  const customCursorList = buildExtensionResourceListSnippet({
+    paginationMode: 'cursor', pageExpression: 'currentPage', hasNextPageExpression: 'canNext', pageChangeExpression: 'goToPage',
+  });
+  assert.match(customCursorList.snippet, /:page="currentPage"/);
+  assert.match(customCursorList.snippet, /hasNextPage: canNext/);
+  assert.match(customCursorList.snippet, /@update:page="goToPage"/);
 
   const grid = buildExtensionResourceGridSnippet({
     itemsExpression: 'notes',
