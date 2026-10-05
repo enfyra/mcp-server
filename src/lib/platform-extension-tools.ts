@@ -585,13 +585,14 @@ export function registerPlatformExtensionTools(server, ENFYRA_API_URL) {
   server.tool(
       'build_extension_tabs',
       [
-        'Generate a UTabs snippet inside the shared TabbedPanel header for Enfyra extension page sections.',
+        'Generate a Panel section snippet for Enfyra extension page sections.',
         'Use this instead of custom tab bars so app-wide tab chrome owns active indicators, focus rings, spacing, and theme contrast.',
       ].join(' '),
       {
         model: z.string().optional().default('activeTab').describe('Active tab model variable.'),
         itemsExpression: z.string().optional().default('tabs').describe('Raw Vue expression for tab items.'),
-        placement: z.enum(['header', 'secondary']).optional().default('header').describe('Header sections use TabbedPanel link tabs; secondary body navigation uses native rounded pill UTabs with theme active roles.'),
+        placement: z.enum(['header', 'secondary']).optional().default('header').describe('Header sections use Panel link tabs; secondary body navigation uses native rounded pill UTabs with theme active roles.'),
+        sectionValue: z.string().optional().default('general').describe('Value of the sample Panel section slot, for example general.'),
         content: z.boolean().optional().describe('Set false for secondary tabs when the caller owns its panels.'),
         body: z.string().optional().describe('Vue template body for #content="{ item }".'),
       },

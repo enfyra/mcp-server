@@ -14,7 +14,7 @@ test('framed legacy surfaces are rejected because shell flattening erases their 
 test('top-level tabs require the shared header while secondary and overlay tabs remain supported', () => {
   const bare = '<template><section><UTabs :items="tabs" /></section></template>';
   assert.equal(reviewExtensionUiContract(bare).issues.some(issue => issue.rule === 'tabs-panel-header'), true);
-  const owned = '<template><TabbedPanel><template #header><UTabs :items="tabs" :content="false" /></template></TabbedPanel></template>';
+  const owned = '<template><Panel :sections="tabs"><template #requests-header><UTabs :items="tabs" :content="false" /></template></Panel></template>';
   assert.equal(reviewExtensionUiContract(owned).valid, true);
   const secondary = '<template><UTabs variant="pill" data-secondary-navigation :items="tabs" /></template>';
   assert.equal(reviewExtensionUiContract(secondary).valid, true);
@@ -24,7 +24,7 @@ test('top-level tabs require the shared header while secondary and overlay tabs 
 test('table-owned frames reject redundant wrappers without rejecting tab content', () => {
   const wrapped = '<template><div class="eapp-bordered-region p-5"><DataTable :data="rows" :columns="columns" :loading="pending" /></div></template>';
   assert.equal(reviewExtensionUiContract(wrapped).issues.some(issue => issue.rule === 'duplicate-data-frame'), true);
-  const owned = '<template><TabbedPanel><template #requests><DataTable :data="rows" :columns="columns" :loading="pending" /></template></TabbedPanel></template>';
+  const owned = '<template><Panel :sections="sections"><template #requests><DataTable :data="rows" :columns="columns" :loading="pending" /></template></Panel></template>';
   assert.equal(reviewExtensionUiContract(owned).valid, true);
 });
 
@@ -37,7 +37,7 @@ test('action and field ownership distinguish page controls from managed overlays
 });
 
 test('ancestor analysis ignores fake tags and guidance explains the actual neutral boundary', () => {
-  const code = '<template><!-- <TabbedPanel> --><section><UTabs :items="tabs" /></section></template>';
+  const code = '<template><!-- <Panel> --><section><UTabs :items="tabs" /></section></template>';
   assert.deepEqual(analyzeExtensionSfc(code).elements.find(element => element.tag === 'UTabs').ancestors.map(item => item.tag), ['section']);
   assert.match(JSON.stringify(getExtensionThemeContract()), /eapp-surface-card.*flatten|flatten.*eapp-surface-card/);
   assert.doesNotMatch(JSON.stringify(getExtensionThemeContract()), /transparent background.*standalone forms/);
@@ -68,7 +68,7 @@ test('secondary tabs use native pills with theme active roles and no header unde
   assert.match(built.snippet, /:content="false"/);
   assert.doesNotMatch(built.snippet, /:ui=|style=|var\(--|data-\[state=active\]/);
   assert.match(built.contract.join(' '), /eApp owns pill chrome globally/);
-  assert.doesNotMatch(built.snippet, /TabbedPanel|border-b(?!-0)/);
+  assert.doesNotMatch(built.snippet, /<Panel|border-b(?!-0)/);
   assert.doesNotThrow(() => validateExtensionCodeLocally(`<template>${built.snippet}</template>`));
 });
 

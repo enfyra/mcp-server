@@ -70,7 +70,7 @@ ensure_page_extension({
           'Page extensions inherit the centered shell container; use eapp-page-constrained-wide only for a narrower body and keep root padding shell-owned.',
           'Render ordinary metrics and lists in the body, not PageHeader.stats, unless the user explicitly wants a compact overview header.',
           'Use app theme tokens and Nuxt UI semantic colors by intent; do not hard-code concrete palettes or redefine the app palette inside extension code.',
-          'Use app-owned primitives such as TabbedPanel, CommonModal, CommonDrawer, Widget, useMenuNotificationRegistry, and useAccountPanelRegistry when the workflow matches them.',
+          'Use app-owned primitives such as Panel, CommonModal, CommonDrawer, Widget, useMenuNotificationRegistry, and useAccountPanelRegistry when the workflow matches them.',
           'Keep list selection local and fetch detail rows only; do not refetch the whole list after a row click unless the list data changed.',
           'Page extension paths are admin app UI routes. Do not verify them with test_rest_endpoint against ENFYRA_API_URL unless inspect_route shows an API route with the same path.',
           'After saving, open Enfyra admin tabs should update through the server/Enfyra admin UI realtime reload contract; do not tell the user to refresh unless that contract is proven broken.',

@@ -28,19 +28,19 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
 
   for (const element of elements) {
     if (element.classes.includes('eapp-surface-card') && element.classes.some((name) => /^border(?:-\d+)?$/.test(name))) {
-      push('error', 'flattened-surface-frame', 'eapp-surface-card is flattened by the admin shell; adding border and padding does not create a framed region.', 'Use eapp-bordered-region with caller-owned padding for standalone filters, metrics and forms. Keep nested overlay content flat and leave DataTable/TabbedPanel frames component-owned.');
+      push('error', 'flattened-surface-frame', 'eapp-surface-card is flattened by the admin shell; adding border and padding does not create a framed region.', 'Use eapp-bordered-region with caller-owned padding for standalone filters, metrics and forms. Keep nested overlay content flat and leave DataTable/Panel frames component-owned.');
     }
     if (element.tag === 'UTabs') {
       const inOverlay = element.ancestors.some((ancestor) => overlayTags.includes(ancestor.tag));
-      const panelIndex = element.ancestors.map((ancestor) => ancestor.tag).lastIndexOf('TabbedPanel');
-      const inPanelHeader = panelIndex >= 0 && element.ancestors.slice(panelIndex + 1).some((ancestor) => ancestor.slot === 'header');
+      const panelIndex = element.ancestors.map((ancestor) => ancestor.tag).lastIndexOf('Panel');
+      const inPanelHeader = panelIndex >= 0 && element.ancestors.slice(panelIndex + 1).some((ancestor) => /-header$/.test(ancestor.slot || ''));
       const secondary = extensionElementHasAttribute(element, 'data-secondary-navigation', null)
         && extensionElementAttributeValue(element, 'variant', null) === 'pill';
       if (secondary && hasStaticOrBound(element, 'ui')) {
         push('error', 'tabs-chrome-ownership', 'Secondary tab chrome is overridden in extension source.', 'Remove the UTabs ui override. eApp owns pill colors, radius, indicator geometry and focus globally; extensions choose variant="pill" color="primary" and own only tab state/content. Fix shared chrome in eApp rather than generating per-extension styling.');
       }
       if (!inOverlay && !inPanelHeader && !secondary) {
-        push('error', 'tabs-panel-header', 'Top-level UTabs are outside the shared panel header.', 'Use TabbedPanel with items and named content slots, or put externally controlled UTabs in its #header. Mark genuine secondary navigation with variant="pill" and data-secondary-navigation.');
+        push('error', 'tabs-panel-header', 'Top-level UTabs are outside the shared panel.', 'Use Panel with sections and named content slots. A section header belongs in #value-header. Mark genuine secondary navigation with variant="pill" and data-secondary-navigation.');
       }
     }
     if (element.tag === 'DataTable' && element.ancestors.some((ancestor) => ancestor.classes.includes('eapp-bordered-region') || ancestor.tag === 'CommonResourceListFrame')) {

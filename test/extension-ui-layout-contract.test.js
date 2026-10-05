@@ -9,15 +9,15 @@ test('extension guidance follows centered native shell layout and native table l
   assert.match(guidance, /80rem/);
   assert.match(guidance, /centered/);
   assert.match(guidance, /native UTable loading/);
-  assert.match(guidance, /TabbedPanel/);
+  assert.match(guidance, /Panel/);
   assert.doesNotMatch(guidance, /full-bleed by default|stay left-aligned|280px|owns initial skeletons/);
 });
 
 test('tabs builder uses the registered shared panel without duplicating its border or tab chrome', () => {
   const built = buildExtensionUiSnippet('tabs', { model: 'selectedTab', itemsExpression: 'sections', body: '<p>{{ item.label }}</p>' });
-  assert.equal(built.component, 'TabbedPanel');
-  assert.match(built.snippet, /<TabbedPanel v-model="selectedTab" :items="sections"/);
-  assert.match(built.snippet, /<template #content="\{ item \}">/);
+  assert.equal(built.component, 'Panel');
+  assert.match(built.snippet, /<Panel v-model="selectedTab" :sections="sections"/);
+  assert.match(built.snippet, /<template #general>/);
   assert.doesNotMatch(built.snippet, /<UCard|<UTabs|border-b|rounded-/);
   assert.doesNotThrow(() => validateExtensionCodeLocally(`<template>${built.snippet}</template>`));
 });

@@ -29,7 +29,7 @@ import {
 const THEME_CLASS_INTENTS = {
   neutral_surface: {
     classes: 'eapp-bordered-region',
-    use: 'One neutral border with app radius, default content background and no elevation for standalone forms, KPI containers and framed tools; keep padding caller-owned and avoid wrapping already framed DataTable/TabbedPanel.',
+    use: 'One neutral border with app radius, default content background and no elevation for standalone forms, KPI containers and framed tools; keep padding caller-owned and avoid wrapping already framed DataTable/Panel.',
   },
   muted_surface: {
     classes: 'eapp-surface-muted eapp-radius-panel',
@@ -300,7 +300,7 @@ export function getExtensionThemeContract() {
     ],
     layout: [
       'The native dashboard shell owns inset geometry, stationary main/header borders and the scrolling body. Page extensions inherit a centered native UContainer capped at 80rem; do not add duplicate shell/header chrome or root-level page padding.',
-      'Keep every page constrained and centered; split long operations into focused pages or TabbedPanel sections.',
+      'Keep every page constrained and centered; split long operations into focused pages or Panel sections.',
       'Use usePageHeaderRegistry for the shell title and useHeaderActionRegistry/useSubHeaderActionRegistry for page actions.',
       'Register dynamic extension header actions inside onMounted after setup refs and handlers exist; build_extension_ui kind=page_shell generates this lifecycle shape.',
       'Use build_extension_ui kind=menu_notification for sidebar menu notification registration snippets.',
@@ -308,15 +308,15 @@ export function getExtensionThemeContract() {
       'Use build_extension_ui kind=account_panel_item for account panel row registration snippets.',
       'For narrower centered detail/form bodies use eapp-page-constrained (1000px) or eapp-page-constrained-wide (1200px); the shell supplies the overall 80rem cap.',
       'Card/list grids inside the default shell must account for the 256px desktop sidebar. Use md:grid-cols-2 xl:grid-cols-3 unless a local container proves three columns have enough width.',
-      'The main workspace is a quiet neutral surface in both themes; centered framed content retains bg-default. Use one neutral border with the app radius and the default content background for a standalone form or data region. DataTable and TabbedPanel own their frame; nested content stays flat without duplicate cards or shadows.',
-      'Use TabbedPanel for top-level sections: native link tabs sit in its muted header and share the divider with a theme-colored underline. Secondary navigation belongs in the content body: build_extension_ui kind=tabs input.placement=secondary returns native pill UTabs with a rounded neutral tray, a solid primary active surface and theme-owned on-primary text/icons. Use content=false only when the caller owns panels. eApp owns pill chrome globally; never add extension ui/color/radius/indicator overrides or copy header underline styles into pills.',
+      'The main workspace is a quiet neutral surface in both themes; centered framed content retains bg-default. Use one neutral border with the app radius and the default content background for a standalone form or data region. DataTable and Panel own their frame; nested content stays flat without duplicate cards or shadows.',
+      'Use Panel for top-level sections: pass sections and named slots. The topmost tab strip or section header uses the muted surface and shares the divider with a theme-colored underline. Secondary navigation belongs in the content body: build_extension_ui kind=tabs input.placement=secondary returns native pill UTabs with a rounded neutral tray, a solid primary active surface and theme-owned on-primary text/icons. eApp owns pill chrome globally; never add extension ui/color/radius/indicator overrides or copy header underline styles into pills.',
       'Page-form Save/Reset actions belong in the shell header for the active editable tab. Drawer/modal forms retain managed footer actions.',
     ],
     theme: [
       'Do not choose theme classes from memory. Decide the UI intent, then call build_extension_ui kind=theme_classes with that intent to receive the exact class/prop contract.',
       'Call build_extension_ui kind=theme_review or kind=review before saving extension UI; validate_extension_code and extension write tools also reject hard theme violations.',
       'Never fix one extension by injecting global CSS, redefining the app palette, or adding theme guards.',
-      'eapp-surface-card is a flat semantic wrapper inside the admin shell: CSS flattens its border, background and horizontal padding. Do not combine it with border/radius utilities to build filters, metrics or forms. Use neutral_surface (eapp-bordered-region) for a real standalone frame; DataTable and TabbedPanel already own theirs.',
+      'eapp-surface-card is a flat semantic wrapper inside the admin shell: CSS flattens its border, background and horizontal padding. Do not combine it with border/radius utilities to build filters, metrics or forms. Use neutral_surface (eapp-bordered-region) for a real standalone frame; DataTable and Panel already own theirs.',
       'Use get_theme_class_reference only when debugging theme internals or when the user explicitly asks for the full theme/class map.',
     ],
     themeIntents: [

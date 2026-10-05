@@ -8,7 +8,7 @@ const AUTO_INJECTED_EXTENSION_COMPONENT_TAGS = [
   'FormEditorLazy',
   'NuxtLink',
   'PermissionGate',
-  'TabbedPanel',
+  'Panel',
   'UBadge',
   'UButton',
   'UCheckbox',
@@ -471,7 +471,7 @@ export function buildExtensionFormEditorSnippet(input) {
       'Use v-model for record state and v-model:errors for validation errors.',
       'Use includes/sections to keep generated forms focused; do not expose compiledCode or unrelated system fields.',
       'Use fieldMap only for behavior/renderer overrides such as code fields or custom labels.',
-      'Centered standalone page forms use one neutral border with the app radius and the default content background against the neutral workspace. Use eapp-form-region for a custom page form; inside TabbedPanel, drawers and modals keep forms flat rather than nesting another card.',
+      'Centered standalone page forms use one neutral border with the app radius and the default content background against the neutral workspace. Use eapp-form-region for a custom page form; inside Panel, drawers and modals keep forms flat rather than nesting another card.',
       'Register page-form Save/Reset in useHeaderActionRegistry for the active tab; drawer/modal forms use their managed footer actions.',
     ],
   };
@@ -560,6 +560,7 @@ export function buildExtensionAccountPanelSnippet(input) {
 export function buildExtensionTabsSnippet(input) {
   const model = input.model || 'activeTab';
   const items = input.itemsExpression || 'tabs';
+  const sectionValue = String(input.sectionValue || 'general').replace(/[^A-Za-z0-9_-]/g, '') || 'general';
   const body = input.body || '<div>{{ item.label }}</div>';
   if (input.placement === 'secondary') {
     const snippet = [
@@ -580,22 +581,22 @@ export function buildExtensionTabsSnippet(input) {
     };
   }
   const snippet = [
-    `<TabbedPanel v-model="${model}" :items="${items}" class="w-full">`,
-    '  <template #content="{ item }">',
+    `<Panel v-model="${model}" :sections="${items}" class="w-full">`,
+    `  <template #${sectionValue}>`,
     indentLines(normalizeVueBodySnippet(body).code, 4),
     '  </template>',
-    '</TabbedPanel>',
+    '</Panel>',
   ].join('\n');
   return {
     action: 'extension_tabs_built',
-    component: 'TabbedPanel',
+    component: 'Panel',
     snippet,
     contract: [
-      'TabbedPanel is the registered app-owned wrapper around native UTabs with one neutral frame and a muted header containing the tab strip.',
-      'The panel owns gutters, the divider aligned with the active indicator, and the app radius; do not copy tab CSS or add another card/border around its content.',
-      'Keep tab items data-driven and render panel content through #content.',
-      'Hidden tab panels stay mounted by default to preserve drafts. Bind the selected tab to the URL query in the caller when navigation state must survive reloads.',
-      'For secondary navigation in the content body, call this builder with placement=secondary. It generates native pill UTabs with a neutral rounded tray, a solid theme-primary active surface and on-primary text/icons instead of another framed TabbedPanel.',
+      'Panel is the registered framed content region. Pass sections as an array; a section with label or icon joins the tab strip, and one unlabeled section hides it.',
+      'The topmost tab strip or section header uses the muted surface and divider. A header below tabs stays on the content surface. Use #value-header for that section and #footer for the shared footer.',
+      'Render each section through its named slot, for example #general. Do not use one shared #content slot or a shared header for every tab.',
+      'Hidden sections stay mounted by default to preserve drafts. Bind the selected section to the URL query in the caller when navigation state must survive reloads.',
+      'For secondary navigation in the content body, call this builder with placement=secondary. It generates native pill UTabs with a neutral rounded tray, a solid theme-primary active surface and on-primary text/icons instead of another framed Panel.',
     ],
   };
 }
