@@ -8,6 +8,15 @@ import {
   reviewDynamicEndpointContract,
 } from '../dist/lib/dynamic-endpoint-contract.js';
 
+test('lock-only reads stay read operations and require target transaction verification', () => {
+  const review=reviewDynamicEndpointContract({routeKind:'custom',method:'POST',sourceCode:'return await @TRANSACTION.run(async()=>{const result=await #secure.accounts.findLocked({id:@PARAMS.id,fields:["id"]});return result.data[0];})'});
+  assert.equal(review.signals.usesMutation,false);
+  assert.deepEqual(extractExplicitRepositoryTableNames('return await #secure.accounts.findLocked({id:@PARAMS.id})'),['accounts']);
+  assert.match(review.verification.join(' '),/findLocked.*deployed.*outer transaction/i);
+  const ignored=reviewDynamicEndpointContract({routeKind:'custom',method:'GET',sourceCode:'const example="repo.findLocked()"; return {ok:true}'});
+  assert.doesNotMatch(ignored.verification.join(' '),/findLocked/);
+});
+
 test('low-level create_handler cannot bypass canonical route boundaries', () => {
   assert.doesNotThrow(() => assertCreateHandlerRouteBoundary(
     { path: '/integrations/orders', mainTable: null },

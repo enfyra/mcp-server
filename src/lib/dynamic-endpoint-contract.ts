@@ -210,6 +210,7 @@ export function reviewDynamicEndpointContract(input: DynamicEndpointReviewInput)
   const trustedTables = unique(matches(TRUSTED_EXPLICIT_PATTERN, executableSource));
   const usesRawBody = RAW_BODY_PATTERN.test(executableSource);
   const usesMutation = MUTATION_PATTERN.test(executableSource);
+  const usesLockedRead = /\.findLocked\s*\(/u.test(executableSource);
   const returnsRepositoryDataDirectly = DIRECT_REPOSITORY_DATA_RETURN_PATTERN.test(executableSource);
   const errors: DynamicEndpointReviewFinding[] = [];
   const warnings: DynamicEndpointReviewFinding[] = [];
@@ -273,6 +274,7 @@ export function reviewDynamicEndpointContract(input: DynamicEndpointReviewInput)
   ));
   const verification = [
     'Smoke-test the saved route through test_rest_endpoint.',
+    ...(usesLockedRead ? ['Verify findLocked on the deployed PostgreSQL/MySQL runtime and keep dependent reads/writes inside the same explicit outer transaction; lock-only reads are not mutations and do not order post-commit publication.'] : []),
     ...(usesMutation ? ['Test an invalid business payload because custom handlers do not inherit canonical body validation.'] : []),
     ...(trustedTables.length > 0 ? ['Verify the response contains only explicitly shaped public fields.'] : []),
     ...(usesMutation && hasNonUpdatableDomainFields ? ['Re-inspect live metadata after E2E setup. Do not change isUpdatable merely to seed fixtures or let this custom action write a server-owned field.'] : []),

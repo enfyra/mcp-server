@@ -3,6 +3,16 @@ import assert from 'node:assert/strict';
 
 import { buildDynamicScriptContextTypeContract } from '../dist/lib/dynamic-script-context-contract.js';
 
+test('lock-only repository contract separates deployed support from read guarantees', () => {
+  const contract=buildDynamicScriptContextTypeContract();
+  assert.match(contract.repositories.declaration,/findLocked\(options: LockedReadOptions\): Promise<CollectionResult>/);
+  assert.match(contract.repositories.declaration,/type LockedReadOptions = \{ id: Id; fields\?: string \| string\[\]; deep\?:/);
+  assert.match(contract.repositories.availability.findLocked,/deployed/i);
+  assert.match(contract.repositories.lockedReadGuarantee,/explicit outer transaction/i);
+  assert.match(contract.repositories.lockedReadGuarantee,/MongoDB and SQLite.*rejected/i);
+  assert.match(contract.repositories.lockedReadGuarantee,/no write.*mutation event/i);
+});
+
 test('dynamic script context contract exposes trusted script-visible runtime types', () => {
   const contract = buildDynamicScriptContextTypeContract();
   const text = JSON.stringify(contract);

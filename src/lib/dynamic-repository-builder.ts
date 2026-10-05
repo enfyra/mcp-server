@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { jsonContent } from './response-format.js';
-import type { DynamicRepositoryUsageInput } from '../types/dynamic-repository-builder.types.js';
+import type { DynamicRepositoryUsageInput, DynamicRepositoryRuntimeRequirements } from '../types/dynamic-repository-builder.types.js';
 
 const IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
@@ -44,6 +44,7 @@ export function buildDynamicRepositoryUsage(input: DynamicRepositoryUsageInput) 
   const idField = requireIdentifier(input.idField || 'id', 'idField');
   const idExpression = input.idSource === 'body' ? '@BODY.id' : '@PARAMS.id';
   let code: string;
+  let runtimeRequirements: DynamicRepositoryRuntimeRequirements | undefined;
 
   if (input.operation === 'list') {
     const fieldNormalization = input.access === 'trusted_explicit'
@@ -82,6 +83,22 @@ return result`;
 const record = result.data?.[0] ?? null
 if (!record) @THROW404("Record not found")
 return record`;
+  } else if (input.operation === 'find_locked') {
+    if (idField !== 'id') throw new Error('find_locked requires a PostgreSQL/MySQL primary-key id. MongoDB lock-only reads are unsupported.');
+    runtimeRequirements = {
+      databases: ['postgres', 'mysql'],
+      requiresOuterTransaction: true,
+      verification: 'Verify findLocked through a non-saving test on the deployed Server/Kernel before using this generated source. Keep dependent repository work inside the same outer transaction callback.',
+    };
+    code = `return await @TRANSACTION.run(async () => {
+  const result = await ${repository}.findLocked({
+    id: ${idExpression},
+    fields: ${fields}
+  })
+  const record = result.data?.[0] ?? null
+  if (!record) @THROW404("Record not found")
+  return record
+})`;
   } else if (input.operation === 'create') {
     code = `const result = await ${repository}.create({
   data: @BODY,
@@ -142,9 +159,11 @@ if (!Array.isArray(ids) || ids.length === 0) @THROW400("ids must be a non-empty 
 
 const result = await ${repository}.deleteMany({ ids })
 return { ok: true, count: result.count }`;
-  } else {
+  } else if (input.operation === 'delete') {
     code = `await ${repository}.delete({ id: ${idExpression} })
 return { ok: true, id: ${idExpression} }`;
+  } else {
+    throw new Error('Unsupported repository operation');
   }
 
   const fieldPermissionsEnforced = input.access !== 'trusted_explicit';
@@ -159,12 +178,14 @@ return { ok: true, id: ${idExpression} }`;
       ? 'Field permissions are enforced by the selected secure repository. Owner, tenant, membership, and route authorization remain separate checks.'
       : 'This trusted repository bypasses field permissions. Use it only for intentional internal work, request exact fields, enforce authorization explicitly, and never return raw trusted rows.',
     typeOrmPartialBody,
+    ...(runtimeRequirements ? { runtimeRequirements } : {}),
     adaptationRecipes: {
       serverOwnedField: 'When the live metadata identifies a server-owned field, adapt the mutation to data: { ...@BODY, <server_owned_field>: @USER.id } so caller input cannot override it.',
       scopedMutation: 'For endpoint-specific owner/tenant policy, load the target with both id and the owner/tenant filter before update/delete, then perform the repository mutation.',
       nonUpdatableServerAction: 'Do not change canonical metadata isUpdatable merely so a custom action can write a server-owned field. Prove row scope with a secure lookup, then use a trusted explicit repository for an exact server-controlled write with no raw @BODY and return a shaped response.',
       customValidation: 'Custom handlers do not inherit canonical column-rule/Zod body middleware. Validate extra business semantics in the handler when required.',
       lockedUpdate: 'updateLocked({ id, fields?, data: current => patch }) takes one object with the same keys as update. data is a callback returning the partial record; fields selects the response. PostgreSQL/MySQL lock the root row; Mongo requires native transactions and may rerun the data callback on conflict. Only plain generic tables are supported. Keep callbacks free of external side effects and repository calls. Set literals and computed values together in the returned patch. Existing outer transactions own commit and Mongo retry. Secure callbacks only receive readable fields. Owner/tenant checks that depend on current state belong inside the data callback.',
+      lockedRead: 'findLocked({ id, fields?, deep? }) requires an explicit outer @TRANSACTION.run on PostgreSQL/MySQL. It performs an authorized read with no write or mutation event, retaining the root row lock until outer commit/rollback. Put owner/tenant checks and all dependent repository reads/writes inside that outer callback. A persisted identity can coordinate bootstrap before a balance exists. Related rows, absent rows and post-commit cache/socket publication are separate boundaries; every competing writer must participate. Do not acquire locks by dummy updates. MongoDB/SQLite lock-only reads are unsupported. Verify deployed runtime support before use.',
     },
     code,
     next: 'Adapt only live field, filter, owner/tenant, and domain error details; keep the repository access class, await, result.data shape, and bounded query contract.',
@@ -175,12 +196,12 @@ export function registerDynamicRepositoryBuilder(server: any) {
   server.tool(
     'build_dynamic_repository_usage',
     [
-      'Generate validated Enfyra dynamic repository code for list, find-one, single or batch create/update/delete, and protected updateLocked.',
+      'Generate validated Enfyra dynamic repository code for list, find-one, findLocked inside an outer transaction, single or batch create/update/delete, and protected updateLocked.',
       'Use secure_main for a canonical route main table, secure_explicit for user-facing explicit-table access, and trusted_explicit only for intentional internal field-permission bypass.',
     ].join(' '),
     {
       access: z.enum(['secure_main', 'secure_explicit', 'trusted_explicit']).describe('Repository security class. Prefer secure_main or secure_explicit for user-facing code.'),
-      operation: z.enum(['list', 'find_one', 'create', 'create_many', 'update', 'update_locked', 'update_many', 'delete', 'delete_many']).describe('Repository operation. update_locked generates a guarded decrement callback and requires counterField.'),
+      operation: z.enum(['list', 'find_one', 'find_locked', 'create', 'create_many', 'update', 'update_locked', 'update_many', 'delete', 'delete_many']).describe('Repository operation. find_locked requires deployed PostgreSQL/MySQL support and generates an outer transaction. update_locked generates a guarded decrement callback and requires counterField.'),
       counterField: z.string().optional().describe('Exact readable/updatable numeric field from live metadata; required for update_locked.'),
       tableName: z.string().optional().describe('Required for explicit access. Omit for secure_main when the route main table is already known.'),
       fields: z.array(z.string()).optional().describe('Exact metadata-backed fields to select or return. Defaults to id.'),

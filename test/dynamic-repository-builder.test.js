@@ -3,6 +3,37 @@ import assert from 'node:assert/strict';
 
 import { buildDynamicRepositoryUsage } from '../dist/lib/dynamic-repository-builder.js';
 
+test('locked reads run inside an outer transaction without mutation scaffolding', async () => {
+  const result = buildDynamicRepositoryUsage({access:'secure_explicit',operation:'find_locked',tableName:'accounts',fields:['id','credit']});
+  assert.match(result.code, /@TRANSACTION\.run/);
+  assert.match(result.code, /#secure\.accounts\.findLocked\(/);
+  assert.doesNotMatch(result.code, /\.update(?:Locked)?\(|@CACHE|@QUERY/);
+  assert.equal(result.typeOrmPartialBody,false);
+  assert.deepEqual(result.runtimeRequirements.databases,['postgres','mysql']);
+  assert.equal(result.runtimeRequirements.requiresOuterTransaction,true);
+  assert.match(result.runtimeRequirements.verification,/deployed/i);
+  let active=false;
+  const code=result.code.replaceAll('@TRANSACTION','$ctx.$transaction').replaceAll('#secure.accounts','$ctx.$repos.secure.accounts').replaceAll('@PARAMS','$ctx.$params').replaceAll('@THROW404','$ctx.$throw404');
+  const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;
+  const row=await new AsyncFunction('$ctx',code)({$params:{id:7},$transaction:{run:async work=>{active=true;try{return await work();}finally{active=false;}}},$repos:{secure:{accounts:{findLocked:async options=>{assert.equal(active,true);assert.deepEqual(options,{id:7,fields:['id','credit']});return {data:[{id:7,credit:100}]};}}}},$throw404:message=>{throw new Error(message);}});
+  assert.deepEqual(row,{id:7,credit:100});
+  assert.equal(active,false);
+});
+
+test('locked read builder preserves main/trusted access and rejects Mongo primary-key syntax', () => {
+  const main=buildDynamicRepositoryUsage({access:'secure_main',operation:'find_locked'});
+  const trusted=buildDynamicRepositoryUsage({access:'trusted_explicit',operation:'find_locked',tableName:'accounts',idSource:'body'});
+  assert.match(main.code, /@REPOS\.main\.findLocked/);
+  assert.match(trusted.code, /#accounts\.findLocked/);
+  assert.match(trusted.code, /id: @BODY\.id/);
+  assert.equal(trusted.fieldPermissionsEnforced,false);
+  assert.throws(()=>buildDynamicRepositoryUsage({access:'secure_explicit',operation:'find_locked',tableName:'accounts',idField:'_id'}),/PostgreSQL\/MySQL/);
+});
+
+test('unsupported operations never generate delete code', () => {
+  assert.throws(()=>buildDynamicRepositoryUsage({access:'secure_explicit',operation:'unknown',tableName:'accounts'}),/Unsupported repository operation/);
+});
+
 test('builds protected credit updates with computation inside the callback', () => {
   const result = buildDynamicRepositoryUsage({ access: 'secure_explicit', operation: 'update_locked', tableName: 'accounts', counterField: 'credit', fields: ['id', 'credit'] });
   assert.match(result.code, /#secure\.accounts\.updateLocked\(/);
