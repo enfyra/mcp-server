@@ -3,6 +3,18 @@ import assert from 'node:assert/strict';
 
 import { buildDynamicRepositoryUsage } from '../dist/lib/dynamic-repository-builder.js';
 
+test('builds protected credit updates with computation inside the callback', () => {
+  const result = buildDynamicRepositoryUsage({ access: 'secure_explicit', operation: 'update_locked', tableName: 'accounts', counterField: 'credit', fields: ['id', 'credit'] });
+  assert.match(result.code, /#secure\.accounts\.updateLocked\(/);
+  assert.match(result.code, /data: \(current\) =>/);
+  assert.match(result.code, /return \{ credit: current\.credit - amount \}/);
+  assert.match(result.code, /fields: \["id", "credit"\]/);
+  assert.doesNotMatch(result.code, /\}, \(current\) =>/);
+  assert.match(result.code, /current\.credit < amount/);
+  assert.match(result.adaptationRecipes.lockedUpdate, /native transactions/);
+  assert.throws(() => buildDynamicRepositoryUsage({ access: 'secure_explicit', operation: 'update_locked', tableName: 'accounts' }), /counterField/);
+});
+
 test('dynamic repository builder defaults explicit user-facing access to secure repositories', () => {
   const result = buildDynamicRepositoryUsage({
     access: 'secure_explicit',

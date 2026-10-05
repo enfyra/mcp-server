@@ -11,7 +11,7 @@ const SECURE_EXPLICIT_PATTERN = new RegExp(`(?:#secure\\.|@REPOS\\.secure\\.|\\$
 const TRUSTED_EXPLICIT_PATTERN = new RegExp(`(?:#(?!secure\\.)|@REPOS\\.(?!main\\b|secure\\b)|\\$ctx\\.\\$repos\\.(?!main\\b|secure\\b))(${IDENTIFIER})\\s*\\.`, 'g');
 const MAIN_REPOSITORY_PATTERN = /(?:@REPOS|\$ctx\.\$repos)\.main\s*\./u;
 const RAW_BODY_PATTERN = /\bdata\s*:\s*@BODY\b|\.\.\.\s*@BODY\b/u;
-const MUTATION_PATTERN = /\.(?:create|createMany|update|updateMany|delete|deleteMany)\s*\(/u;
+const MUTATION_PATTERN = /\.(?:create|createMany|update|updateLocked|updateMany|delete|deleteMany)\s*\(/u;
 const DIRECT_REPOSITORY_DATA_RETURN_PATTERN = /\breturn\s+[^;\n]*(?:\.data\b|\.data\?\.\[|\.data\s*\[)/u;
 
 function maskNonExecutable(sourceCode: string) {
