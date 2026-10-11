@@ -1,39 +1,4 @@
-type IdLike = string | number | boolean | null | undefined;
-
-type RefRecord = {
-  id?: IdLike;
-  _id?: IdLike;
-  name?: unknown;
-  email?: unknown;
-  path?: unknown;
-  [key: string]: unknown;
-};
-
-type MethodIdNameMap = Record<string, string>;
-
-type RouteRecord = RefRecord & {
-  availableMethods?: unknown[];
-  publicMethods?: unknown[];
-  skipRoleGuardMethods?: unknown[];
-  isEnabled?: unknown;
-};
-
-type RoutePermissionRecord = RefRecord & {
-  isEnabled?: unknown;
-  description?: unknown;
-  route?: unknown;
-  role?: RefRecord | IdLike;
-  allowedUsers?: unknown[];
-  methods?: unknown[];
-};
-
-type RouteAccessExpected = {
-  methods?: unknown[];
-  roleId?: IdLike;
-  roleName?: string;
-  roleRequired?: boolean;
-  allowedUserIds?: unknown[];
-};
+import type { IdLike, RefRecord, MethodIdNameMap, RouteRecord, RoutePermissionRecord, RouteAccessExpected } from '../types/route-permission.types.js';
 
 export function normalizeMethodName(method: unknown) {
   return String(method || '').trim().toUpperCase();
@@ -84,15 +49,15 @@ export function methodNamesFromRecords(methods: unknown[] = [], methodIdNameMap:
 }
 
 export function routeAvailableMethodNames(route: RouteRecord | null | undefined, methodIdNameMap: MethodIdNameMap = {}) {
-  return methodNamesFromRecords(route?.availableMethods || [], methodIdNameMap);
+  return normalizeMethodNames((route?.methodConfigs || []).filter((config) => config.available === true).flatMap((config) => methodNamesFromRecords([config.method], methodIdNameMap)));
 }
 
 export function routePublicMethodNames(route: RouteRecord | null | undefined, methodIdNameMap: MethodIdNameMap = {}) {
-  return methodNamesFromRecords(route?.publicMethods || [], methodIdNameMap);
+  return normalizeMethodNames((route?.methodConfigs || []).filter((config) => config.available === true && config.isPublic === true).flatMap((config) => methodNamesFromRecords([config.method], methodIdNameMap)));
 }
 
 export function permissionMethodNames(permission: RoutePermissionRecord | null | undefined, methodIdNameMap: MethodIdNameMap = {}) {
-  return methodNamesFromRecords(permission?.methods || [], methodIdNameMap);
+  return normalizeMethodNames((permission?.routeMethodConfigs || []).filter((config) => config.available === true).flatMap((config) => methodNamesFromRecords([config.method], methodIdNameMap)));
 }
 
 export function validateMethodsForRoute(route: RouteRecord | null | undefined, methods: unknown[] = [], methodMap: MethodIdNameMap = {}, methodIdNameMap: MethodIdNameMap = {}) {
@@ -104,18 +69,16 @@ export function validateMethodsForRoute(route: RouteRecord | null | undefined, m
   }
 
   const availableMethods = routeAvailableMethodNames(route, methodIdNameMap);
-  if (availableMethods.length) {
-    const unavailable = normalizedMethods.filter((method) => !availableMethods.includes(method));
-    if (unavailable.length) {
-      throw new Error(`Route ${route?.path} does not list methods as available: ${unavailable.join(', ')}. Available: ${availableMethods.join(', ')}`);
-    }
+  const unavailable = normalizedMethods.filter((method) => !availableMethods.includes(method));
+  if (unavailable.length) {
+    throw new Error(`Route ${route?.path} does not list methods as available: ${unavailable.join(', ')}. Available: ${availableMethods.join(', ')}`);
   }
 
   return normalizedMethods;
 }
 
 export function sortedIdStrings(values: unknown[] = []) {
-  return [...new Set((values || []).map((value) => String(getReferenceId(value))).filter(Boolean))].sort();
+  return [...new Set((values || []).map(getReferenceId).filter((id) => id != null).map(String))].sort();
 }
 
 export function sameIdSet(a: unknown[] = [], b: unknown[] = []) {
@@ -193,7 +156,7 @@ export function summarizeRouteAccess(route: RouteRecord, routePermissions: Route
     isEnabled: route?.isEnabled !== false,
     availableMethods: routeAvailableMethodNames(route, methodIdNameMap),
     publicMethods: routePublicMethodNames(route, methodIdNameMap),
-    skipRoleGuardMethods: methodNamesFromRecords(route?.skipRoleGuardMethods || [], methodIdNameMap),
+    skipRoleGuardMethods: normalizeMethodNames((route?.methodConfigs || []).filter((config) => config.available === true && config.skipRoleGuard === true).flatMap((config) => methodNamesFromRecords([config.method], methodIdNameMap))),
     permissions,
     expected: expectedMethods.length ? {
       methods: expectedMethods,

@@ -8,7 +8,6 @@ const SCRIPT_TABLES = new Set([
   'enfyra_websocket_event',
   'enfyra_websocket',
   'enfyra_oauth_config',
-  'enfyra_bootstrap_script',
 ]);
 
 const CODE_ALIAS_FORBIDDEN_TABLES = new Set([
@@ -19,7 +18,6 @@ const CODE_ALIAS_FORBIDDEN_TABLES = new Set([
   'enfyra_websocket_event',
   'enfyra_websocket',
   'enfyra_oauth_config',
-  'enfyra_bootstrap_script',
 ]);
 
 const FORBIDDEN_RELATION_DEFINITION_KEYS = new Set([
@@ -157,11 +155,6 @@ const DOMAIN_OWNED_RECORD_MUTATIONS: Record<string, Partial<Record<'create' | 'u
     create: 'setup_oauth_provider',
     update: 'setup_oauth_provider',
     delete: 'physical removal is not exposed',
-  },
-  enfyra_bootstrap_script: {
-    create: 'not exposed — bootstrap scripts are platform-owned',
-    update: 'patch_script_source / update_script_source for source edits',
-    delete: 'not exposed — bootstrap scripts are platform-owned',
   },
   enfyra_user: {
     create: 'not exposed — inspect enfyra_user schema first',

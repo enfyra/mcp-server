@@ -59,7 +59,7 @@ export function assertExtensionReadFields(tableName: string, fields?: string[]) 
   if (!requestsSourceCode) return;
   throw new Error([
     'enfyra_extension stores editable Vue SFC extension source in `code`, not `sourceCode`.',
-    '`sourceCode` belongs to dynamic server script records such as handlers, hooks, flow steps, websocket handlers, the OAuth lifecycle, and bootstrap scripts.',
+    '`sourceCode` belongs to dynamic server script records such as handlers, hooks, flow steps, websocket handlers, the OAuth lifecycle.',
     'For admin UI lookup, use search_admin_extensions(mode="search") then search_admin_extensions(mode="inspect").',
     'For focused extension edits, use patch_extension_code or update_extension_code.',
     'If you intentionally read raw extension records, request fields such as ["id","name","type","version","code"].',
@@ -114,7 +114,7 @@ export const CAPABILITY_AREAS = [
   },
   {
     area: 'Extensions, menus, packages',
-    tables: ['enfyra_extension', 'enfyra_menu', 'enfyra_package', 'enfyra_bootstrap_script'],
+    tables: ['enfyra_extension', 'enfyra_menu', 'enfyra_package'],
     workflow: 'Extensions are Vue SFC records. Use install_package for enfyra_package rather than raw CRUD.',
   },
   {
@@ -255,7 +255,6 @@ export const SCRIPT_BACKED_TABLES = [
   'enfyra_websocket_event',
   'enfyra_websocket',
   'enfyra_oauth_config',
-  'enfyra_bootstrap_script',
 ] as const;
 
 export const SCRIPT_BACKED_TABLE_SET = new Set(SCRIPT_BACKED_TABLES);

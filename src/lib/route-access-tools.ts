@@ -6,7 +6,6 @@ import { z } from 'zod';
 // Import modules
 import {
   fetchAll,
-  firstDataRecord,
   getId,
   getMethodIdNameMap,
   getMethodMap,
@@ -15,7 +14,7 @@ import {
   resolveMethodIds,
   sameId
 } from './enfyra-tool-logic.js';
-import { fetchAPI } from './fetch.js';
+import { routePermissionFields, saveRoutePermission } from './route-access-operations.js';
 import {
   assertGlobalRulesAck,
   globalRulesAckParam
@@ -23,12 +22,13 @@ import {
 import {
   findRoutePermission,
   mergeMethodNames,
+  methodNamesFromRecords,
+  permissionMethodNames,
   normalizeMethodNames,
   resolveRoleByNameOrId,
   routeAvailableMethodNames,
   routePublicMethodNames,
   summarizeRouteAccess,
-  summarizeRoutePermission,
   validateMethodsForRoute,
 } from './route-permission-tools.js';
 
@@ -56,8 +56,8 @@ export function registerRouteAccessTools(server, ENFYRA_API_URL) {
         if (roleId && roleName) throw new Error('Provide roleId or roleName, not both.');
     
         const [routes, routePermissions, roles, methodIdNameMap] = await Promise.all([
-          fetchAll('/enfyra_route?limit=1000'),
-          fetchAll('/enfyra_route_permission?limit=1000'),
+          fetchAll('/enfyra_route?limit=1000&fields=id,path,isEnabled,methodConfigs.id,methodConfigs.method.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,methodConfigs.skipRoleGuard'),
+          fetchAll(`/enfyra_route_permission?limit=1000&fields=${routePermissionFields}`),
           fetchAll('/enfyra_role?limit=1000'),
           getMethodIdNameMap(),
         ]);
@@ -76,7 +76,7 @@ export function registerRouteAccessTools(server, ENFYRA_API_URL) {
         const payload = {
           guidance: {
             publicAccess: 'publicMethods bypass RoleGuard and do not require enfyra_route_permission.',
-            authenticatedAccess: 'For non-public methods, Enfyra admin UI PermissionGate and backend RoleGuard both expect enabled enfyra_route_permission rows with matching route + HTTP method.',
+            authenticatedAccess: 'For non-public methods, Enfyra admin UI PermissionGate and backend RoleGuard both require enabled permissions bound to the exact available routeMethodConfigs; legacy route + methods alone do not grant backend access.',
             directUserAccess: 'allowedRoutePermissions on /me represent direct user-scoped route permissions; role.routePermissions represent role-scoped permissions.',
           },
           expectedScope: {
@@ -101,7 +101,7 @@ export function registerRouteAccessTools(server, ENFYRA_API_URL) {
       'ensure_route_access',
       [
         'Create or update authenticated route access for one role/user scope.',
-        'Use this instead of raw enfyra_route_permission CRUD when fixing 403s. It resolves roleName/route/method ids, validates route.availableMethods, merges existing permission methods by default, and reloads routes.',
+        'Use this instead of raw enfyra_route_permission CRUD when fixing 403s. It resolves roleName/route/method ids, validates available method configurations, merges existing permission bindings by default, and verifies saved routeMethodConfigs plus inverse method permissions before reloading routes.',
       ].join(' '),
       {
         path: z.string().optional().describe('Route path, e.g. /orders'),
@@ -120,13 +120,14 @@ export function registerRouteAccessTools(server, ENFYRA_API_URL) {
         if (!path && !routeId) throw new Error('Provide path or routeId.');
         if (path && routeId) throw new Error('Provide path or routeId, not both.');
         if (roleId && roleName) throw new Error('Provide roleId or roleName, not both.');
+        if (!methods.length) throw new Error('Provide at least one HTTP method.');
         if (!roleId && !roleName && (!allowedUserIds || allowedUserIds.length === 0)) {
           throw new Error('Provide roleId, roleName, or allowedUserIds.');
         }
     
         const [routes, routePermissions, roles, methodMap, methodIdNameMap] = await Promise.all([
-          fetchAll('/enfyra_route?limit=1000'),
-          fetchAll('/enfyra_route_permission?limit=1000'),
+          fetchAll('/enfyra_route?limit=1000&fields=id,path,isEnabled,methodConfigs.id,methodConfigs.method.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,methodConfigs.skipRoleGuard'),
+          fetchAll(`/enfyra_route_permission?limit=1000&fields=${routePermissionFields}`),
           fetchAll('/enfyra_role?limit=1000'),
           getMethodMap(),
           getMethodIdNameMap(),
@@ -143,43 +144,24 @@ export function registerRouteAccessTools(server, ENFYRA_API_URL) {
         };
         const requestedMethods = validateMethodsForRoute(route, methods, methodMap, methodIdNameMap);
         const existing = findRoutePermission(routePermissions, getId(route), scope);
-        const existingMethods = existing ? summarizeRoutePermission(existing, methodIdNameMap).methods : [];
+        const existingMethods = existing ? mergeMethodNames(permissionMethodNames(existing, methodIdNameMap), methodNamesFromRecords(existing.methods || [], methodIdNameMap)) : [];
         const finalMethods = mergeMethodNames(existingMethods, requestedMethods, mode);
         const methodRefs = resolveMethodIds(methodMap, finalMethods);
         const publicMethods = routePublicMethodNames(route, methodIdNameMap);
         const alreadyPublic = requestedMethods.filter((method) => publicMethods.includes(method));
     
-        let result;
-        let action;
-        if (existing) {
-          action = 'updated';
-          const patchBody = {
-            isEnabled,
-            methods: methodRefs,
-            ...(description !== undefined ? { description } : {}),
-          };
-          result = await fetchAPI(ENFYRA_API_URL, `/enfyra_route_permission/${encodeURIComponent(String(getId(existing)))}`, {
-            method: 'PATCH',
-            body: JSON.stringify(patchBody),
-          });
-        } else {
-          action = 'created';
-          const createBody = {
-            isEnabled,
-            description,
-            route: { id: getId(route) },
-            methods: methodRefs,
-            ...(scope.roleId ? { role: { id: scope.roleId } } : {}),
-            ...(scope.allowedUserIds.length ? { allowedUsers: scope.allowedUserIds.map((id) => ({ id })) } : {}),
-          };
-          result = await fetchAPI(ENFYRA_API_URL, '/enfyra_route_permission', {
-            method: 'POST',
-            body: JSON.stringify(createBody),
-          });
-        }
-    
+        const { result, saved, routeMethodConfigs, verified } = await saveRoutePermission(ENFYRA_API_URL, {
+          routeId: getId(route),
+          permissionId: getId(existing),
+          methods: finalMethods,
+          methodRefs,
+          methodIdNameMap,
+          scope,
+          isEnabled,
+          description,
+        });
+        const action = existing ? 'updated' : 'created';
         const routeReload = await reloadRoutesResult();
-        const saved = firstDataRecord(result);
         const payload = {
           action,
           kind: 'route_access',
@@ -196,6 +178,8 @@ export function registerRouteAccessTools(server, ENFYRA_API_URL) {
           permission: {
             id: getId(saved) || getId(existing),
             methods: finalMethods,
+            routeMethodConfigs,
+            verified,
             alreadyPublic,
             isEnabled,
           },

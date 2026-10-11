@@ -1105,6 +1105,10 @@ test('route permission helpers resolve role names and validate available methods
     id: 10,
     path: '/cloud_projects',
     availableMethods: [{ id: 1 }, { id: 2 }],
+    methodConfigs: [
+      { id: 101, method: { id: 1 }, available: true },
+      { id: 102, method: { id: 2 }, available: true },
+    ],
   };
   const methodMap = { GET: 1, POST: 2, PATCH: 3 };
   const methodIdNameMap = { 1: 'GET', 2: 'POST', 3: 'PATCH' };
@@ -1124,6 +1128,10 @@ test('route permission helpers match scopes and merge methods predictably', () =
     role: { id: 2, name: 'user' },
     allowedUsers: [],
     methods: [{ id: 1 }, { id: 2 }],
+    routeMethodConfigs: [
+      { id: 101, route: { id: 10 }, method: { id: 1 }, available: true },
+      { id: 102, route: { id: 10 }, method: { id: 2 }, available: true },
+    ],
     isEnabled: true,
   };
   const methodIdNameMap = { 1: 'GET', 2: 'POST', 3: 'PATCH' };
@@ -1135,7 +1143,7 @@ test('route permission helpers match scopes and merge methods predictably', () =
   assert.deepEqual(mergeMethodNames(['GET'], ['POST'], 'replace'), ['POST']);
 
   const access = summarizeRouteAccess(
-    { id: 10, path: '/cloud_projects', availableMethods: [{ id: 1 }, { id: 2 }] },
+    { id: 10, path: '/cloud_projects', methodConfigs: permission.routeMethodConfigs },
     [permission],
     methodIdNameMap,
     { roleId: 2, methods: ['GET', 'PATCH'] }
@@ -1148,7 +1156,7 @@ test('route permission helpers match scopes and merge methods predictably', () =
     allowedUsers: [{ id: 5 }],
   };
   const roleWideAccess = summarizeRouteAccess(
-    { id: 10, path: '/cloud_projects', availableMethods: [{ id: 1 }] },
+    { id: 10, path: '/cloud_projects', methodConfigs: permission.routeMethodConfigs.slice(0, 1) },
     [narrowedPermission],
     methodIdNameMap,
     { roleId: 2, allowedUserIds: [], methods: ['GET'] }

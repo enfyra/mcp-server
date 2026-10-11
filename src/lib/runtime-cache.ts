@@ -1,3 +1,6 @@
+import type { RuntimeCacheDomain } from '../types/runtime-cache.types.js';
+export type { RuntimeCacheDomain } from '../types/runtime-cache.types.js';
+
 type CacheEntry = {
   domain: RuntimeCacheDomain;
   value: unknown;
@@ -51,29 +54,10 @@ const PATH_DOMAIN_PREFIXES: Array<[string, RuntimeCacheDomain]> = [
   ['/enfyra_flow_step', 'flow'],
   ['/enfyra_flow', 'flow'],
   ['/enfyra_folder', 'folder'],
-  ['/enfyra_bootstrap_script', 'bootstrap'],
   ['/enfyra_menu', 'menu'],
   ['/enfyra_extension', 'extension'],
   ['/enfyra_graphql', 'graphql'],
 ];
-
-export type RuntimeCacheDomain =
-  | 'metadata'
-  | 'route'
-  | 'guard'
-  | 'fieldPermission'
-  | 'column-rule'
-  | 'setting'
-  | 'storage'
-  | 'oauth'
-  | 'websocket'
-  | 'package'
-  | 'flow'
-  | 'folder'
-  | 'bootstrap'
-  | 'menu'
-  | 'extension'
-  | 'graphql';
 
 const ALL_RUNTIME_CACHE_DOMAINS = [...new Set(PATH_DOMAIN_PREFIXES.map(([, domain]) => domain))];
 const domainGenerations = new Map<RuntimeCacheDomain, number>();
@@ -243,7 +227,6 @@ export function runtimeCacheDomainsForReloadSteps(steps: string[]): RuntimeCache
     if (step === 'package') domains.add('package');
     if (step === 'flow') domains.add('flow');
     if (step === 'folder') domains.add('folder');
-    if (step === 'bootstrap') domains.add('bootstrap');
   }
   return [...domains];
 }
@@ -264,7 +247,6 @@ export function runtimeCacheDomainsForMutationPath(path: string) {
     package: ['package'],
     flow: ['flow'],
     folder: ['folder'],
-    bootstrap: ['bootstrap'],
     menu: ['menu', 'extension'],
     extension: ['extension'],
     graphql: ['graphql'],

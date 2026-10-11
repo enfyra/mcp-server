@@ -522,7 +522,7 @@ export async function findRouteMethodConfig(apiUrl, routeId, methodId) {
     route: { id: { _eq: routeId } },
     method: { id: { _eq: methodId } },
   }));
-  const result = await fetchAPI(apiUrl, `/enfyra_route_method_config?filter=${filter}&limit=1&fields=id,_id,route.id,method.id,timeout,available,isPublic,skipRoleGuard`);
+  const result = await fetchAPI(apiUrl, `/enfyra_route_method_config?filter=${filter}&limit=1&fields=id,_id,route.id,method.id,timeout,available,isPublic,skipRoleGuard,routePermissions.id`);
   return unwrapData(result)[0] || null;
 }
 

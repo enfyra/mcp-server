@@ -151,7 +151,6 @@ export function scriptTraceFields(tableName) {
     enfyra_websocket_event: `${common},gateway.id,gateway.path`,
     enfyra_websocket: `${common},path`,
     enfyra_oauth_config: `${common},provider,redirectUri,appCallbackUrl,autoSetCookies,isEnabled`,
-    enfyra_bootstrap_script: common,
   };
   return byTable[tableName] || '*';
 }

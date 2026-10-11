@@ -155,6 +155,7 @@ const GLOBAL_RULES_SECTIONS = [
       'Visible UI with an expected backend 403 is a low-risk UX/API boundary and may remain intentional; it must be reported as visible_server_denied, not treated as a permission grant.',
       'Anonymous server authority over sensitive or secret data is critical even when the UI is visible. Use assess_permission_exposure and require explicit review for high/critical findings.',
       'For every permission workflow, record the assessed severity and verification evidence in the final result. Never report a UI-only hide as secured.',
+      'Authenticated REST access is owned by available enfyra_route_method_config records and their routePermissions. Use ensure_route_access or api_endpoint_workflow to bind permission.routeMethodConfigs and verify both saved scope/state and inverse method attachment; legacy permission.route plus methods is not runtime authority. Root-admin smoke bypasses RBAC and cannot verify ordinary Member access.',
     ],
   },
   {
@@ -314,8 +315,8 @@ const DYNAMIC_CODE_SECTIONS = [
       'Keep one responsibility per hook. When a pre-hook or post-hook grows across unrelated concerns, create separate named hooks with explicit method scopes and priorities, then test their order, pre-hook short-circuit behavior, and post-hook error behavior independently. Do not move handler-owned business logic into hooks solely to shorten the handler.',
       'For flows, prefer multiple named flow steps with one business operation per step. Use fixed query/create/update/delete/http/sleep/trigger/log steps when their static contract is sufficient, and keep each script or condition step focused on the dynamic behavior that fixed steps cannot express. Preserve one transaction boundary when operations truly must be atomic.',
       'For websocket code, keep the gateway source focused on connection lifecycle, authentication, and room/setup concerns. Put each event contract in its own websocket event record, and move durable, retryable, or scheduled side effects into a flow instead of growing the connection or event script.',
-      'Keep OAuth lifecycle and bootstrap scripts focused on their own lifecycle contract. Use local helper functions for cohesive transformations, and split independent work into supported records or flows only when runtime ordering and atomicity remain explicit; do not invent static imports or unsupported shared modules.',
-      'After decomposition, inspect and verify every saved handler, hook, flow step, websocket record, OAuth source, or bootstrap source at its own runtime boundary. A passing test for one unit does not prove the ordering or failure behavior of the composed workflow.',
+      'Keep OAuth lifecycle scripts focused on their own lifecycle contract. Use local helper functions for cohesive transformations, and split independent work into supported records or flows only when runtime ordering and atomicity remain explicit; do not invent static imports or unsupported shared modules.',
+      'After decomposition, inspect and verify every saved handler, hook, flow step, websocket record, or OAuth source at its own runtime boundary. A passing test for one unit does not prove the ordering or failure behavior of the composed workflow.',
     ],
   },
   {
@@ -489,7 +490,7 @@ const EXTENSION_SECTIONS = [
 const SCOPED_PURPOSES: Record<KnowledgeScope, string> = {
   full: 'Read this before mutating Enfyra metadata, schema, routes, permissions, menus, packages, cache state, dynamic server code, or extension UI through MCP.',
   schema: 'Read this before mutating Enfyra metadata, schema, table data, routes, permissions, guards, or cache state through MCP.',
-  'dynamic-code': 'Read this before writing or mutating dynamic server code (handlers, hooks, flow steps, websocket events, OAuth lifecycle scripts, bootstrap scripts) through MCP.',
+  'dynamic-code': 'Read this before writing or mutating dynamic server code (handlers, hooks, flow steps, websocket events, OAuth lifecycle scripts) through MCP.',
   extension: 'Read this before writing or mutating Enfyra admin extension UI, menus, or shell registrations through MCP.',
   flow: 'Read this before creating or mutating Enfyra flows and flow steps through MCP.',
 };

@@ -1,0 +1,16 @@
+export type RuntimeCacheDomain =
+  | 'metadata'
+  | 'route'
+  | 'guard'
+  | 'fieldPermission'
+  | 'column-rule'
+  | 'setting'
+  | 'storage'
+  | 'oauth'
+  | 'websocket'
+  | 'package'
+  | 'flow'
+  | 'folder'
+  | 'menu'
+  | 'extension'
+  | 'graphql';

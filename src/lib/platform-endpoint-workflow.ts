@@ -5,6 +5,8 @@ import {
   reviewDynamicEndpointContract,
 } from './dynamic-endpoint-contract.js';
 import { fetchAPI } from './fetch.js';
+import { routePermissionFields, saveRoutePermission } from './route-access-operations.js';
+import { permissionMethodNames, mergeMethodNames } from './route-permission-tools.js';
 import { fetchTableMetadata } from './metadata-client.js';
 import { validateScriptSourceIfPresent } from './mutation-guards.js';
 import {
@@ -148,7 +150,7 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
     } else {
       const permissions = await fetchRecords(apiUrl, 'enfyra_route_permission', {
         route: { id: { _eq: routeId } },
-      }, 'id,_id,route.id,role.id,role.name,allowedUsers.id,methods.*', 1000);
+      }, routePermissionFields, 1000);
       role = await resolveRole(apiUrl, { roleId: opts.roleId, roleName: opts.roleName });
       const allowedUserIds = (opts.allowedUserIds || []).map(String).sort();
       permission = permissions.find((candidate) => {
@@ -159,8 +161,10 @@ async function resolveApiEndpointWorkflowState(apiUrl, opts) {
         return allowedUserIds.length === candidateUserIds.length
           && allowedUserIds.every((value, index) => value === candidateUserIds[index]);
       }) || null;
-      permissionMethods = methodNamesFromRecords(permission?.methods || [], methodIdNameMap);
-      permissionMissingMethods = permissionMethods.includes(methodName) ? [] : [methodName];
+      permissionMethods = permission?.isEnabled === true ? permissionMethodNames(permission, methodIdNameMap) : [];
+      permissionMissingMethods = permissionMethods.includes(methodName)
+        && (permission?.routeMethodConfigs || []).some((config) => String(getId(config)) === String(getId(methodConfig)))
+        && (methodConfig?.routePermissions || []).some((candidate) => String(refId(candidate)) === String(getId(permission))) ? [] : [methodName];
     }
   }
 
@@ -343,30 +347,21 @@ async function applyApiEndpointWorkflowStep(apiUrl, state, opts, stepId) {
     assertOneScope(opts);
     const role = state.role || await resolveRole(apiUrl, { roleId: opts.roleId, roleName: opts.roleName });
     const existing = state.steps.find((item) => item.id === 'ensure_route_access')?.permissionId
-      ? await findRecord(apiUrl, 'enfyra_route_permission', { id: { _eq: state.steps.find((item) => item.id === 'ensure_route_access').permissionId } }, 'id,_id,methods.*')
+      ? await findRecord(apiUrl, 'enfyra_route_permission', { id: { _eq: state.steps.find((item) => item.id === 'ensure_route_access').permissionId } }, routePermissionFields)
       : null;
-    const existingMethods = methodNamesFromRecords(existing?.methods || [], state.methodIdNameMap);
+    const existingMethods = mergeMethodNames(permissionMethodNames(existing, state.methodIdNameMap), methodNamesFromRecords(existing?.methods || [], state.methodIdNameMap));
     const finalMethods = uniqueMethodNames([...existingMethods, endpoint.method]);
-    const body = {
+    const verification = await saveRoutePermission(apiUrl, {
+      routeId: endpoint.routeId,
+      permissionId: getId(existing),
+      methods: finalMethods,
+      methodRefs: resolveMethodRefs(state.methodMap, finalMethods),
+      methodIdNameMap: state.methodIdNameMap,
+      scope: { roleId: role?.id, allowedUserIds: opts.allowedUserIds || [] },
       isEnabled: true,
       description: opts.routePermissionDescription,
-      methods: resolveMethodRefs(state.methodMap, finalMethods),
-      ...(role ? { role: { id: role.id } } : {}),
-      ...(opts.allowedUserIds?.length ? { allowedUsers: opts.allowedUserIds.map((id) => ({ id })) } : {}),
-    };
-    const result = existing
-      ? await fetchAPI(apiUrl, `/enfyra_route_permission/${encodeURIComponent(String(getId(existing)))}`, {
-        method: 'PATCH',
-        body: JSON.stringify(body),
-      })
-      : await fetchAPI(apiUrl, '/enfyra_route_permission', {
-        method: 'POST',
-        body: JSON.stringify({
-          route: { id: endpoint.routeId },
-          ...body,
-        }),
-      });
-    return { action: existing ? 'route_access_updated' : 'route_access_created', result, routeReload: await reloadRoutes(apiUrl) };
+    });
+    return { action: existing ? 'route_access_updated' : 'route_access_created', ...verification, routeReload: await reloadRoutes(apiUrl) };
   }
 
   if (selectedStep.id === 'smoke_test') {
