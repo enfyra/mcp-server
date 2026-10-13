@@ -78,8 +78,8 @@ export const CAPABILITY_AREAS = [
     workflow: 'Use table tools for table/column/relation schema changes. enfyra_column and enfyra_session are internal/no-route; do not CRUD them directly.',
   },
   {
-    area: 'Dynamic REST API',
-    tables: ['enfyra_route', 'enfyra_route_handler', 'enfyra_pre_hook', 'enfyra_post_hook', 'enfyra_route_permission', 'enfyra_method'],
+    area: 'Dynamic REST API and shared helpers',
+    tables: ['enfyra_helper', 'enfyra_route', 'enfyra_route_handler', 'enfyra_pre_hook', 'enfyra_post_hook', 'enfyra_route_permission', 'enfyra_method'],
     workflow: 'Create custom paths with create_route without mainTableId, then add handlers/hooks. mainTableId is only for canonical table routes like /table_name. Query enfyra_method before assigning route methods.',
   },
   {
@@ -255,6 +255,7 @@ export const SCRIPT_BACKED_TABLES = [
   'enfyra_websocket_event',
   'enfyra_websocket',
   'enfyra_oauth_config',
+  'enfyra_helper',
 ] as const;
 
 export const SCRIPT_BACKED_TABLE_SET = new Set(SCRIPT_BACKED_TABLES);

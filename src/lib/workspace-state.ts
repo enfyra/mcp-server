@@ -4,7 +4,7 @@ import { readWorkspaceFile, safeWorkspacePath, sourceHash, writeWorkspaceFile } 
 import { writeSourceArtifact } from './source-artifacts.js';
 import type { WorkspaceArtifact, WorkspaceArtifactRef, WorkspaceDependencies, WorkspaceManifest, WorkspaceObservation, WorkspacePaths, WorkspaceRemoteSource, WorkspaceSourceStatus } from './workspace-types.js';
 
-export const WORKSPACE_TABLES = ['enfyra_route_handler', 'enfyra_pre_hook', 'enfyra_post_hook', 'enfyra_flow_step', 'enfyra_websocket_event', 'enfyra_websocket', 'enfyra_oauth_config', 'enfyra_extension'] as const;
+export const WORKSPACE_TABLES = ['enfyra_route_handler', 'enfyra_pre_hook', 'enfyra_post_hook', 'enfyra_flow_step', 'enfyra_websocket_event', 'enfyra_websocket', 'enfyra_oauth_config', 'enfyra_helper', 'enfyra_extension'] as const;
 export const workspaceArtifactSchema = z.object({ tableName: z.enum(WORKSPACE_TABLES), id: z.string().min(1).max(200), path: z.string().optional() }).strict();
 const savedArtifactSchema = workspaceArtifactSchema.extend({ key: z.string(), path: z.string(), sourceField: z.string(), language: z.string(), baseline: z.string() });
 const manifestSchema = z.object({ target: z.string(), artifacts: z.array(savedArtifactSchema).max(500) }).strict();

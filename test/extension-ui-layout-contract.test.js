@@ -6,11 +6,13 @@ import { buildExtensionUiSnippet, reviewExtensionUiContract, validateExtensionCo
 
 test('extension guidance follows centered native shell layout and native table loading', () => {
   const guidance = JSON.stringify([buildRequiredKnowledgePayload('extension'), getExtensionThemeContract()]);
-  assert.match(guidance, /80rem/);
+  assert.match(guidance, /75rem/);
+  assert.match(guidance, /initial skeletons/);
+  assert.doesNotMatch(guidance, /80rem|1000px|without default row skeletons|Settings tables explicitly opt out/);
   assert.match(guidance, /centered/);
   assert.match(guidance, /native UTable loading/);
   assert.match(guidance, /Panel/);
-  assert.doesNotMatch(guidance, /full-bleed by default|stay left-aligned|280px|owns initial skeletons/);
+  assert.doesNotMatch(guidance, /full-bleed by default|stay left-aligned|280px/);
 });
 
 test('tabs builder uses the registered shared panel without duplicating its border or tab chrome', () => {
@@ -25,7 +27,7 @@ test('tabs builder uses the registered shared panel without duplicating its bord
 test('information-list guidance uses the shared footer and all request states', () => {
   const built = buildExtensionUiSnippet('resource_list', {});
   assert.match(JSON.stringify(built.contract), /native UTable loading/);
-  assert.doesNotMatch(JSON.stringify(built.contract), /first-load skeletons/);
+  assert.match(JSON.stringify(built.contract), /initial skeletons/);
   const review = reviewExtensionUiContract('<template><UTable :data="records" /></template>', { pattern: 'resource_list' });
   assert.match(JSON.stringify(review.issues), /paginationConfig/);
   assert.doesNotMatch(JSON.stringify(review.issues), /inside #footer/);

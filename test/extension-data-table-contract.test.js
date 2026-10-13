@@ -12,7 +12,7 @@ test('extension knowledge requires DataTable for information lists and describes
   const knowledge = JSON.stringify(buildRequiredKnowledgePayload('extension'));
   assert.match(knowledge, /must use DataTable/);
   assert.match(knowledge, /paginationConfig/);
-  assert.match(knowledge, /@load-more/);
+  assert.match(knowledge, /load-more.*not supported/);
   assert.match(knowledge, /built-in DataTable footer owns its mobile-only separator/);
   assert.match(knowledge, /raw UPagination outside DataTable keeps Nuxt UI defaults/);
   assert.match(knowledge, /main footer stays in-flow/);
@@ -46,14 +46,25 @@ test('resource_list builder generates DataTable with server pagination inside it
   assert.doesNotThrow(() => validateExtensionCodeLocally(asExtension(result.snippet), { uiPattern: 'resource_list' }));
 });
 
-test('resource_list cursor mode keeps page size and emits only Load more pagination actions', () => {
-  const result = buildExtensionUiSnippet('resource_list', { paginationMode: 'cursor', itemsExpression: 'orders', hasMoreExpression: 'canLoadMore', loadMoreExpression: 'fetchNext', pageSizeChangeExpression: 'resetCursorSize' });
+test('resource_list cursor mode keeps page size and commits requested pages through the owner', () => {
+  const result = buildExtensionUiSnippet('resource_list', { paginationMode: 'cursor', itemsExpression: 'orders', hasNextPageExpression: 'canGoNext', pageChangeExpression: 'fetchPage', pageSizeChangeExpression: 'resetCursorSize' });
   assert.match(result.snippet, /mode: 'cursor'/);
-  assert.match(result.snippet, /hasMore: canLoadMore/);
-  assert.match(result.snippet, /@load-more="fetchNext"/);
+  assert.match(result.snippet, /hasNextPage: canGoNext/);
+  assert.match(result.snippet, /:page="page"/);
+  assert.match(result.snippet, /@update:page="fetchPage"/);
+  assert.doesNotMatch(result.snippet, /@load-more|loadedCount|hasMore/);
   assert.match(result.snippet, /@page-size-change="resetCursorSize"/);
   assert.doesNotMatch(result.snippet, /v-model:page|<UPagination|<USelect/);
   assert.equal(reviewExtensionUiContract(asExtension(result.snippet), { pattern: 'resource_list' }).valid, true);
+});
+
+test('resource_list binds optional dataset heading and an exact known count without duplicate badge markup', () => {
+  const result = buildExtensionUiSnippet('resource_list', { headerName: 'Orders', showRecordCount: true, recordCountExpression: 'filteredCount' });
+  assert.match(result.snippet, /header-name="Orders"/);
+  assert.match(result.snippet, /:show-record-count="true"/);
+  assert.match(result.snippet, /:record-count="filteredCount"/);
+  assert.doesNotMatch(result.snippet, /<UBadge/);
+  assert.doesNotThrow(() => validateExtensionCodeLocally(asExtension(result.snippet), { uiPattern: 'resource_list' }));
 });
 
 test('resource_list rejects record rows even when they use the shared non-tabular frame', () => {

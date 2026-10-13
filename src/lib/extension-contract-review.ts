@@ -145,7 +145,7 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
       push('error', 'resource-grid-breakpoints', 'Resource grids must use the admin-shell one/two/three-column breakpoints.', 'Use one column by default, md:grid-cols-2, and xl:grid-cols-3.');
     }
     if (!allClasses.has('eapp-page-constrained-wide')) {
-      push('warning', 'resource-grid-width', 'The resource grid does not use the standard narrower workboard width.', 'Use eapp-page-constrained-wide for a 1200px centered workboard, or inherit the shell 80rem content cap.');
+      push('warning', 'resource-grid-width', 'The resource grid does not use the standard narrower workboard width.', 'Use eapp-page-constrained-wide for a 1200px centered workboard, or inherit the shared shell 75rem (1200px) content cap.');
     }
   }
 

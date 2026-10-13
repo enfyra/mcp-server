@@ -23,6 +23,7 @@ export type ZoneTable = {
 
 export const ZONE_TABLES: Record<Exclude<RuntimeZone, 'admin_ui' | 'schema_data'>, ZoneTable[]> = {
   api_runtime: [
+    { tableName: 'enfyra_helper', fields: 'id,_id,name,description,isEnabled,scriptLanguage,sourceCode', sourceFields: ['sourceCode'], labelFields: ['name', 'description'] },
     { tableName: 'enfyra_route', fields: 'id,_id,path,description,isEnabled,mainTable.name,methodConfigs.id,methodConfigs.method.name,methodConfigs.available,methodConfigs.isPublic,methodConfigs.timeout', labelFields: ['path', 'description'], pathFields: ['path'] },
     { tableName: 'enfyra_route_method_config', fields: 'id,_id,route.id,route.path,method.name,available,isPublic,skipRoleGuard,timeout,requestBodyType,description', labelFields: ['route.path', 'method.name'], pathFields: ['route.path'] },
     { tableName: 'enfyra_route_handler', fields: 'id,_id,name,key,sourceCode,scriptLanguage,route.id,route.path,method.name', sourceFields: ['sourceCode'], labelFields: ['name', 'key', 'route.path', 'method.name'], pathFields: ['route.path'] },

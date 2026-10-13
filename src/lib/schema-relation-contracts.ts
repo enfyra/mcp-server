@@ -322,15 +322,22 @@ export function normalizeColumnOptionsValue(options: unknown) {
   return [...new Set(parsed.map((option) => option.trim()).filter(Boolean))];
 }
 
-export function getSupportedColumnTypes(): string[] {
-  return [...ENFYRA_COLUMN_TYPES];
+const mongoColumnTypeMap: Record<string, string> = {
+  varchar: 'string', text: 'string', longtext: 'string', boolean: 'bool',
+  ObjectId: 'objectId', bigint: 'long', datetime: 'date', timestamp: 'date',
+  'simple-json': 'json', float: 'double',
+};
+
+export function getSupportedColumnTypes(dbType?: string | null): string[] {
+  if (dbType === 'mongodb') return [...new Set(ENFYRA_COLUMN_TYPES.map(type => mongoColumnTypeMap[type] ?? type)), 'object', 'array'];
+  return ENFYRA_COLUMN_TYPES.filter(type => dbType === 'mysql' || type !== 'longtext');
 }
 
 function chooseFirstSupported(supported: Set<string>, candidates: string[]) {
   return candidates.find((candidate) => supported.has(candidate));
 }
 
-export function normalizeColumnTypeForLiveMetadata(type: unknown, supportedTypes: string[] = [...ENFYRA_COLUMN_TYPES]) {
+export function normalizeColumnTypeForLiveMetadata(type: unknown, supportedTypes: string[] = getSupportedColumnTypes()) {
   const raw = String(type ?? '').trim();
   if (!raw) {
     throw new Error(`Column type is required. Valid Enfyra types: ${supportedTypes.join(', ')}.`);
@@ -339,21 +346,23 @@ export function normalizeColumnTypeForLiveMetadata(type: unknown, supportedTypes
   if (supported.has(raw)) return { type: raw, changed: false, originalType: raw };
 
   const normalized = raw.toLowerCase();
+  const mongoType = mongoColumnTypeMap[raw];
+  if (mongoType && supported.has(mongoType)) return { type: mongoType, changed: true, originalType: raw };
   const alias =
     normalized === 'string' || normalized === 'char' || normalized === 'character varying'
-      ? chooseFirstSupported(supported, ['varchar', 'text'])
+      ? chooseFirstSupported(supported, ['string', 'varchar', 'text'])
       : normalized === 'integer'
         ? chooseFirstSupported(supported, ['int', 'bigint', 'float'])
         : normalized === 'bool'
-          ? chooseFirstSupported(supported, ['boolean'])
+          ? chooseFirstSupported(supported, ['boolean', 'bool'])
           : ['decimal', 'numeric', 'number', 'double', 'money', 'currency'].includes(normalized)
-            ? chooseFirstSupported(supported, ['decimal', 'float'])
+            ? chooseFirstSupported(supported, ['decimal', 'float', 'double'])
             : ['longtext', 'mediumtext', 'large-text'].includes(normalized)
-              ? chooseFirstSupported(supported, ['text', 'richtext', 'varchar'])
+              ? chooseFirstSupported(supported, ['text', 'string', 'richtext', 'varchar'])
               : ['json', 'jsonb', 'object', 'array'].includes(normalized)
-                ? chooseFirstSupported(supported, ['simple-json', 'text'])
+                ? chooseFirstSupported(supported, ['simple-json', 'json', 'text'])
                 : ['date-time', 'timestamptz'].includes(normalized)
-                  ? chooseFirstSupported(supported, ['datetime', 'timestamp'])
+                  ? chooseFirstSupported(supported, ['datetime', 'timestamp', 'date'])
                   : null;
 
   if (!alias) {

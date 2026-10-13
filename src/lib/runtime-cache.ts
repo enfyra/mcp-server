@@ -34,6 +34,7 @@ const PATH_DOMAIN_PREFIXES: Array<[string, RuntimeCacheDomain]> = [
   ['/metadata', 'metadata'],
   ['/enfyra_table', 'metadata'],
   ['/enfyra_relation', 'metadata'],
+  ['/enfyra_helper', 'helper'],
   ['/enfyra_route_handler', 'route'],
   ['/enfyra_pre_hook', 'route'],
   ['/enfyra_post_hook', 'route'],
@@ -218,6 +219,7 @@ export function runtimeCacheDomainsForReloadSteps(steps: string[]): RuntimeCache
     }
     if (step === 'storage' || step === 'storage_config' || step === 'enfyra_storage_config') domains.add('storage');
     if (step === 'graphql') domains.add('graphql');
+    if (step === 'helper') domains.add('helper');
     if (step === 'guard') domains.add('guard');
     if (step === 'fieldPermission') domains.add('fieldPermission');
     if (step === 'column-rule') domains.add('column-rule');
@@ -237,6 +239,7 @@ export function runtimeCacheDomainsForMutationPath(path: string) {
   const stepsByDomain: Record<RuntimeCacheDomain, string[]> = {
     metadata: ['metadata', 'route', 'graphql', 'fieldPermission', 'column-rule'],
     route: ['route'],
+    helper: ['helper'],
     guard: ['guard'],
     fieldPermission: ['fieldPermission', 'graphql'],
     'column-rule': ['column-rule'],

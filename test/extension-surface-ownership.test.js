@@ -53,9 +53,10 @@ test('search toolbar has one bounded native control group and does not duplicate
   const built = buildExtensionUiSnippet('resource_list', { searchExpression: 'email', searchSubmitExpression: 'searchMembers', searchPlaceholder: 'Search by email', searchLabel: 'Member email' });
   assert.match(built.snippet, /<template #toolbar>/);
   assert.match(built.snippet, /@submit.prevent="searchMembers"/);
-  assert.match(built.snippet, /<UFieldGroup class="w-full">/);
+  assert.match(built.snippet, /eapp-search-field min-w-0 w-full md:max-w-sm md:flex-1/);
+  assert.match(built.snippet, /<UFieldGroup class="w-full"/);
   assert.match(built.snippet, /<UInput[^>]*size="sm"/);
-  assert.match(built.snippet, /:ui="\{ base: 'h-7 py-1' \}"/);
+  assert.match(built.snippet, /h-8 !rounded-s-\[var\(--radius-control\)\] !rounded-e-none/);
   assert.match(built.snippet, /<UButton[^>]*size="sm"/);
   assert.doesNotMatch(built.snippet, /<h[1-3]|Choose visible columns|>Columns</);
   assert.doesNotThrow(() => validateExtensionCodeLocally(`<template>${built.snippet}</template>`));

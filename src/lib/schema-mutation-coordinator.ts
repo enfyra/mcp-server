@@ -50,6 +50,7 @@ export const ENFYRA_COLUMN_TYPES = [
   'int',
   'varchar',
   'text',
+  'longtext',
   'boolean',
   'uuid',
   'ObjectId',
@@ -86,14 +87,14 @@ export const AUTO_MANAGED_COLUMN_NAMES = new Set(['id', '_id', 'createdAt', 'upd
 
 export function buildPrimaryColumnForDbType(dbType: string | null | undefined): ColumnPatch {
   return dbType === 'mongodb'
-    ? { name: '_id', type: 'ObjectId', isPrimary: true, isGenerated: true, isNullable: false }
+    ? { name: '_id', type: 'objectId', isPrimary: true, isGenerated: true, isNullable: false }
     : { name: 'id', type: 'int', isPrimary: true, isGenerated: true, isNullable: false };
 }
 
 export const COLUMN_TYPE_ALIAS_HINTS = [
   'Use varchar for short strings; text or richtext for long prose.',
   'Use float for prices, money, percentages, ratings, and decimal-like numbers unless the live instance explicitly lists decimal.',
-  'Use simple-json for structured objects/arrays when the live instance lists it; do not use json/jsonb as column types.',
+  'Use simple-json on SQL or json/object/array on MongoDB when the live database lists them; jsonb is not an Enfyra type.',
   'Use relations for links to other records; do not create userId/course_id/categoryIds columns for normalized relationships.',
 ];
 

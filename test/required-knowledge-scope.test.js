@@ -153,7 +153,7 @@ test('dynamic code knowledge defines hook layer responsibilities', () => {
 test('dynamic code knowledge requires awaiting helper bridge calls', () => {
   const payload = buildRequiredKnowledgePayload('dynamic-code');
   const section = payload.dynamicServerCode.find(rule => rule.id === 'dynamic-script-shape');
-  assert.match(section.rules.join('\n'), /Every @HELPERS method call crosses the async executor bridge and must be awaited/);
+  assert.match(section.rules.join('\n'), /Built-in @HELPERS methods cross the async executor bridge.*named run.*task-local.*All must be awaited/);
 });
 
 test('dynamic code knowledge distinguishes buffered fetch from streaming response', () => {

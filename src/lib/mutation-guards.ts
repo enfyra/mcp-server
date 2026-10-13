@@ -8,6 +8,7 @@ const SCRIPT_TABLES = new Set([
   'enfyra_websocket_event',
   'enfyra_websocket',
   'enfyra_oauth_config',
+  'enfyra_helper',
 ]);
 
 const CODE_ALIAS_FORBIDDEN_TABLES = new Set([
@@ -18,6 +19,7 @@ const CODE_ALIAS_FORBIDDEN_TABLES = new Set([
   'enfyra_websocket_event',
   'enfyra_websocket',
   'enfyra_oauth_config',
+  'enfyra_helper',
 ]);
 
 const FORBIDDEN_RELATION_DEFINITION_KEYS = new Set([

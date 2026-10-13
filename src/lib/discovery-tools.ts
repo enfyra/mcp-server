@@ -510,15 +510,22 @@ export function registerDiscoveryTools(server, ENFYRA_API_URL) {
           },
           throws: 'Public source retains @THROW400/@THROW401/@THROW403/@THROW404/@THROW409/@THROW422/@THROW429/@THROW500/@THROW503 as quick fixed-status helpers. Each requires exactly one message and ESV compiles it to @THROW.http(theFixedStatusCode, message). Use @THROW.http(statusCode, message?) for a generic error with a dynamic status. Use @THROW.json(body, { statusCode, headers }) for custom error fields; body and body.error must be objects. ESV writes root success=false and root statusCode equal to the HTTP status, removes error.statusCode, and merges server-owned timestamp, pathname-only path, method, and correlationId into error. Status defaults to 500 and must be 400-599. There is no .error, semantic throw method, details argument, or raw numeric property call in authored source. Use terminal return await @RES.json(body, { statusCode, headers }) only for complete custom success responses; it accepts statuses 200-399.',
           helpers: {
-            core: '$ctx.$helpers includes $bcrypt.hash/compare, autoSlug(text), $fetch, $sleep(ms) capped by the runtime, and $crypto. HTTP and GraphQL contexts also expose $jwt through $ctx.$helpers. Every helper method crosses the async executor bridge: await its result before property access, interpolation, concatenation, or persistence.',
+            named: 'await @HELPERS.run(name, params) invokes an enabled enfyra_helper in the same task/realm with explicit @PARAMS, fresh empty data and null user. Caller host-owned repository authority, transaction and deadline remain. No route lifecycle replay or separate hostile-code sandbox. Verify deployed metadata/support first; author through generic record CRUD and hash-guarded source tools.',
+            core: '$ctx.$helpers includes $bcrypt.hash/compare, autoSlug(text), $fetch, $sleep(ms) capped by the runtime, and $crypto. HTTP and GraphQL contexts also expose $jwt through $ctx.$helpers. Built-in helper methods cross the async executor bridge; the named runner is task-local and async. Await their results before property access, interpolation, concatenation, or persistence.',
             fetch: '@FETCH maps to $ctx.$helpers.$fetch for outbound HTTP calls from server scripts. Keep secrets in encrypted fields instead of embedding them in sourceCode.',
             crypto: '$ctx.$helpers.$crypto exposes bounded runtime crypto helpers: randomUUID(), randomBytes(size, encoding), sha256(value, encoding), hmacSha256(value, secret, encoding), and generateSshKeyPair(comment). Await every call, including helpers whose host implementation is synchronous, for example const id = await @HELPERS.$crypto.randomUUID(). Use generateSshKeyPair for SSH key material. Do not use legacy $ctx.$helpers.$ssh.',
             files: '$ctx.$storage.$upload and $ctx.$storage.$update accept file: @UPLOADED_FILE for request uploads and stream from the server temp file path. $ctx.$storage.$registerFile creates a enfyra_file record for an object that already exists in storage without uploading bytes. Use buffer only for small generated/transformed files; do not use @UPLOADED_FILE.buffer.',
           },
-          env: '$ctx.$env exposes a sanitized process env snapshot with exact sensitive keys removed: DB_URI, DB_REPLICA_URIS, REDIS_URI, SECRET_KEY, and ADMIN_PASSWORD. Store app secrets in unpublished isEncrypted fields instead of reading them from $env.',
+          env: '$ctx.$env exposes a sanitized process env snapshot with exact sensitive keys removed: DB_URI, DB_REPLICA_URIS, REDIS_URI, REDIS_PASSWORD, SECRET_KEY, and ADMIN_PASSWORD. Store app secrets in unpublished isEncrypted fields instead of reading them from $env.',
         },
         runtimeTypes: buildDynamicScriptContextTypeContract(),
         contexts: {
+          sharedHelper: {
+            runs: 'Explicit await @HELPERS.run(name, params) using enabled activated enfyra_helper source in the existing task.',
+            data: ['@PARAMS explicit params', '@BODY/@QUERY/@SHARE/@ENV fresh empty objects', '@USER null', 'shared repository/transaction/package/cache/storage/socket/throw capabilities'],
+            authority: 'Retains caller host-owned repository authority and active transaction, not user/role values supplied in params. Fresh data context does not isolate the shared JavaScript realm or replay route guards/hooks/triggers.',
+            returnBehavior: 'The awaited result is returned to the caller. Missing/disabled helpers fail; structured throws retain their carrier. Nested named calls use the same activated snapshot and task budget.',
+          },
           preHook: {
             runs: 'Before handler.',
             data: ['@BODY', '@QUERY', '@PARAMS', '@USER', '@REQ', '@REPOS', '@CACHE', '@HELPERS', '@FETCH', '@STORAGE', '@THROW*', '@SOCKET global emit helpers/roomSize'],

@@ -34,7 +34,7 @@ function createToolHarness() {
   };
 }
 
-function installScriptPatchFetchMock(initialSource = 'return "before";') {
+function installScriptPatchFetchMock(initialSource = 'return "before";', tableName = TABLE_NAME) {
   const originalFetch = globalThis.fetch;
   let source = initialSource;
   const writes = [];
@@ -48,13 +48,13 @@ function installScriptPatchFetchMock(initialSource = 'return "before";') {
       return jsonResponse({ dbType: 'postgresql', enfyraVersion: 'test' });
     }
     if (urlText.includes('/enfyra_table?')) {
-      return jsonResponse({ data: [{ id: 41, name: TABLE_NAME, alias: null }] });
+      return jsonResponse({ data: [{ id: 41, name: tableName, alias: null }] });
     }
-    if (urlText.endsWith(`/metadata/${TABLE_NAME}`)) {
+    if (urlText.endsWith(`/metadata/${tableName}`)) {
       return jsonResponse({
         data: {
           id: 41,
-          name: TABLE_NAME,
+          name: tableName,
           columns: [
             { id: 1, name: 'id', isPrimary: true },
             { id: 2, name: 'sourceCode' },
@@ -64,7 +64,7 @@ function installScriptPatchFetchMock(initialSource = 'return "before";') {
         },
       });
     }
-    if (urlText.includes(`/${TABLE_NAME}?`)) {
+    if (urlText.includes(`/${tableName}?`)) {
       return jsonResponse({
         data: [{ id: RECORD_ID, sourceCode: source, scriptLanguage: 'javascript' }],
       });
@@ -72,7 +72,7 @@ function installScriptPatchFetchMock(initialSource = 'return "before";') {
     if (urlText.endsWith('/admin/script/validate') && options.method === 'POST') {
       return jsonResponse({ valid: true });
     }
-    if (urlText.endsWith(`/${TABLE_NAME}/${RECORD_ID}`) && options.method === 'PATCH') {
+    if (urlText.endsWith(`/${tableName}/${RECORD_ID}`) && options.method === 'PATCH') {
       const payload = JSON.parse(String(options.body));
       source = payload.sourceCode;
       writes.push(payload);
@@ -224,4 +224,23 @@ test('patch_script_source rejects a real replacement text value alongside an art
   } finally {
     fixture.restore();
   }
+});
+
+test('named helper source patches validate, reject stale hashes and verify saved source', async () => {
+  const fixture = installScriptPatchFetchMock('return @PARAMS;', 'enfyra_helper');
+  const tool = createRegisteredPatchTool();
+  try {
+    const input = { tableName: 'enfyra_helper', id: RECORD_ID, oldText: 'return @PARAMS;', newText: 'return { value: @PARAMS };', ...applyAcknowledgements() };
+    const preview = JSON.parse((await tool.handler({ ...input, apply: false })).content[0].text);
+    fixture.setSource('return null;');
+    clearRuntimeCache();
+    await assert.rejects(tool.handler({ ...input, apply: true, expectedSourceSha256: preview.sourceSha256Before }), /Source hash mismatch/);
+    assert.equal(fixture.writes.length, 0);
+    fixture.setSource('return @PARAMS;');
+    clearRuntimeCache();
+    const applied = JSON.parse((await tool.handler({ ...input, apply: true, expectedSourceSha256: preview.sourceSha256Before })).content[0].text);
+    assert.equal(fixture.writes.length, 1);
+    assert.equal(fixture.source, input.newText);
+    assert.equal(applied.savedSource.valid, true);
+  } finally { fixture.restore(); clearRuntimeCache(); }
 });

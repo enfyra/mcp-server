@@ -60,7 +60,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       if (!tableData) {
         throw new Error(`Table with ID ${args.tableId} not found.`);
       }
-      const supportedTypes = getSupportedColumnTypes();
+      const supportedTypes = getSupportedColumnTypes((await fetchMetadataContext(ENFYRA_API_URL)).dbType);
       const normalized = normalizeColumnTypeForLiveMetadata(args.type, supportedTypes);
       assertColumnNameCanBeCreated(args.name, 'create_columns');
   
@@ -411,7 +411,7 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
   async function createOneTable(args, batchTableNames: Set<string> = new Set(), createdTableIds: Map<string, number | string> = new Map()) {
       const userColumns = arrayValue('columns', args.columns);
       const metadataContext = await fetchMetadataContext(ENFYRA_API_URL);
-      const supportedTypes = getSupportedColumnTypes();
+      const supportedTypes = getSupportedColumnTypes(metadataContext.dbType);
       const idColumn = buildPrimaryColumnForDbType(metadataContext.dbType);
   	    const { columns: userColumnsWithoutAuto, skippedAutoColumns } = stripAutoManagedColumns(userColumns);
   	    const { columns: normalizedUserColumns, normalizations } = normalizeColumnsForLiveMetadata(userColumnsWithoutAuto, supportedTypes);
@@ -667,6 +667,10 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         throw new Error(`Column ${columnId} was not found on table ${tableId}; refusing schema cascade patch.`);
       }
       const existingColumn = existingColumns.find((column) => String(getId(column)) === String(columnId));
+      if (type !== undefined) {
+        const supportedTypes = getSupportedColumnTypes((await fetchMetadataContext(ENFYRA_API_URL)).dbType);
+        type = normalizeColumnTypeForLiveMetadata(type, supportedTypes).type;
+      }
       const effectiveType = type ?? existingColumn?.type;
       const normalizedOptions = options !== undefined
         ? normalizeColumnOptionsValue(options)

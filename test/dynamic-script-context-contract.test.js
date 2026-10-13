@@ -13,6 +13,20 @@ test('lock-only repository contract separates deployed support from read guarant
   assert.match(contract.repositories.lockedReadGuarantee,/no write.*mutation event/i);
 });
 
+test('runtime context includes named multipart files, host-owned failures and composed stream helpers', () => {
+  const contract = buildDynamicScriptContextTypeContract();
+  assert.match(contract.values['$ctx.$uploadFile'].type, /UploadedFileInfo/);
+  assert.match(contract.values['$ctx.$uploadFile'].guarantee, /missing.*throws/i);
+  assert.match(contract.values['@API'].declaration, /executionId\?: string/);
+  assert.match(contract.values['@ERROR'].declaration, /origin\?.*client.*stream.*execution/);
+  assert.match(JSON.stringify(contract.httpFailureAudit), /enfyra:client-disconnect-audit/);
+  assert.match(JSON.stringify(contract.httpFailureAudit), /response_stream_timeout/);
+  assert.match(contract.services['$ctx.$streams'], /guard\(/);
+  assert.match(contract.services['$ctx.$streams'], /tap\(/);
+  assert.match(contract.services['$ctx.$streams'], /cancel\(/);
+  assert.match(contract.services['$ctx.$streams'], /idleTimeoutMs/);
+});
+
 test('dynamic script context contract exposes trusted script-visible runtime types', () => {
   const contract = buildDynamicScriptContextTypeContract();
   const text = JSON.stringify(contract);

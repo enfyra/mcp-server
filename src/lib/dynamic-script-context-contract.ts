@@ -12,7 +12,7 @@ export function buildDynamicScriptContextTypeContract() {
       'type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }',
       'type JsonObject = { [key: string]: JsonValue }',
       'type PackageReadable = AsyncIterable<Uint8Array>',
-      'type PackageStreamOptions = { timeoutMs?: number; maxBytes?: number }',
+      'type PackageStreamOptions = { timeoutMs?: number; idleTimeoutMs?: number; maxBytes?: number }',
     ],
     values: {
       '@BODY': {
@@ -26,7 +26,7 @@ export function buildDynamicScriptContextTypeContract() {
       },
       '@PARAMS': {
         type: 'Record<string, string>',
-        guarantee: 'Always an object, defaulting to {}. Declared route parameters are strings.',
+        guarantee: 'In HTTP contexts this is an object, defaulting to {}, with string route parameters. In a named shared helper it is the explicit params argument, typed unknown: object, array, primitive, null or undefined. Validate that helper-specific contract; params are not cloned.',
       },
       '@USER': {
         type: 'RuntimeRecord | null',
@@ -43,16 +43,16 @@ export function buildDynamicScriptContextTypeContract() {
       },
       '@ERROR': {
         type: 'DynamicScriptError | undefined',
-        declaration: 'type DynamicScriptError = { message: string; name: string; stack: string; statusCode: number; details: unknown; timestamp: string }',
+        declaration: 'type DynamicScriptError = { message: string; name?: string; stack?: string; statusCode: number; details?: unknown; timestamp?: string; origin?: "client" | "stream" | "execution"; code?: string }',
         guarantee: 'Defined in post-hooks only when the handler path failed.',
       },
       '@ENV': {
         type: 'Record<string, string | undefined>',
-        guarantee: 'Always an object. ESV removes DB_URI, DB_REPLICA_URIS, REDIS_URI, SECRET_KEY, and ADMIN_PASSWORD.',
+        guarantee: 'Always an object. ESV removes DB_URI, DB_REPLICA_URIS, REDIS_URI, REDIS_PASSWORD, SECRET_KEY, and ADMIN_PASSWORD.',
       },
       '@SHARE': {
         type: '{ $logs: unknown[] }',
-        guarantee: 'Always an object with a $logs array for the current execution batch.',
+        guarantee: 'An object with a $logs array for an ordinary execution batch; named shared helpers instead receive a fresh empty local share object.',
       },
       '@REQ': {
         type: 'HttpRequestContext | WebsocketRequestContext',
@@ -64,13 +64,17 @@ export function buildDynamicScriptContextTypeContract() {
       },
       '@API': {
         type: 'ApiExecutionContext',
-        declaration: 'type ApiExecutionContext = { request: { method: string; url: string; timestamp: string; correlationId?: string; userAgent?: string; ip?: string }; response?: { statusCode: number; responseTime: number; timestamp: string }; error?: DynamicScriptError }',
+        declaration: 'type ApiExecutionContext = { request: { method: string; url: string; timestamp: string; correlationId?: string; executionId?: string; userAgent?: string; ip?: string }; response?: { statusCode: number; responseTime: number; timestamp: string }; error?: DynamicScriptError }',
         guarantee: 'Present in HTTP and websocket contexts. response/error are populated for post-hook completion and error handling.',
       },
       '@UPLOADED_FILE': {
         type: 'UploadedFileInfo | undefined',
         declaration: 'type UploadedFileInfo = { originalname: string; mimetype: string; encoding: string; path?: string; size: number; fieldname: string }',
         guarantee: 'Defined only for a multipart request containing a file. It is disk-backed metadata; do not expect a buffer.',
+      },
+      '$ctx.$uploadFile': {
+        type: 'Record<string, UploadedFileInfo | UploadedFileInfo[]>',
+        guarantee: 'Named multipart file map on configured methods. maxCount=1 yields one file; larger counts yield an array. Optional missing fields are absent; reading a missing key throws. Check Object.keys before an optional access. Files are disk-backed and cleaned up by Server; do not expect buffer.',
       },
       '@FLOW': {
         type: 'FlowContext',
@@ -105,8 +109,27 @@ export function buildDynamicScriptContextTypeContract() {
       availability: { findLocked: 'Requires deployed Server/Kernel support for native locked reads. Verify with a non-saving target test before authoring live consumers; a local source contract does not prove the deployed method exists.' },
       lockedReadGuarantee: 'findLocked requires an explicit outer transaction on PostgreSQL/MySQL and follows normal read authorization. Its locking read observes current root state even after an earlier MySQL repeatable-read snapshot. It performs no write and emits no mutation event, retaining the root row lock until outer commit/rollback. MongoDB and SQLite lock-only reads are rejected. Missing roots fail; absent rows, related targets and external publication need separate protection. Keep dependent repository operations inside the outer callback and verify deployed support before use.',
     },
+    httpFailureAudit: {
+      availability: 'Verify deployed Server support before attaching audit consumers.',
+      optIn: "Only attached post-hooks whose source begins with 'enfyra:client-disconnect-audit'; run in a fresh five-second terminal audit task. Ordinary hooks/inference do not replay, and no live response is available.",
+      cause: 'Host-owned first cause is authoritative: client 499 client_closed_request; stream 502 response_stream_error or 504 response_stream_timeout; execution 504 execution_timeout or 500 execution_failed. Later close/abort flags cannot replace it.',
+      identity: '@API.request.executionId is a Server UUID, not caller correlation/session identity. Coordinate failure audits and successful settlement under the same application transaction/lock and check persisted success to avoid duplicate failure rows.',
+      context: 'Retains authenticated identity and last host snapshot, not guaranteed in-flight share changes. @ERROR carries origin/statusCode/code/safe message. Best-effort finalization is not a durable outbox. No new response after disconnect; before headers Server sends matching safe JSON/retry signals, after commit wire status stays unchanged.',
+    },
+    sharedHelpers: {
+      table: 'enfyra_helper',
+      availability: 'Requires a Server deployment whose newer-release bootstrap provisions enfyra_helper. Verify target metadata and runtime support before authoring consumers; local source is not deployment proof. Never reset initialization or downgrade the recorded version.',
+      invocation: 'await @HELPERS.run(name, params), equivalent to $ctx.$helpers.run(name, params). There is no implicit input variable.',
+      data: '@PARAMS is the explicit argument. @BODY, @QUERY, @SHARE and @ENV are fresh empty objects; @USER is null. Caller request, API, result, flow state and lexical locals are not copied. Pass required data explicitly.',
+      execution: 'Shared task, JavaScript realm, repository capabilities, deadline and cancellation. This is a fresh data-context boundary, not a separate sandbox for hostile code, child executor, route dispatch or queue job. One task retains its activated helper snapshot.',
+      authority: 'Host-owned caller repository authority and the active transaction are retained. Params containing a user or role cannot grant authority. Awaited repository calls join the caller transaction; external effects do not roll back. Route guards, hooks and triggers are not replayed.',
+      authoring: 'Trusted privileged authors only. Unique lowercase names match ^[a-z0-9][a-z0-9_]{0,127}$; __proto__, prototype, constructor, run, then, catch and finally are reserved. Save sourceCode/scriptLanguage, never compiledCode. Enabled definitions need executable source.',
+      bounds: 'At most 1024 definitions, 1024 calls per task and depth 32. All enabled executable definitions plus caller/wrapper must fit the 4 MiB bound. Missing/disabled helpers fail explicitly, structured throws retain their carrier, and no helper retry is added.',
+      testing: 'Draft tests perform real side effects and do not automatically roll back. Nested named calls resolve saved activated helpers, not other unsaved drafts. Use run_admin_test(kind=script), timeout=5000, body.body={params}, and the same fresh-context wrapper as the App helper editor; a plain HTTP-like test context is not a helper context. No implicit caller user is copied into that wrapper.',
+    },
     services: {
       '@HELPERS': [
+        'run<T = unknown>(name: string, params?: unknown): Promise<T> — named helper in the current task, requires deployed Shared Helpers support',
         '$jwt(payload: RuntimeRecord, expiresIn: string): Promise<string> — HTTP and GraphQL only',
         '$bcrypt.hash(plain: string): Promise<string>',
         '$bcrypt.compare(plain: string, hash: string): Promise<boolean>',
@@ -140,7 +163,7 @@ export function buildDynamicScriptContextTypeContract() {
         global: 'HTTP/flow global socket: emitToUser(userId, event, data), emitToRoom(path, room, event, data), emitToGateway(path, event, data), broadcast(event, data) return Promise<void>; roomSize(room) returns Promise<number>.',
         bound: 'The bound websocket socket also exposes reply(event, data), join(room), leave(room), emitToCurrentRoom(room, event, data), broadcastToRoom(room, event, data), and disconnect(), all returning Promise<void>.',
       },
-      '$ctx.$streams': 'Kernel-managed package-readable helpers. preflight(readable: PackageReadable, options?: { timeoutMs?: number }): Promise<{ stream: PackageReadable; firstChunk: Uint8Array }> pulls the first non-empty raw chunk before the public response starts and returns a single-consumer replay stream. readBytes(readable, options?: PackageStreamOptions): Promise<Uint8Array> and readText(readable, options?: PackageStreamOptions): Promise<string> consume without starting a response; both default maxBytes to 8 MiB, enforce it on raw bytes, and readText decodes UTF-8 incrementally. A preflight/read timeout is stream-scoped and throws ERR_PACKAGE_STREAM_TIMEOUT, leaving the executor task available for application-owned retry with a new upstream request. Empty-before-byte throws ERR_PACKAGE_STREAM_EMPTY. Each package readable has one consumer; duplicate or concurrent consumption throws a deterministic ERR_PACKAGE_STREAM_* error. Helper timeoutMs is capped by the enclosing handler or flow-step deadline, and task cancellation cleans up every owned stream session.',
+      '$ctx.$streams': 'Kernel-managed package-readable helpers. preflight(readable: PackageReadable, options?: { timeoutMs?: number; idleTimeoutMs?: number; maxFirstChunkBytes?: number }): Promise<{ stream: PackageReadable; firstChunk: Uint8Array; cancel: () => Promise<void> }> pulls the first non-empty raw chunk before the public response starts and returns a single-consumer replay stream. readBytes(readable, options?: PackageStreamOptions): Promise<Uint8Array> and readText(readable, options?: PackageStreamOptions): Promise<string> consume without starting a response; both default maxBytes to 8 MiB, enforce it on raw bytes, and readText decodes UTF-8 incrementally. guard(readable, options?: PackageStreamOptions): PackageReadable composes total/idle/max-byte bounds; tap(readable, options?: PackageStreamOptions & { onChunk?: (bytes: Uint8Array, totalBytes: number) => void | Promise<void> }): PackageReadable observes raw bytes with serialized backpressure; cancel(readable): Promise<void> closes the owned session. Replay is not tied to the expired preflight deadline. A preflight/read timeout is stream-scoped and throws ERR_PACKAGE_STREAM_TIMEOUT, leaving the executor task available for application-owned retry with a new upstream request. Empty-before-byte throws ERR_PACKAGE_STREAM_EMPTY. Each package readable has one consumer; duplicate or concurrent consumption throws a deterministic ERR_PACKAGE_STREAM_* error. Helper timeoutMs is capped by the enclosing handler or flow-step deadline, and task cancellation cleans up every owned stream session.',
       '@RES': 'HTTP handler only. json(value, { statusCode?, headers? }): Promise<void> owns a complete success JSON body, status (200-399), and headers; use return await @RES.json(...) as the terminal statement for custom success responses. Custom errors use @THROW.json instead. bytes(value, { statusCode?, mimetype?, filename?, headers? }): Promise<void> owns an exact binary response. stream(readable, options?): Promise<void> relays a readable and is also a terminal response boundary. The readable may be package-backed, the replay stream returned by $ctx.$streams.preflight, or another approved server-side readable. Direct @RES.stream(upstream.body, ...) starts the public response before consuming the body; use preflight first when the application must retry an upstream that produces no bytes. Stream options may include statusCode, mimetype, filename, headers, observer?: (chunkText: string, kind: "chunk" | "end" | "error") => unknown | Promise<unknown>, and transform?: (chunkText: string, kind: "chunk" | "end") => string | null | undefined | Promise<string | null | undefined>. transform receives UTF-8-decoded fragments before relay: one decoder spans the full stream, so a Unicode code point split across byte chunks is intact. A fragment may still end inside an SSE line or event, so SSE transforms keep a per-request buffer and parse only complete blank-line-delimited events. Return a string to replace output, null to suppress it, or undefined to preserve it; transform failures fail the stream. observer remains best-effort and is not a pre-response readiness primitive. Await the response method and do not start or return another response afterward. Direct relay remains bounded by the selected method timeout; client abort/response close cancels the task.',
       '@TRIGGER': 'Callable macro: @TRIGGER(flowIdOrName: Id, payload?: JsonValue): Promise<{ jobId: string; flowId: Id } | { triggered: true; flowId: Id; flowName: string }>. Do not use @TRIGGER.trigger(...).',
       '@TRANSACTION': 'Maps to $ctx.$transaction. Use await @TRANSACTION.run<T>(async () => { ... }) for an atomic repository mutation scope. The OAuth lifecycle script already runs inside a server-owned transaction, and a nested @TRANSACTION.run joins it. Repository cache invalidations and mutation events flush after commit; direct external effects such as fetch, storage, cache, socket, and flow triggers do not roll back.',
@@ -155,7 +178,7 @@ export function buildDynamicScriptContextTypeContract() {
       '@PKGS': 'Record<string, package module>. Package calls may be async or thenable according to the installed package; await operations that produce values. A package-backed readable is a single-consumer AsyncIterable<Uint8Array>: pull it with for await...of, preflight it through $ctx.$streams, consume it through readBytes/readText, or relay it once through @RES.stream.',
     },
     bridge: {
-      async: 'In script code, calls through @REPOS, @HELPERS, @CACHE, @STORAGE, @SOCKET, $ctx.$streams, @RES, and @TRIGGER cross the executor bridge and return promises. Await them.',
+      async: 'In script code, calls through @REPOS, built-in @HELPERS, @CACHE, @STORAGE, @SOCKET, $ctx.$streams, @RES, and @TRIGGER cross the executor bridge and return promises. Named @HELPERS.run is task-local and async. Await them.',
       sync: '@LOGS and @THROW execute synchronously. Do not await them.',
     },
   };

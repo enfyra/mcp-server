@@ -343,7 +343,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.match(platformTools, /Generate a Widget snippet/);
   assert.match(platformTools, /Generate useMenuNotificationRegistry registration code/);
   assert.match(platformTools, /Generate useAccountPanelRegistry registration code/);
-  assert.match(platformTools, /Generate a UTabs snippet/);
+  assert.match(platformTools, /Generate a Panel section snippet/);
   assert.match(platformTools, /Generate a CommonUploadModal snippet/);
   assert.match(platformTools, /extension_api_usage_built/);
   assert.match(platformTools, /extension_notify_usage_built/);
@@ -403,7 +403,7 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(extensionThemeContractBlock, /bg-primary\/10/);
   assert.match(platformTools, /Use build_extension_ui kind=modal for generated modal\/confirmation snippets/);
   assert.match(platformTools, /md:grid-cols-2 xl:grid-cols-3/);
-  assert.match(examples, /eapp-surface-card p-4/);
+  assert.match(examples, /eapp-bordered-region p-4/);
   assert.match(examples, /eapp-primary-surface/);
   assert.match(examples, /eapp-primary-soft/);
   assert.match(examples, /eapp-primary-solid/);

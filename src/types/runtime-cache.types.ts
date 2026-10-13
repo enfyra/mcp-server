@@ -1,6 +1,7 @@
 export type RuntimeCacheDomain =
   | 'metadata'
   | 'route'
+  | 'helper'
   | 'guard'
   | 'fieldPermission'
   | 'column-rule'

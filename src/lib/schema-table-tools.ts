@@ -124,14 +124,14 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
           fetchTableMetadata(ENFYRA_API_URL, 'enfyra_table'),
           fetchTableMetadata(ENFYRA_API_URL, 'enfyra_relation'),
         ]);
-        const supportedColumnTypes = getSupportedColumnTypes();
+        const supportedColumnTypes = getSupportedColumnTypes(metadataContext.dbType);
         const relationTypes = metadataColumnOptions(relationMetadata, 'enfyra_relation', 'type');
         const onDeleteOptions = metadataColumnOptions(relationMetadata, 'enfyra_relation', 'onDelete');
         const tableAttributes = metadataColumnNames(tableMetadata, 'enfyra_table');
         const columnAttributes = COLUMN_SCHEMA_ATTRIBUTES;
         const relationAttributes = metadataColumnNames(relationMetadata, 'enfyra_relation');
         const primaryColumnNames = [metadataContext.dbType === 'mongodb' ? '_id' : 'id'];
-        const primaryColumnTypes = [metadataContext.dbType === 'mongodb' ? 'ObjectId' : 'int'];
+        const primaryColumnTypes = [metadataContext.dbType === 'mongodb' ? 'objectId' : 'int'];
   
         return jsonContent({
           action: 'schema_design_context',
@@ -141,7 +141,7 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             observedPrimaryColumnNames: primaryColumnNames,
             observedPrimaryColumnTypes: primaryColumnTypes,
             createTableDefault: metadataContext.dbType === 'mongodb'
-              ? 'create_tables auto-includes the Mongo _id/ObjectId primary key.'
+              ? 'create_tables auto-includes the Mongo _id/objectId primary key.'
               : 'create_tables auto-includes the SQL id/int primary key.',
           },
           createTableInput: {
@@ -151,7 +151,7 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             notAcceptedAtCreate: ['alias', 'graphqlEnabled'],
             autoManagedColumns: ['id', 'createdAt', 'updatedAt'],
             idColumn: metadataContext.dbType === 'mongodb'
-              ? 'create_tables auto-includes _id/ObjectId; do not include your own primary key.'
+              ? 'create_tables auto-includes _id/objectId; do not include your own primary key.'
               : 'create_tables auto-includes id/int; do not include your own primary key.',
             reservedColumnRule: 'Do not declare id, _id, createdAt, or updatedAt in create_tables/create_columns. create_tables strips them before save and reports skippedAutoColumns; create_columns rejects them.',
             timestampSemantics: {
@@ -165,14 +165,14 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
             allowedFields: ['name', 'type', 'isNullable', 'isUnique', 'isPublished', 'isUpdatable', 'isEncrypted', 'defaultValue', 'description', 'options', 'placeholder', 'metadata'],
             supportedTypes: supportedColumnTypes,
             typeSelection: [
-              'varchar: short text, labels, slugs, status strings.',
+              'varchar (SQL) or string (MongoDB): short text, labels, slugs, status strings.',
               'text/richtext: long prose.',
-              'float: prices, amounts, ratings, percentages, decimal-like numbers unless supportedTypes contains decimal.',
-              'int/bigint: counts, ordering, integer quantities.',
-              'boolean: true/false flags.',
+              'float (SQL) or double (MongoDB): prices, amounts, ratings, percentages, decimal-like numbers unless supportedTypes contains decimal.',
+              'int/bigint (SQL) or int/long (MongoDB): counts, ordering, integer quantities.',
+              'boolean (SQL) or bool (MongoDB): true/false flags.',
               'date/datetime/timestamp: temporal fields.',
               'enum: constrained option strings when options are provided.',
-              'simple-json: structured snapshots/arrays only when supportedTypes contains simple-json.',
+              'simple-json (SQL) or json/object/array (MongoDB): structured values when listed in supportedTypes.',
               'code: source-code fields.',
             ],
             forbiddenGuesses: ['json', 'jsonb', 'longtext', 'decimal'].filter((type) => !supportedColumnTypes.includes(type)),

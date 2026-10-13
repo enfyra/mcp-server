@@ -296,6 +296,9 @@ test('update_columns replaces enum options canonically and verifies the saved ar
     if (urlText.includes('/enfyra_table?')) {
       return jsonResponse({ data: [{ id: 10, name: 'ai_payment_order' }] });
     }
+    if (urlText.endsWith('/metadata')) {
+      return jsonResponse({ dbType: 'postgres', enfyraVersion: '2.3.3' });
+    }
     if (urlText.endsWith('/metadata/ai_payment_order')) {
       return jsonResponse({ data: currentMetadata });
     }
@@ -1321,4 +1324,32 @@ test('prepareRecordMutation fails closed when script validation endpoint is unav
     }),
     /Script validation failed before save/
   );
+});
+
+test('schema design selects native column and primary-key types for each confirmed database', async () => {
+  const originalFetch = global.fetch;
+  try {
+    for (const dbType of ['postgres', 'mysql', 'mongodb']) {
+      resetTokens();
+      initAuth('https://database-types.test/api', 'fixture-token');
+      global.fetch = async url => {
+        const path = new URL(String(url)).pathname;
+        if (path.endsWith('/metadata')) return jsonResponse({ dbType });
+        if (path.endsWith('/metadata/enfyra_table')) return jsonResponse({ data: { columns: [{ name: 'name' }] } });
+        if (path.endsWith('/metadata/enfyra_relation')) return jsonResponse({ data: { columns: [] } });
+        throw new Error(`Unexpected fixture request: ${path}`);
+      };
+      const server = createToolHarness();
+      registerTableTools(server, 'https://database-types.test/api');
+      const result = await server.get('get_schema_design_context').handler({});
+      const data = JSON.parse(result.content[0].text);
+      assert.deepEqual(data.supportedColumnTypes, getSupportedColumnTypes(dbType));
+      assert.deepEqual(data.primaryKeyContext.observedPrimaryColumnTypes, [dbType === 'mongodb' ? 'objectId' : 'int']);
+      assert.equal(data.supportedColumnTypes.includes('longtext'), dbType === 'mysql');
+      if (dbType === 'mongodb') {
+        for (const type of ['string', 'bool', 'long', 'double', 'json', 'object', 'array', 'objectId']) assert.ok(data.supportedColumnTypes.includes(type));
+        for (const type of ['varchar', 'boolean', 'bigint', 'float', 'simple-json', 'ObjectId']) assert.equal(data.supportedColumnTypes.includes(type), false);
+      }
+    }
+  } finally { global.fetch = originalFetch; resetTokens(); }
 });

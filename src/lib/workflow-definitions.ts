@@ -276,16 +276,16 @@ export const TOOL_WORKFLOWS = [
     key: 'dynamic-script',
     title: 'Dynamic server code: handlers, hooks, scripts, or source patches',
     useWhen: [
-      'Writing or reviewing handler, hook, flow step, websocket, or OAuth sourceCode.',
+      'Writing or reviewing handler, hook, named shared helper, flow step, websocket, or OAuth sourceCode.',
       'Editing an existing script-backed metadata record.',
       'Debugging macro, repository, or validation behavior.',
       'Splitting a large hook or handler into pre-hook, handler, post-hook, column-rule, guard, or flow responsibilities.',
     ],
-    keywords: ['sourcecode', 'script', 'hook', 'pre hook', 'post hook', 'hook layering', 'god hook', 'split handler', 'large script', 'decompose script', 'compiledcode', 'macro', 'repos'],
+    keywords: ['sourcecode', 'script', 'shared helper', 'enfyra_helper', 'helpers.run', 'hook', 'pre hook', 'post hook', 'hook layering', 'god hook', 'split handler', 'large script', 'decompose script', 'compiledcode', 'macro', 'repos'],
     firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'build_dynamic_repository_usage', 'search_runtime_zone'],
     inspectTools: ['search_runtime_zone(mode=search, zone=api_runtime|flow_runtime|websocket_runtime)', 'search_runtime_zone(mode=inspect)', 'trace_metadata_usage', 'discover_script_contexts'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'build_dynamic_repository_usage'],
-    writeTools: ['patch_script_source', 'update_script_source', 'create_handler', 'create_pre_hook', 'create_post_hook', 'api_endpoint_workflow'],
+    writeTools: ['patch_script_source', 'update_script_source', 'create_records', 'update_records', 'delete_records', 'create_handler', 'create_pre_hook', 'create_post_hook', 'api_endpoint_workflow'],
     verifyTools: ['validate_dynamic_script', 'run_admin_test', 'test_rest_endpoint', 'test_flow_step'],
     avoidTools: [
       {
@@ -305,6 +305,7 @@ export const TOOL_WORKFLOWS = [
     exampleCategories: ['handlers-hooks'],
     nextStepTemplate: [
       'Discover script context macros for the surface.',
+      'For reusable explicit operations, inspect enfyra_helper metadata and deployed support first. Use generic record CRUD for name/description/enabled state and inspected hash-guarded source tools for sourceCode. Call await @HELPERS.run(name, params); preserve caller authority, transaction, shared realm and fresh explicit data context, without replaying a route lifecycle.',
       'Assess cohesion before saving: split mixed-responsibility code through the native boundary for that surface, while preserving endpoint-specific business logic and any transaction that truly must remain atomic.',
       'Inspect the route and linked pre-hooks, handlers, and post-hooks. Assign each invariant to the smallest layer: Guard Engine for request gating, pre-hook for canonical shared policy, handler for endpoint business logic, post-hook for response/best-effort work, column rule for deterministic validation, field permission for visibility, and flow for durable async work.',
       'For flows use multiple named steps with one business operation each; for websocket code keep connection lifecycle in the gateway and one event contract per event record; keep OAuth lifecycle sources focused on their own lifecycle contracts.',

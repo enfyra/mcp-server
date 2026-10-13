@@ -34,7 +34,8 @@ test('required knowledge tells models how to decompose large dynamic code and ex
   assert.match(dynamicRules, /flow steps/i);
   assert.match(dynamicRules, /websocket/i);
   assert.match(dynamicRules, /OAuth/i);
-  assert.match(dynamicRules, /bootstrap/i);
+  assert.match(dynamicRules, /shared helper/i);
+  assert.doesNotMatch(dynamicRules, /bootstrap script/i);
 
   const extensionKnowledge = buildRequiredKnowledgePayload('extension');
   const extensionSection = extensionKnowledge.extensions.find((section) => section.id === 'extension-composition');

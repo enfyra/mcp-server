@@ -324,12 +324,21 @@ test('column type guidance uses the Enfyra schema contract and normalizes common
   );
 });
 
-test('MCP column types stay aligned with the ESV snapshot contract', () => {
-  const source = readFileSync(new URL('../../server/src/engines/bootstrap/types/snapshot-definition.types.ts', import.meta.url), 'utf8');
-  const definition = source.match(/export type SnapshotColumnType =([\s\S]*?);\n\nexport type SnapshotRelationType/u)?.[1] || '';
-  const serverTypes = [...definition.matchAll(/'([^']+)'/gu)].map((match) => match[1]);
-
-  assert.deepEqual(getSupportedColumnTypes(), serverTypes);
+test('MCP column types follow the current ESV SQL and Mongo contracts', () => {
+  const source = readFileSync(new URL('../../server/src/shared/types/column-type.types.ts', import.meta.url), 'utf8');
+  const definition = source.match(/export const COLUMN_TYPE_CONTRACT = \{([\s\S]*?)\} as const/u)?.[1];
+  assert.ok(definition, 'The backend type contract must be located, never compared with an empty fallback');
+  const entries = [...definition.matchAll(/sqlType: '([^']+)', mongoType: '([^']+)'/gu)];
+  const sql = entries.map(match => match[1]);
+  const mongo = [...new Set(entries.map(match => match[2]).concat(['object', 'array']))];
+  assert.deepEqual(getSupportedColumnTypes('mysql'), sql);
+  assert.deepEqual(getSupportedColumnTypes('postgres'), sql.filter(type => type !== 'longtext'));
+  assert.deepEqual(getSupportedColumnTypes('mongodb'), mongo);
+  assert.equal(normalizeColumnTypeForLiveMetadata('longtext', getSupportedColumnTypes('mysql')).type, 'longtext');
+  for (const [input, output] of [['varchar', 'string'], ['boolean', 'bool'], ['bigint', 'long'], ['simple-json', 'json'], ['ObjectId', 'objectId'], ['float', 'double']]) {
+    assert.equal(normalizeColumnTypeForLiveMetadata(input, mongo).type, output);
+  }
+  assert.throws(() => normalizeColumnTypeForLiveMetadata('geometry', mongo), /Unsupported column type/);
 });
 
 test('resolveRelationTargetsFromMetadata converts table names to ids before schema mutation', () => {
@@ -452,7 +461,7 @@ test('primary column definition follows metadata dbType without pkField', () => 
   });
   assert.deepEqual(buildPrimaryColumnForDbType('mongodb'), {
     name: '_id',
-    type: 'ObjectId',
+    type: 'objectId',
     isPrimary: true,
     isGenerated: true,
     isNullable: false,
