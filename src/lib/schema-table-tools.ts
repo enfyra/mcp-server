@@ -205,7 +205,7 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
           constraints: {
             indexes: 'JSON array of non-unique logical field groups, e.g. [["status","createdAt"]]. Relation propertyName values are allowed.',
             uniques: 'JSON array of unique logical field groups, e.g. [["record","actor"]].',
-            uniqueIndexRule: 'Any field that appears in any uniques group, including composite unique groups such as ["event","attendee"], must not appear in indexes because unique constraints already create indexed lookups for their fields.',
+            uniqueIndexRule: 'An explicit index must not duplicate the ordered leading prefix of a unique group. uniques [["event","attendee"]] covers indexes [["event"]], but not [["attendee"]] or [["attendee","event"]]. Use logical relation propertyName values; owning relations and temporal fields receive automatic indexes when not covered.',
             createTablesPreflight: 'create_tables rejects constraints that reference fields not declared as scalar columns, auto-managed columns, or relation propertyName values in that same table item before it creates anything.',
             relationBasedUniques: 'For one-pass schema creation, put the owning relations in the same create_tables item as the relation-based unique group. If relations already exist, add relation-based uniques later with update_tables.',
           },

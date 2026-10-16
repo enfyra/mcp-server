@@ -260,30 +260,12 @@ test('resolveTableIdentifierFromMetadata supports ids, names, and aliases', () =
   );
 });
 
-test('schema constraint validation rejects indexes that include unique fields', () => {
-  assert.throws(
-    () =>
-      assertIndexesDoNotReferenceUniqueFields(
-        [['is_active', 'version']],
-        [['version'], ['docker_image']],
-      ),
-    /indexes must not include fields that appear in uniques, including composite unique groups/,
-  );
-  assert.throws(
-    () =>
-      assertIndexesDoNotReferenceUniqueFields(
-        [['status', 'scheduled_start']],
-        [['patient', 'scheduled_start']],
-      ),
-    /\["status","scheduled_start"\] overlaps unique group\(s\) \["patient","scheduled_start"\] via \["scheduled_start"\]/,
-  );
-
-  assert.doesNotThrow(() =>
-    assertIndexesDoNotReferenceUniqueFields(
-      [['is_active', 'sort_order']],
-      [['version'], ['docker_image']],
-    ),
-  );
+test('schema constraint validation rejects only ordered unique-prefix indexes', () => {
+  assert.throws(() => assertIndexesDoNotReferenceUniqueFields([['patient']], [['patient', 'scheduled_start']]), /ordered leading prefix/);
+  assert.doesNotThrow(() => assertIndexesDoNotReferenceUniqueFields(
+    [['is_active', 'version'], ['status', 'scheduled_start'], ['scheduled_start']],
+    [['version'], ['patient', 'scheduled_start']],
+  ));
 });
 
 test('column type guidance uses the Enfyra schema contract and normalizes common SQL aliases', () => {

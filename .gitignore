@@ -10,5 +10,6 @@ AGENTS.md
 .cursor/
 .zcode/
 .codex
+.kilo/
 package-lock.json
 benchmark/

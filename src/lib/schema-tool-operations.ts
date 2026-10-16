@@ -2,6 +2,7 @@
  * Table & Column tools for Enfyra MCP Server
  */
 import { fetchAPI } from './fetch.js';
+import { verifyTableConstraints } from './schema-constraint-verification.js';
 import {
   fetchMetadataContext,
   fetchTableCatalog
@@ -33,6 +34,7 @@ import {
   normalizeColumnTypeForLiveMetadata,
   normalizeColumnsForLiveMetadata,
   normalizeConstraintGroupsValue,
+  normalizeLogicalConstraintGroups,
   normalizeRelationForTablePatch,
   parseJsonArrayParam,
   patchTableAutoConfirm,
@@ -526,13 +528,14 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
   	    const tableData = await fetchTableWithDetails(ENFYRA_API_URL, tableId);
   	    const mappedIndexes = resolveRelationConstraintGroups(tableData, deferredIndexes, 'indexes');
   	    const mappedUniques = resolveRelationConstraintGroups(tableData, deferredUniques, 'uniques');
-  	    const existingIndexes = normalizeConstraintGroupsValue('indexes', tableData.indexes || []);
-  	    const existingUniques = normalizeConstraintGroupsValue('uniques', tableData.uniques || []);
+        const existingIndexes = normalizeLogicalConstraintGroups(tableData, normalizeConstraintGroupsValue('indexes', tableData.indexes || []));
+        const existingUniques = normalizeLogicalConstraintGroups(tableData, normalizeConstraintGroupsValue('uniques', tableData.uniques || []));
   	    const uniques = mergeConstraintGroups(existingUniques, mappedUniques);
   	    const prunedExistingIndexes = pruneIndexesThatOverlapUniques(existingIndexes, uniques);
   	    const indexes = mergeConstraintGroups(prunedExistingIndexes.indexes, mappedIndexes);
   	    assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
   	    const result = await patchTableAutoConfirm(ENFYRA_API_URL, tableId, { indexes, uniques });
+        await verifyTableConstraints(ENFYRA_API_URL, tableId, { indexes, uniques });
   	    return {
   	      action: 'deferred_constraints_applied',
   	      tableId,
@@ -562,26 +565,32 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
       if (args.uniques !== undefined) body.uniques = normalizeConstraintGroupsValue('uniques', args.uniques);
   
       if (args.indexes !== undefined || args.uniques !== undefined) {
-        let indexes = body.indexes;
-        let uniques = body.uniques;
-        if (indexes === undefined || uniques === undefined) {
-          const existing = await fetchTableWithDetails(ENFYRA_API_URL, args.tableId);
-          if (indexes === undefined) indexes = normalizeConstraintGroupsValue('indexes', existing.indexes);
-          if (uniques === undefined) uniques = normalizeConstraintGroupsValue('uniques', existing.uniques);
-        }
+        const existing = await fetchTableWithDetails(ENFYRA_API_URL, args.tableId);
+        let indexes = normalizeLogicalConstraintGroups(existing, body.indexes ?? normalizeConstraintGroupsValue('indexes', existing.indexes));
+        const uniques = normalizeLogicalConstraintGroups(existing, body.uniques ?? normalizeConstraintGroupsValue('uniques', existing.uniques));
+        if (args.indexes !== undefined) body.indexes = indexes;
+        if (args.uniques !== undefined) body.uniques = uniques;
         if (args.uniques !== undefined && args.indexes === undefined) {
           const prunedExistingIndexes = pruneIndexesThatOverlapUniques(indexes ?? [], uniques ?? []);
           indexes = prunedExistingIndexes.indexes;
           body.indexes = indexes;
           schemaConstraintNormalization = {
             prunedExistingIndexes: prunedExistingIndexes.removed,
-            reason: 'Unique constraints already provide indexed lookups; MCP removed existing non-unique indexes that used fields now covered by uniques.',
+            reason: 'Unique constraints already provide these ordered prefix lookups; MCP removed only the redundant existing non-unique indexes.',
           };
         }
         assertIndexesDoNotReferenceUniqueFields(indexes ?? [], uniques ?? []);
+        const existingIndexKeys = new Set(normalizeLogicalConstraintGroups(existing, normalizeConstraintGroupsValue('indexes', existing.indexes)).map(group => JSON.stringify(group)));
+        const owningRelations = new Set((existing.relations || []).filter(relation => !relation.mappedBy && !relation.mappedById && ['many-to-one', 'one-to-one'].includes(relation.type)).map(relation => relation.propertyName));
+        if (args.indexes !== undefined && indexes.some(group => group.length === 1 && owningRelations.has(group[0]) && !existingIndexKeys.has(JSON.stringify(group)))) {
+          throw new Error('Owning relations already have automatic indexes; omit manually declared single-relation indexes.');
+        }
       }
   
       const result = await patchTableAutoConfirm(ENFYRA_API_URL, args.tableId, body);
+      if (args.indexes !== undefined || args.uniques !== undefined) {
+        await verifyTableConstraints(ENFYRA_API_URL, args.tableId, body);
+      }
       return {
         action: 'table_updated',
         tableId: args.tableId,

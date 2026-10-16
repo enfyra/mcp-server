@@ -16,11 +16,10 @@ import {
 } from './schema-mutation-coordinator.js';
 
 export function pruneIndexesThatOverlapUniques(indexes: ConstraintGroup[], uniques: ConstraintGroup[]) {
-  const uniqueFields = new Set(uniques.flat());
   const kept: ConstraintGroup[] = [];
   const removed: ConstraintGroup[] = [];
   for (const indexGroup of indexes) {
-    if (indexGroup.some((field) => uniqueFields.has(field))) {
+    if (uniques.some(unique => unique.length >= indexGroup.length && indexGroup.every((field, position) => unique[position] === field))) {
       removed.push(indexGroup);
     } else {
       kept.push(indexGroup);

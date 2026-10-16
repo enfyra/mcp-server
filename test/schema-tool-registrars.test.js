@@ -905,9 +905,9 @@ test('create_tables accepts tables alias and defers relation constraints until F
       name: 'createdAt',
       reason: 'Enfyra manages id/createdAt/updatedAt automatically during table creation.',
     }]);
-    assert.deepEqual(constraintPatch.uniques, [['eventId', 'scheduledDate']]);
-    assert.deepEqual(constraintPatch.indexes, [['status']]);
-    assert.deepEqual(payload.appliedDeferredConstraints[0].prunedExistingIndexes, [['scheduledDate']]);
+    assert.deepEqual(constraintPatch.uniques, [['event', 'scheduledDate']]);
+    assert.deepEqual(constraintPatch.indexes, [['status'], ['scheduledDate']]);
+    assert.deepEqual(payload.appliedDeferredConstraints[0].prunedExistingIndexes, []);
     assert.deepEqual(payload.cleanupHints.recordCreateOrder, ['event_registration']);
     assert.match(payload.cleanupHints.recordCreateRule, /parent\/target rows/);
     assert.equal(payload.inverseDecisions.length, 2);
@@ -1088,12 +1088,12 @@ test('create_tables rejects unique/index overlap before partial create', async (
               { name: 'reserveType', type: 'varchar' },
             ],
             uniques: [['claim', 'reserveType']],
-            indexes: [['reserveType']],
+            indexes: [['claim']],
           },
         ],
         globalRulesAckKey: GLOBAL_RULES_ACK_KEY,
       }),
-      /indexes must not include fields that appear in uniques/,
+      /ordered leading prefix of a unique constraint/,
     );
     assert.equal(postCount, 0);
   } finally {

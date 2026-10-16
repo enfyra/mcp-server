@@ -49,7 +49,7 @@ function normalizeConstraintGroups(name, groups) {
     if (!Array.isArray(value) || value.length === 0 || value.some((item) => typeof item !== 'string' || !item.trim())) {
       throw new Error(`${name}[${index}] must be a non-empty string array or { "value": [...] }.`);
     }
-    return value;
+    return value.map(field => field.trim());
   });
 }
 
@@ -140,6 +140,10 @@ export function preflightCreateTableDefinitions(items: AnyRecord[]) {
     const indexes = normalizeConstraintGroupsValue(`items[${index}].indexes`, item.indexes ?? []);
     const uniques = normalizeConstraintGroupsValue(`items[${index}].uniques`, item.uniques ?? []);
     assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
+    const owningRelations = new Set(relations.filter(relation => ['many-to-one', 'one-to-one'].includes(relation.type)).map(relation => relation.propertyName));
+    if (indexes.some(group => group.length === 1 && owningRelations.has(group[0]))) {
+      throw new Error('Owning relations already have automatic indexes; omit manually declared single-relation indexes.');
+    }
     const unknownConstraintFields = [...indexes, ...uniques]
       .flat()
       .filter((field) => !logicalFields.has(field));
@@ -257,28 +261,23 @@ export function resolveRelationConstraintGroups(table: AnyRecord, groups: Constr
         'This usually means the relation is not a direct many-to-one/one-to-one relation. Keep relation indexes/uniques only on direct owning relations.',
       );
     }
-    return physicalColumn;
+    return field;
   }));
 }
 
 export function assertIndexesDoNotReferenceUniqueFields(indexes: ConstraintGroup[], uniques: ConstraintGroup[]) {
-  const conflicts = indexes
-    .map((indexGroup) => ({
-      indexGroup,
-      uniqueGroups: uniques
-        .map((uniqueGroup) => ({
-          uniqueGroup,
-          overlappingFields: indexGroup.filter((field) => uniqueGroup.includes(field)),
-        }))
-        .filter((conflict) => conflict.overlappingFields.length > 0),
-    }))
-    .filter((conflict) => conflict.uniqueGroups.length > 0);
+  const conflicts = indexes.filter(index => uniques.some(unique =>
+    unique.length >= index.length && index.every((field, position) => unique[position] === field),
+  ));
   if (conflicts.length > 0) {
-    const groups = conflicts
-      .map((conflict) => `${JSON.stringify(conflict.indexGroup)} overlaps unique group(s) ${conflict.uniqueGroups.map((item) => `${JSON.stringify(item.uniqueGroup)} via ${JSON.stringify(item.overlappingFields)}`).join(', ')}`)
-      .join('; ');
-    throw new Error(
-      `Invalid schema constraints: indexes must not include fields that appear in uniques, including composite unique groups. Conflict(s): ${groups}. Unique constraints already create indexed lookups for their fields; remove those fields from indexes and keep them only in uniques.`,
-    );
+    throw new Error(`Invalid schema constraints: indexes must not duplicate an ordered leading prefix of a unique constraint. Remove redundant indexes ${JSON.stringify(conflicts)}; uniques already provide these lookups.`);
   }
+}
+
+export function normalizeLogicalConstraintGroups(table: AnyRecord, groups: ConstraintGroup[]): ConstraintGroup[] {
+  const aliases = new Map<string, string>();
+  for (const relation of table.relations || []) {
+    if (relation.foreignKeyColumn && relation.propertyName) aliases.set(relation.foreignKeyColumn, relation.propertyName);
+  }
+  return groups.map(group => group.map(field => aliases.get(field) ?? field));
 }
