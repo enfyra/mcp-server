@@ -135,7 +135,8 @@ export function buildDynamicScriptContextTypeContract() {
         '$bcrypt.compare(plain: string, hash: string): Promise<boolean>',
         'autoSlug(text: string): Promise<string>',
         '$fetch(url: string, options?): Promise<unknown | string | ArrayBuffer>',
-        '$sleep(ms: number): Promise<void>',
+        '$sleep(ms: number): Promise<void> — the only delay primitive in the sandbox; capped by the runtime (currently 30s) and aborted with the task',
+        'No timer globals exist in the sandbox: setTimeout, setInterval, setImmediate, queueMicrotask and the timers packages are all undefined. Use await $sleep(ms) for a pause, and drive polling with a bounded loop rather than an interval callback.',
         '$crypto.randomUUID(): Promise<string>',
         "$crypto.randomBytes(size?: number, encoding?: 'hex' | 'base64' | 'base64url'): Promise<string>",
         "$crypto.sha256(value: string, encoding?: 'hex' | 'base64' | 'base64url'): Promise<string>",
@@ -175,7 +176,7 @@ export function buildDynamicScriptContextTypeContract() {
         'Readable aliases @THROW400/@THROW401/@THROW403/@THROW404/@THROW409/@THROW422/@THROW429/@THROW500/@THROW503 each require exactly one message and compile to http(theFixedStatusCode, message).',
         'No .error, semantic throw methods, details argument, or numeric property calls exist in the source contract. @RES.json is success-only.',
       ],
-      '@PKGS': 'Record<string, package module>. Package calls may be async or thenable according to the installed package; await operations that produce values. A package-backed readable is a single-consumer AsyncIterable<Uint8Array>: pull it with for await...of, preflight it through $ctx.$streams, consume it through readBytes/readText, or relay it once through @RES.stream.',
+      '@PKGS': 'Record<string, package module>. Package calls may be async or thenable according to the installed package; await operations that produce values, and await a call before reading fields from a returned class instance. A returned class instance keeps its scalar data fields synchronous (status, ok, total, hasNext, cursor and similar non-function properties) while methods and object-valued properties stay async; an unawaited result is an async proxy for every property. A package-backed readable is a single-consumer AsyncIterable<Uint8Array>: pull it with for await...of, preflight it through $ctx.$streams, consume it through readBytes/readText, or relay it once through @RES.stream. A Web Response (including undici fetch results) arrives as a real Response: status, ok, statusText, url and headers are synchronous values, and text/json/arrayBuffer read the body once through $ctx.$streams. An undici request result stays a plain object whose statusCode is a number and whose body is a package readable.',
     },
     bridge: {
       async: 'In script code, calls through @REPOS, built-in @HELPERS, @CACHE, @STORAGE, @SOCKET, $ctx.$streams, @RES, and @TRIGGER cross the executor bridge and return promises. Named @HELPERS.run is task-local and async. Await them.',
