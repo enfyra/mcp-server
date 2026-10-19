@@ -1,0 +1,51 @@
+# Dynamic Script Failure Registry
+
+Every failure that reached a dynamic script is recorded here exactly once. The registry exists so a failure class is fixed at its owning layer and never rediscovered by a later session.
+
+## Rules
+
+1. Record the failure in the same change that fixes it, not later and not only in chat.
+2. Never reuse an ID. Append the next free number.
+3. Name the owning layer: `mcp-validation` (save/test preflight), `kernel-package-bridge` (executor package runtime), or `esv-runtime` (host context, routes, flows).
+4. When the failure class is statically detectable, add a deterministic validator in the same change and name it in the `Validator` column. Never rely on prose alone.
+5. When it is not statically detectable, write `runtime-only` and state the reason, so nobody adds a validator that produces false positives.
+6. Every fixed entry needs a regression test that fails without the fix.
+7. A symptom that is only a different manifestation of an existing root cause belongs in that entry's `Variants` cell, not in a new row.
+
+## Entries
+
+| ID | Symptom | Root cause | Layer | Fix | Regression | Validator |
+|---|---|---|---|---|---|---|
+| F-001 | `typeof res.status` is `'function'`, `Number(res.status)` throws on a package `Response` | Every package value crossed as an opaque async handle, so no data was synchronous | kernel-package-bridge | Dedicated `Response`/`Headers` envelope plus a synchronous data snapshot | `test-acceptance-package-response.mjs`, `test-acceptance-fetch-response.mjs` | runtime-only |
+| F-002 | Instance fields keep pre-call values after a mutating method | Snapshot was captured once and never refreshed | kernel-package-bridge | Every call returns a fresh snapshot of the object it ran on | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-003 | Nested instance loses its methods (`holder.child.increment` is not a function) | Nested instances were flattened into data | kernel-package-bridge | Nested instances cross as their own handle with their own snapshot | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-004 | `rows().map(...)` loses the receiver | A method read from a plain value was invoked without `this` | kernel-package-bridge | Plain-data methods keep their source value as receiver | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-005 | Business record shaped like a protocol envelope is mangled | Envelope detection matched ordinary records | kernel-package-bridge | Escape colliding records as `__plainObject`; internal state uses a `Symbol` tag | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-006 | Snapshot bounds had no effect | Arrays and records were truncated instead of skipped | kernel-package-bridge | Oversized or unrepresentable records cross as their own handle | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-007 | A bodyless `Response` (204) rejects every body read as unusable | Missing body was treated as an already-consumed body | kernel-package-bridge | Bodyless responses read as empty and do not mark `bodyUsed` | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-008 | A throwing accessor named `status` fails the whole call | Capability detection read package accessors unguarded | kernel-package-bridge | Every detection read is guarded and falls through to a handle | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-009 | A caught package error loses `name` and structured data (`issues`, `keyword`) | Only message and stack crossed the boundary | kernel-package-bridge | Error identity and data cross; transport carrier rides on the stack | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-010 | A package error retires the package child and fails an unrelated task in the same child | Error serialization read `error.name` outside a guard | kernel-package-bridge | Every error field read is individually guarded | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-011 | A record with one unsnapshottable member loses that member | Snapshot skipped the member but kept the record | kernel-package-bridge | The record crosses as its own handle; arrays keep `length` | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-012 | Business data containing `__pkgState` or `__pkgHandle` is treated as protocol state | Values were re-classified after decoding | kernel-package-bridge | Decoded values are never re-classified | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-013 | Deleted field still reads its old value; mutate-then-throw leaves stale data; parent refresh drops nested data | Refresh had no invalidation path and no error path | kernel-package-bridge | Explicit invalidation, state carried with errors, nested encode on refresh | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-014 | A `$property()` branch makes the root proxy stale | Each proxy created its own snapshot box | kernel-package-bridge | One snapshot box per handle, shared by every derived proxy | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-015 | `self()` returning `this` produces an alias with independent data | Each serialization created a new handle ID for the same object | kernel-package-bridge | One handle per object per task | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-016 | A thenable held in returned plain data never resolves on `await` | Only async result proxies resolved thenables, not handles | kernel-package-bridge | Thenable handles resolve exactly once on explicit await | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-017 | `const fn = await obj.method` yields an object and calling it throws | Method marker was not callable outside the proxy | kernel-package-bridge | A method marker decodes to a callable that dispatches to its owning handle | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-018 | `headers.set/append/delete` are missing on a package `Headers` | Headers crossed as read-only data | kernel-package-bridge | Header mutations update the local view and forward to the host object | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-019 | Refresh sent with an error arrives as wire data, so nested fields read as `undefined` | Error-carried state was cached without decoding | kernel-package-bridge | Error-carried state is decoded before caching | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-020 | `obj.__proto__` reads as `undefined` instead of being blocked | Missing-property handling swallowed every traversal error | kernel-package-bridge (security) | Only a missing property reads as `undefined`; forbidden keys still reject | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-021 | A record with a parent pointer fails the whole call as a circular reference | Any repeated node aborted serialization | kernel-package-bridge | A repeated node crosses as its own handle; cyclic members read live | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-022 | A 200-node linked chain fails with "maximum serialization depth" | Depth overflow rejected the call | kernel-package-bridge | Subtrees past the inline depth cross as a handle | `test-acceptance-package-contract.mjs` | runtime-only |
+| F-023 | `@LOGS.info(...)`, `@SOCKET.emit(...)`, `@TRIGGER.trigger(...)` save successfully and fail at runtime | No deterministic preflight for callable-vs-object contracts | mcp-validation | Portable validation rejects the method-style calls before save | `test/runtime-surface-contracts.test.js` | `validateLogsContract`, `validateSocketContract`, `validateTriggerContract` |
+| F-024 | Unawaited `#table.find(...)` reads `undefined` | Repository calls are async and were not awaited | mcp-validation | Portable validation requires `await` before repository calls | `test/runtime-surface-contracts.test.js` | `validateAwaitedRepositoryCalls` |
+| F-025 | `pkg.obj.then(...)` resolves to `undefined` and silently skips the callback | Package proxies reserve `then`/`catch`/`finally` for Promise assimilation | mcp-validation | Preflight rejects literal reserved-member access and names `$property` | `test/script-package-contract-validation.test.js` | `validatePackageContract` |
+| F-026 | `const x = new pkg.Class(); x.field` reads an async proxy | A constructor returns a handle; fields are only readable after `await` | mcp-validation | Preflight rejects an unawaited constructor whose binding is property-read | `test/script-package-contract-validation.test.js` | `validatePackageContract` |
+
+## Static coverage boundaries
+
+- Reading a field from an unawaited package *call* is not validated. A package function may legitimately return plain data (`nanoid()`, `uuid.v4()`), so a static rule would reject correct scripts. The contract text states the requirement, and the kernel keeps an unawaited result an async proxy.
+- Awaiting a lazy thenable (a query builder) is intentional when the script wants the query to run. Validation cannot distinguish intent.
+- Envelope, snapshot, alias, cycle, depth, `Response`, `Headers`, method-marker, and error-shape failures are runtime semantics. Their defense is the kernel contract suite, not a source validator.
+- A new runtime-only entry must name the kernel regression that pins it. A validator is added only when the failure class is unambiguous in source text.

@@ -279,6 +279,48 @@ export function validatePortableScriptSource(sourceCode) {
   validateTriggerContract(sourceCode);
   validateAwaitedRepositoryCalls(sourceCode);
   validateThrowContract(sourceCode);
+  validatePackageContract(sourceCode);
+}
+
+// One package proxy chain with no call in it: `@PKGS.foo.bar` or
+// `$ctx.$pkgs['foo'].bar`. A `)` inside the chain ends the match, which is what
+// separates the proxy itself from the value a call returns.
+const PACKAGE_PROXY_CHAIN = String.raw`(?:@PKGS|\$ctx\.\$pkgs)(?:\s*(?:\.\s*[A-Za-z_$][\w$]*|\[\s*(?:'[^']*'|"[^"]*"|\d+)\s*\]))+`;
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+}
+
+function validatePackageContract(sourceCode) {
+  const reservedMember = new RegExp(
+    `${PACKAGE_PROXY_CHAIN}\\s*\\.\\s*(then|catch|finally)\\b`,
+    'u',
+  ).exec(sourceCode);
+  if (reservedMember) {
+    throw new Error(
+      `Package proxies reserve .${reservedMember[1]}. Await the call to read its value, or use .$property("${reservedMember[1]}") when the package genuinely exposes that member.`,
+    );
+  }
+
+  const constructPattern = new RegExp(
+    `(?:const|let|var)\\s+([A-Za-z_$][\\w$]*)\\s*=\\s*new\\s+${PACKAGE_PROXY_CHAIN}\\s*\\(`,
+    'gu',
+  );
+  let match;
+  while ((match = constructPattern.exec(sourceCode)) !== null) {
+    const beforeOnLine = sourceCode.slice(
+      sourceCode.lastIndexOf('\n', match.index) + 1,
+      match.index,
+    );
+    if (/\bawait\s*$/u.test(beforeOnLine)) continue;
+    const binding = match[1];
+    const rest = sourceCode.slice(match.index + match[0].length);
+    const readPattern = new RegExp(`\\b${escapeRegExp(binding)}\\s*\\.`, 'u');
+    if (!readPattern.test(rest)) continue;
+    throw new Error(
+      `A package constructor returns a handle. Use const ${binding} = await new <package>.<Class>(...); before reading ${binding}.<field>.`,
+    );
+  }
 }
 
 function validateTriggerContract(sourceCode) {
