@@ -28,6 +28,14 @@ test('table-owned frames reject redundant wrappers without rejecting tab content
   assert.equal(reviewExtensionUiContract(owned).valid, true);
 });
 
+test('guidance allows a table inside a panel section while keeping the decorative-wrapper ban', () => {
+  const panelTable = '<template><Panel :sections="sections"><template #requests><DataTable header-name="Requests" :data="rows" :columns="columns" :loading="pending" /></template></Panel></template>';
+  assert.equal(reviewExtensionUiContract(panelTable).valid, true);
+  const guidance = JSON.stringify(getExtensionThemeContract());
+  assert.match(guidance, /may sit directly in a page or inside a Panel section/);
+  assert.doesNotMatch(guidance, /never nest it inside a Panel|instead of nesting it in a Panel/);
+});
+
 test('action and field ownership distinguish page controls from managed overlays', () => {
   const page = '<template><section><UButton @click="send">Send notification</UButton></section></template>';
   assert.equal(reviewExtensionUiContract(page).issues.some(issue => issue.rule === 'page-action-header'), true);
