@@ -107,6 +107,12 @@ export function reviewExtensionUiContract(code, options: AnyRecord = {}) {
       if (!hasStaticOrBound(table, 'loading')) {
         push('error', 'resource-list-table-loading', 'DataTable needs a request loading state.', 'Bind :loading for initial load and refresh so native header progress remains table-owned.');
       }
+      if (!hasStaticOrBound(table, 'header-name') && !hasStaticOrBound(table, 'headerName')) {
+        push('error', 'resource-list-table-header', 'DataTable requires a header-name.', 'Pass header-name (and optionally header-description) on every DataTable; the record count renders beside it automatically.');
+      }
+      if (hasStaticOrBound(table, 'show-record-count') || hasStaticOrBound(table, 'showRecordCount') || hasStaticOrBound(table, 'record-count') || hasStaticOrBound(table, 'recordCount')) {
+        push('error', 'resource-list-table-count-prop', 'DataTable no longer accepts count props.', 'Remove show-record-count and record-count; the count is always rendered from paginationConfig.total or the current rows.');
+      }
     }
     const frame = frames[0];
     if (frame && !hasStaticOrBound(frame, 'loading')) {

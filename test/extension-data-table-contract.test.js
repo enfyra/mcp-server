@@ -58,13 +58,15 @@ test('resource_list cursor mode keeps page size and commits requested pages thro
   assert.equal(reviewExtensionUiContract(asExtension(result.snippet), { pattern: 'resource_list' }).valid, true);
 });
 
-test('resource_list binds optional dataset heading and an exact known count without duplicate badge markup', () => {
-  const result = buildExtensionUiSnippet('resource_list', { headerName: 'Orders', showRecordCount: true, recordCountExpression: 'filteredCount' });
+test('resource_list always renders the heading and never emits count props', () => {
+  const result = buildExtensionUiSnippet('resource_list', { headerName: 'Orders', headerDescription: 'All orders' });
   assert.match(result.snippet, /header-name="Orders"/);
-  assert.match(result.snippet, /:show-record-count="true"/);
-  assert.match(result.snippet, /:record-count="filteredCount"/);
-  assert.doesNotMatch(result.snippet, /<UBadge/);
+  assert.match(result.snippet, /header-description="All orders"/);
+  assert.doesNotMatch(result.snippet, /show-record-count|record-count|<UBadge/);
   assert.doesNotThrow(() => validateExtensionCodeLocally(asExtension(result.snippet), { uiPattern: 'resource_list' }));
+
+  const fallback = buildExtensionUiSnippet('resource_list', {});
+  assert.match(fallback.snippet, /header-name="Records"/);
 });
 
 test('resource_list rejects record rows even when they use the shared non-tabular frame', () => {
@@ -75,11 +77,21 @@ test('resource_list rejects record rows even when they use the shared non-tabula
   assert.throws(() => validateExtensionCodeLocally(code, { uiPattern: 'resource_list' }), /resource-list-table-required/);
 });
 
-test('DataTable list validation requires data, columns and loading bindings', () => {
-  for (const prop of ['data', 'columns', 'loading']) {
-    const template = '<DataTable :data="orders" :columns="columns" :loading="pending" />';
-    const code = asExtension(template.replace(new RegExp(` :${prop}="[^"]*"`), ''));
+test('DataTable list validation requires data, columns, loading and a header', () => {
+  const template = '<DataTable header-name="Orders" :data="orders" :columns="columns" :loading="pending" />';
+  for (const prop of ['header-name', 'data', 'columns', 'loading']) {
+    const code = asExtension(template.replace(new RegExp(` ?:?${prop}="[^"]*"`), ''));
     assert.equal(reviewExtensionUiContract(code, { pattern: 'resource_list' }).valid, false);
+  }
+  assert.equal(reviewExtensionUiContract(asExtension(template), { pattern: 'resource_list' }).valid, true);
+});
+
+test('DataTable list validation rejects count props', () => {
+  for (const prop of [':show-record-count="true"', ':record-count="total"']) {
+    const code = asExtension(`<DataTable header-name="Orders" :data="orders" :columns="columns" :loading="pending" ${prop} />`);
+    const review = reviewExtensionUiContract(code, { pattern: 'resource_list' });
+    assert.equal(review.valid, false);
+    assert.ok(review.issues.some((issue) => issue.rule === 'resource-list-table-count-prop'));
   }
 });
 

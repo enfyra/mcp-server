@@ -340,27 +340,24 @@ export function buildExtensionResourceListSnippet(input) {
     `  @page-size-change="${input.pageSizeChangeExpression || `${itemsPerPageExpression} = $event; ${pageExpression} = 1`}"`,
   ];
   const rowClick = input.rowClickExpression ? `  @row-click="${input.rowClickExpression}"` : '';
-  const searchToolbar = input.searchExpression ? [
-    '  <template #toolbar>',
-    `    <form class="eapp-search-field min-w-0 w-full md:max-w-sm md:flex-1" @submit.prevent="${input.searchSubmitExpression || 'applySearch'}">`,
-    '      <UFieldGroup class="w-full" :ui="{ base: \'w-full rounded-[var(--radius-control)]\' }">',
-    `        <UInput v-model="${input.searchExpression}" icon="lucide:search" size="sm" :ui="{ base: 'h-8 !rounded-s-[var(--radius-control)] !rounded-e-none' }" class="w-full min-w-0 flex-1" placeholder="${String(input.searchPlaceholder || 'Search records').replace(/"/g, '&quot;')}" aria-label="${String(input.searchLabel || 'Search records').replace(/"/g, '&quot;')}" />`,
-    `        <UButton type="submit" size="sm" color="neutral" variant="outline" :loading="${input.loadingExpression || 'pending'}" class="h-8 !rounded-s-none !rounded-e-[var(--radius-control)]">Search</UButton>`,
-    '      </UFieldGroup>',
-    '    </form>',
-    '  </template>',
+  const searchProps = input.searchExpression ? [
+    '  :searchable="true"',
+    `  v-model:search="${input.searchExpression}"`,
+    `  search-placeholder="${String(input.searchPlaceholder || 'Search records').replace(/"/g, '&quot;')}"`,
+    `  search-label="${String(input.searchLabel || 'Search records').replace(/"/g, '&quot;')}"`,
+    ...(input.searchSubmitExpression ? [`  @search="${input.searchSubmitExpression}"`] : []),
   ] : [];
   const table = [
     '<DataTable',
+    `  header-name="${String(input.headerName || 'Records').replace(/"/g, '&quot;')}"`,
     `  :data="${itemsExpression}"`,
     `  :columns="${input.columnsExpression || 'columns'}"`,
     `  :loading="${input.loadingExpression || 'pending'}"`,
-    ...(input.headerName ? [`  header-name="${String(input.headerName).replace(/"/g, '&quot;')}"`] : []),
-    ...(input.showRecordCount ? ['  :show-record-count="true"', `  :record-count="${input.recordCountExpression || totalExpression}"`] : []),
+    ...(input.headerDescription ? [`  header-description="${String(input.headerDescription).replace(/"/g, '&quot;')}"`] : []),
     ...(paginated ? paginationBindings : []),
     ...(rowClick ? [rowClick] : []),
+    ...searchProps,
     '>',
-    ...searchToolbar,
     '  <template #empty>',
     '    <EmptyState',
     `      title="${String(input.emptyTitle || 'No items found').replace(/"/g, '&quot;')}"`,
@@ -377,7 +374,7 @@ export function buildExtensionResourceListSnippet(input) {
     : ['<section class="eapp-page-constrained-wide space-y-4">', indentLines(table, 2), '</section>'].join('\n');
   return {
     action: 'extension_resource_list_built',
-    components: ['DataTable', 'EmptyState', ...(input.searchExpression ? ['UFieldGroup', 'UInput', 'UButton'] : [])],
+    components: ['DataTable', 'EmptyState'],
     snippet,
     contract: [
       'Lists of records with information fields must use DataTable, not raw UTable, HTML tables, repeated cards, or CommonResourceListItem rows. Review/save with uiPattern="resource_list".',
@@ -388,9 +385,9 @@ export function buildExtensionResourceListSnippet(input) {
       'Use DataTable paginationConfig and @page-size-change for the shared footer; never copy pagination/selector CSS into extensions. Offset uses v-model:page. Cursor uses :page and @update:page with hasNextPage/loading; the handler selects the requested page cursor, replaces rows and commits page only after a successful response. Save visited cursors for Previous and fetch one extra row to determine Next availability. Reset cursor history on filters or page-size changes. Both control modes occupy the same footer position: centered on mobile and right-aligned on desktop. The main footer stays in-flow; offset mode retains its mini pager by default, and cursor mode has the same scoped mini pager at all widths. Mini controls stay left/range right on one line. Set paginationConfig.floating=false to disable it. Raw UPagination outside DataTable keeps Nuxt UI defaults. Both modes retain 10/20/50/100 page sizes; the caller owns query/cursor state and stable-key persistence. Use itemsPerPageExpression=0 only for known bounded non-paginated data.',
       'Show status as a badge; put Enable/Disable and destructive actions in a row ellipsis menu using named cell slots such as #actions-cell with row.original. row-click emits the original record.',
       'The shell centers and constrains every page. Use eapp-page-constrained-wide for the shared 75rem (1200px) cap; keep search/filter controls compact and avoid a second border around DataTable.',
-      'A single-dataset toolbar starts with a bounded search group on the left; native Columns stays on the right and is icon-only. Do not repeat the shell title and instruction paragraph next to search. Use a 32px size=sm input/Search group marked eapp-search-field, full width first below md with all other controls below; bound it on desktop and submit on Enter. Pass searchExpression/searchSubmitExpression/searchPlaceholder/searchLabel for this scaffold; callers own the query and first-page reset.',
-      'Below md the toolbar is two tiers: tier one is headerName or the caller Search, never both, because a page that owns Search already has a page header and the table hides its own title; tier two carries filters, count, toolbar-actions and Columns/reload, separated by a full-bleed border-t divider.',
-      'Use headerName for a distinct dataset title and showRecordCount/recordCount for a known count. Count precedence is recordCount, paginationConfig.total, then current rows; never invent a whole-dataset cursor total. The left header owns title/search/quick filters/count; toolbar-actions and Columns are on the right. A distinct dataset title is useful when a page has multiple tables. Put long guidance in the page description, concise scope/count in the shared footer or dataset toolbar, and complex filters in one eapp-bordered-region outside the table. Avoid arbitrary height, alignment or padding overrides on the native toolbar.',
+      'header-name is required on every DataTable and the record count is always rendered beside it on the left; there is no showRecordCount or recordCount prop. The count comes from paginationConfig.total, falling back to the current rows. Custom controls belong in #toolbar-actions, which renders in the header right cluster on desktop and in a second mobile tier beside the count. Search is a table-owned solo row below the header: pass searchable with v-model:search, search-placeholder, search-label and @search so DataTable renders CommonSearchField; never hand-build a UInput/UButton/UFieldGroup search form, never put search in #toolbar, and never register custom controls beside the search field. Callers own the query ref and first-page reset inside the @search handler.',
+      'The toolbar has no horizontal padding, so every tier divider spans the full table width. Desktop: title plus count and the action cluster share one header row, and the optional search is a solo row below it. Mobile: title row, then a tier with the count on the left and the action cluster on the right, then the full-width search row. Render DataTable as its own surface on a list page; never nest it inside a Panel.',
+      'Use header-name for the required dataset title and header-description for an optional supporting line under the title and count. The count is automatic; never pass a count prop. Put complex filters in the header action cluster, not beside the search field. Avoid arbitrary height, alignment or padding overrides on the native toolbar.',
       'DataTable reload is opt-in: pass :reload and optionally :reload-loading to render the icon-only reload button after Columns. Selection bulk actions stay in #toolbar-actions at every viewport and are icon-only (one error-outline square trash button, no Clear button and no selected-count text); report the count through #pagination-summary.',
     ],
   };
@@ -599,7 +596,7 @@ export function buildExtensionTabsSnippet(input) {
       'A section can declare title, description, icon and actions; Panel renders them as that section header with left and right action clusters. Use actions for controls owned by that tab or panel (reload its content, preview, upload) and keep Save/Delete/Reset on the shell header action bar. Section actions accept full HeaderAction objects, including component, show, permission, loading, disabled, to and submit.',
       'The topmost tab strip or section header uses the muted surface and divider. A header below tabs stays on the content surface. Use #value-header for custom header content in that section and #footer for the shared footer; that footer uses the same chrome as the DataTable footer (top border, compact horizontal padding, muted small text).',
       'Render each section through its named slot, for example #general. Do not use one shared #content slot or a shared header for every tab.',
-      'From md the section title and both action clusters share one row. Below md, a left action cluster puts the title on its own row with the actions on a separate bordered tier; with no left action cluster, the title and the right cluster stay on one row.',
+      'From md the section title and both action clusters share one row. Below md the title always keeps its own row and the left and right clusters move to a separate bordered tier, matching the DataTable toolbar.',
       'Hidden sections stay mounted by default to preserve drafts. Bind the selected section to the URL query in the caller when navigation state must survive reloads.',
       'For secondary navigation in the content body, call this builder with placement=secondary. It generates native pill UTabs with a neutral rounded tray, a solid theme-primary active surface and on-primary text/icons instead of another framed Panel.',
     ],

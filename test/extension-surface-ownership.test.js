@@ -51,13 +51,14 @@ test('header builder keeps expression-based loading and disabled state reactive'
 
 test('search toolbar has one bounded native control group and does not duplicate page or Columns chrome', () => {
   const built = buildExtensionUiSnippet('resource_list', { searchExpression: 'email', searchSubmitExpression: 'searchMembers', searchPlaceholder: 'Search by email', searchLabel: 'Member email' });
-  assert.match(built.snippet, /<template #toolbar>/);
-  assert.match(built.snippet, /@submit.prevent="searchMembers"/);
-  assert.match(built.snippet, /eapp-search-field min-w-0 w-full md:max-w-sm md:flex-1/);
-  assert.match(built.snippet, /<UFieldGroup class="w-full"/);
-  assert.match(built.snippet, /<UInput[^>]*size="sm"/);
-  assert.match(built.snippet, /h-8 !rounded-s-\[var\(--radius-control\)\] !rounded-e-none/);
-  assert.match(built.snippet, /<UButton[^>]*size="sm"/);
+  assert.match(built.snippet, /:searchable="true"/);
+  assert.match(built.snippet, /v-model:search="email"/);
+  assert.match(built.snippet, /@search="searchMembers"/);
+  assert.match(built.snippet, /search-placeholder="Search by email"/);
+  assert.match(built.snippet, /search-label="Member email"/);
+  assert.doesNotMatch(built.snippet, /<template #toolbar>|<form|<UFieldGroup|<UInput|<UButton/);
+  assert.match(built.contract.join(' '), /header-name is required on every DataTable/);
+  assert.match(built.snippet, /header-name="Records"/);
   assert.doesNotMatch(built.snippet, /<h[1-3]|Choose visible columns|>Columns</);
   assert.doesNotThrow(() => validateExtensionCodeLocally(`<template>${built.snippet}</template>`));
 });
