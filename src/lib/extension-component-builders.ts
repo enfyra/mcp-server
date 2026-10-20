@@ -587,12 +587,20 @@ export function buildExtensionTabsSnippet(input) {
     '  </template>',
     '</Panel>',
   ].join('\n');
+  const sectionsScaffold = [
+    `const ${items} = [`,
+    `  { value: '${sectionValue}', label: 'General', title: 'General', description: 'What this section shows and over which range.', icon: 'lucide:layout-list', slot: '${sectionValue}' },`,
+    `  { value: 'details', label: 'Details', title: 'Details', description: 'What this section shows and over which range.', icon: 'lucide:list', slot: 'details' }`,
+    ']',
+  ].join('\n');
   return {
     action: 'extension_tabs_built',
     component: 'Panel',
     snippet,
+    sectionsScaffold,
     contract: [
       'Panel is the registered framed content region. Pass sections as an array; a section with label or icon joins the tab strip, and one unlabeled section hides it.',
+      'Every Panel section that joins the tab strip must declare both title and description. Panel renders them as the section header; a section with only label shows no header, and a description without title falls back to the label. Never omit description just because the tab label already names the section.',
       'A section can declare title, description, icon and actions; Panel renders them as that section header with left and right action clusters. Use actions for controls owned by that tab or panel (reload its content, preview, upload) and keep Save/Delete/Reset on the shell header action bar. Section actions accept full HeaderAction objects, including component, show, permission, loading, disabled, to and submit.',
       'The topmost tab strip or section header uses the muted surface and divider. A header below tabs stays on the content surface. Use #value-header for custom header content in that section and #footer for the shared footer; that footer uses the same chrome as the DataTable footer (top border, compact horizontal padding, muted small text).',
       'Render each section through its named slot, for example #general. Do not use one shared #content slot or a shared header for every tab.',

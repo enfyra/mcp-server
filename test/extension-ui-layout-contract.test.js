@@ -24,6 +24,15 @@ test('tabs builder uses the registered shared panel without duplicating its bord
   assert.doesNotThrow(() => validateExtensionCodeLocally(`<template>${built.snippet}</template>`));
 });
 
+test('panel tabs builder requires title and description on every tabbed section', () => {
+  const built = buildExtensionUiSnippet('tabs', { model: 'selectedTab', itemsExpression: 'sections', body: '<p>{{ item.label }}</p>' });
+  assert.match(built.contract.join(' '), /must declare both title and description/);
+  assert.match(built.sectionsScaffold, /title: 'General'/);
+  assert.match(built.sectionsScaffold, /description: '/);
+  const guidance = JSON.stringify([buildRequiredKnowledgePayload('extension'), getExtensionThemeContract()]);
+  assert.match(guidance, /must declare both title and description/);
+});
+
 test('information-list guidance uses the shared footer and all request states', () => {
   const built = buildExtensionUiSnippet('resource_list', {});
   assert.match(JSON.stringify(built.contract), /native UTable loading/);
