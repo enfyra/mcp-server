@@ -315,7 +315,7 @@ test('resource-list policy requires DataTable instead of ad hoc or shared resour
   assert.equal(sharedRows.valid, false);
   assert.match(JSON.stringify(sharedRows.issues), /resource-list-table-required/);
 
-  const tableCode = '<template><section class="eapp-page-constrained-wide"><DataTable :data="items" :columns="columns" :loading="pending" /></section></template>';
+  const tableCode = '<template><section class="eapp-page-constrained-wide"><DataTable header-name="Orders" :data="items" :columns="columns" :loading="pending" /></section></template>';
   assert.equal(reviewExtensionUiContract(tableCode, { pattern: 'resource_list' }).valid, true);
   assert.doesNotThrow(() => validateExtensionCodeLocally(tableCode, { uiPattern: 'resource_list' }));
   const missingColumns = tableCode.replace(' :columns="columns"', '');
@@ -334,7 +334,7 @@ test('extension verification distinguishes compiler and contract checks from bro
   const code = [
     '<template>',
     '  <section class="eapp-page-constrained-wide">',
-    '    <DataTable :data="items" :columns="columns" :loading="pending" />',
+    '    <DataTable header-name="Orders" :data="items" :columns="columns" :loading="pending" />',
     '  </section>',
     '</template>',
   ].join('\n');
@@ -356,7 +356,7 @@ test('verifyExtensionRuntime reads the saved extension and compiles that exact s
   const originalFetch = globalThis.fetch;
   const apiUrl = 'http://mcp-extension-verifier.test/api';
   const calls = [];
-  const code = '<template><section class="eapp-page-constrained-wide"><DataTable :data="items" :columns="columns" :loading="pending" /></section></template>';
+  const code = '<template><section class="eapp-page-constrained-wide"><DataTable header-name="Orders" :data="items" :columns="columns" :loading="pending" /></section></template>';
   initAuth(apiUrl, 'pat_test');
   resetTokens();
   globalThis.fetch = async (url, options = {}) => {
@@ -404,8 +404,10 @@ test('extension full saves can read a reviewed source artifact without echoing t
     if (textUrl.includes('/enfyra_extension?')) {
       return jsonResponse({ data: [{ id: 7, name: 'ArtifactExtension', type: 'widget', isEnabled: true, version: '1.0.0', code: savedCode }] });
     }
+    if (textUrl.endsWith('/metadata')) return jsonResponse({ dbType: 'postgres' });
     if (textUrl.endsWith('/enfyra_extension/preview')) return jsonResponse({ success: true, extensionId: 'ArtifactExtension', compiledCode: 'compiled' });
     if (textUrl.endsWith('/enfyra_extension/7')) {
+      assert.equal(JSON.parse(String(options.body)).version, '1.0.1');
       savedCode = JSON.parse(String(options.body)).code;
       return jsonResponse({ data: [{ id: 7, name: 'ArtifactExtension', type: 'widget', isEnabled: true, version: '1.0.0' }] });
     }

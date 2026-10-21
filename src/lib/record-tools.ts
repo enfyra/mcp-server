@@ -30,6 +30,7 @@ import {
   validateExtensionCodeForGenericMutation,
 } from './enfyra-tool-logic.js';
 import { fetchAPI, validateFilter, validateTableName } from './fetch.js';
+import { prepareCodeUpdate } from './code-version.js';
 import { fetchTableCatalog, fetchTableMetadata } from './metadata-client.js';
 import { assertGenericRecordMutationAllowed, parseRecordBatchData, resolveCanonicalTableName } from './mutation-guards.js';
 import { validateQueryContract } from './query-contract.js';
@@ -53,7 +54,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
     filter: jsonObjectParam(z, 'Filter object').optional().describe('Filter object to narrow the result set. Prefer a range filter (for example a record time window) over all=true so queries stay bounded. Example: {"status": {"_eq": "active"}}.'),
     sort: z.string().optional().describe('Sort field. Prefix with - for descending (e.g., "createdAt", "-id")'),
     page: z.number().optional().describe('Page number (default: 1). Paginate with limit+page to page through more than one cap-sized batch instead of requesting an unbounded all.'),
-    limit: z.number().int().min(0).optional().describe('Items per page. Required unless all=true. Do not invent arbitrary limits for "all"; use all=true instead. Use count_records for counts.'),
+    limit: z.number().int().min(-1).optional().describe('Items per page. Required unless all=true. Use -1 for unlimited (the documented contract); 0 is still accepted as the legacy unlimited value. Do not invent arbitrary limits for "all"; use all=true instead. Use count_records for counts.'),
     all: z.boolean().optional().default(false).describe('Return matching rows capped at ' + String(QUERY_TABLE_ALL_CAP) + ' rows (never no-limit). Prefer a filter/range; if the result is capped, paginate with limit+page to read further.'),
     fields: z.array(z.string()).optional().describe('Fields to select. If omitted, MCP selects only the table primary key to avoid oversized responses.'),
     meta: z.string().optional().describe('Optional REST meta request, e.g. "totalCount", "filterCount", or aggregate modes supported by the route. Use count_records for simple counts.'),
@@ -338,6 +339,7 @@ export function registerRecordTools(server, ENFYRA_API_URL) {
       }
       assertKnowledgeForGenericMutation(tableName, JSON.stringify(item.data), { knowledgeAckKey, extensionKnowledgeAckKey });
       const prepared = await prepareGenericMutation(tableName, JSON.stringify(item.data), 'update');
+      prepared.payload = await prepareCodeUpdate(`/${tableName}/${encodeURIComponent(String(item.id))}`, prepared.payload, path => fetchAPI(ENFYRA_API_URL, path));
       preparedItems.push({ index, id: item.id, queryParams: item.queryParams, prepared });
       extensionValidations.push(await validateExtensionCodeForGenericMutation(tableName, prepared.payload, item.id));
     }

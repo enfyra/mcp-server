@@ -145,6 +145,36 @@ const oauthProviderOutputSchema = {
   }).passthrough(),
 } satisfies ZodRawShape;
 
+const codeHistoryOutputSchema = {
+  ...baseOutputSchema,
+  data: recordArrayOutputSchema,
+} satisfies ZodRawShape;
+
+const codeRevisionOutputSchema = {
+  ...baseOutputSchema,
+  auditId: z.string(),
+  tableName: z.string(),
+  recordId: z.string(),
+  action: z.enum(['create', 'update', 'delete', 'revert']),
+  restorable: z.boolean(),
+  sourceArtifact: z.object({
+    resourceUri: z.string(),
+    tmpFile: z.string(),
+    sha256: z.string(),
+    length: z.number().int().nonnegative(),
+  }).optional(),
+} satisfies ZodRawShape;
+
+const restoredCodeRevisionOutputSchema = {
+  ...actionOutputSchema,
+  action: z.literal('code_revision_restored'),
+  auditId: z.string(),
+  tableName: z.string(),
+  recordId: z.string(),
+  version: z.string(),
+  verified: z.literal(true),
+} satisfies ZodRawShape;
+
 const CORE_ACTION_OUTPUT_TOOLS = new Set([
   'search_runtime_zone',
   'search_admin_extensions',
@@ -197,6 +227,9 @@ export function getToolOutputSchema(toolName: string): ZodRawShape | undefined {
   if (toolName === 'discover_enfyra_workflows') return workflowDiscoveryOutputSchema;
   if (toolName === 'get_enfyra_api_context') return apiContextOutputSchema;
   if (toolName === 'query_table') return queryTableOutputSchema;
+  if (toolName === 'get_code_history') return codeHistoryOutputSchema;
+  if (toolName === 'inspect_code_revision') return codeRevisionOutputSchema;
+  if (toolName === 'restore_code_revision') return restoredCodeRevisionOutputSchema;
   if (toolName === 'inspect_rest_projection') return restProjectionOutputSchema;
   if (toolName === 'delete_records') return deleteRecordsOutputSchema;
   if (['delete_tables', 'delete_columns', 'delete_relations', 'delete_method', 'delete_route', 'delete_route_handler', 'delete_route_hook', 'delete_route_permission', 'delete_flow', 'delete_flow_step', 'delete_extension', 'delete_menu', 'uninstall_package'].includes(toolName)) {

@@ -474,7 +474,7 @@ export async function ensureExtension(apiUrl, {
   menuId,
   description,
   isEnabled = true,
-  version = '1.0.0',
+  version = undefined,
   globalRulesAckKey,
   extensionKnowledgeAckKey,
 }) {

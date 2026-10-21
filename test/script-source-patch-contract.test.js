@@ -37,6 +37,7 @@ function createToolHarness() {
 function installScriptPatchFetchMock(initialSource = 'return "before";', tableName = TABLE_NAME) {
   const originalFetch = globalThis.fetch;
   let source = initialSource;
+  let version = '1.0.0';
   const writes = [];
 
   globalThis.fetch = async (url, options = {}) => {
@@ -64,6 +65,7 @@ function installScriptPatchFetchMock(initialSource = 'return "before";', tableNa
         },
       });
     }
+    if (new URL(urlText).pathname.endsWith(`/${tableName}`) && new URL(urlText).searchParams.get('fields') === 'version') return jsonResponse({ data: [{ version }] });
     if (urlText.includes(`/${tableName}?`)) {
       return jsonResponse({
         data: [{ id: RECORD_ID, sourceCode: source, scriptLanguage: 'javascript' }],
@@ -75,6 +77,7 @@ function installScriptPatchFetchMock(initialSource = 'return "before";', tableNa
     if (urlText.endsWith(`/${tableName}/${RECORD_ID}`) && options.method === 'PATCH') {
       const payload = JSON.parse(String(options.body));
       source = payload.sourceCode;
+      version = payload.version;
       writes.push(payload);
       return jsonResponse({ data: { id: RECORD_ID } });
     }

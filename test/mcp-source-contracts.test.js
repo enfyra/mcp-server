@@ -54,7 +54,7 @@ import {
 test('mcp server exposes update_script_source for raw source updates', () => {
   const entry = readEntrySource();
   assert.match(entry, /server\.tool\(\s*['"]update_script_source['"]/);
-  assert.match(entry, /JSON\.stringify\(\{ sourceCode: resolvedSourceCode, scriptLanguage \}\)/);
+  assert.match(entry, /JSON\.stringify\(\{ sourceCode: resolvedSourceCode, scriptLanguage, \.\.\.\(version === undefined \? \{\} : \{ version \}\) \}\)/);
   assert.match(entry, /updated_script_source/);
   assert.match(entry, /sourceFile/);
   assert.match(entry, /sourceResourceUri/);

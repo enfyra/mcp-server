@@ -28,6 +28,7 @@ import { registerRouteTools } from './route-tools.js';
 import { startRuntimeCacheSocket } from './runtime-cache-socket.js';
 import { registerRuntimeZoneTools } from './runtime-zone-tools.js';
 import { registerScriptTools } from './script-tools.js';
+import { registerCodeHistoryTools } from './code-history-tools.js';
 import { readSourceArtifactResource } from './source-artifacts.js';
 import { registerSystemTools } from './system-tools.js';
 import { registerTableTools } from './table-tools.js';
@@ -83,6 +84,7 @@ export function createEnfyraMcpServer() {
   registerDiscoveryTools(server, ENFYRA_API_URL);
   registerRecordTools(server, ENFYRA_API_URL);
   registerScriptTools(server, ENFYRA_API_URL);
+  registerCodeHistoryTools(server, ENFYRA_API_URL);
   registerMethodTools(server, ENFYRA_API_URL);
   registerRouteTools(server, ENFYRA_API_URL);
   registerTableTools(server, ENFYRA_API_URL, { toolset: MCP_TOOLSET });

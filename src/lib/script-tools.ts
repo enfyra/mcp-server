@@ -90,11 +90,12 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       occurrence: z.enum(['first', 'all']).optional().default('all').describe('Replace first occurrence or all occurrences.'),
       expectedSourceSha256: z.string().optional().describe('Optional SHA-256 from get_script_source; fails if source changed.'),
       scriptLanguage: z.string().optional().describe('Script language to save. Defaults to existing scriptLanguage or javascript.'),
+      version: z.string().optional().describe('Optional advancing version. Omit to increment the current patch version.'),
       apply: z.boolean().optional().default(false).describe('false returns preview only; true validates and saves.'),
       globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when apply=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
       knowledgeAckKey: dynamicCodeKnowledgeAckParam(z).optional().describe('Required when apply=true. Use dynamicCodeAckKey from get_enfyra_required_knowledge.'),
     },
-    async ({ tableName, id, oldText, newText, sourceFile, sourceResourceUri, occurrence, expectedSourceSha256, scriptLanguage, apply, globalRulesAckKey, knowledgeAckKey }) => {
+    async ({ tableName, id, oldText, newText, sourceFile, sourceResourceUri, occurrence, expectedSourceSha256, scriptLanguage, version, apply, globalRulesAckKey, knowledgeAckKey }) => {
       const { record, sourceField, sourceCode } = await fetchScriptRecord(tableName, id);
       if (sourceField !== 'sourceCode') {
         throw new Error(`patch_script_source only saves sourceCode records. Record uses "${sourceField}"; use update_records intentionally for this legacy field.`);
@@ -153,7 +154,7 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       const language = scriptLanguage || record.scriptLanguage || 'javascript';
       const prepared = await prepareGenericMutation(
         tableName,
-        JSON.stringify({ sourceCode: exactPatched, scriptLanguage: language }),
+        JSON.stringify({ sourceCode: exactPatched, scriptLanguage: language, ...(version === undefined ? {} : { version }) }),
       );
       const result = await fetchAPI(
         ENFYRA_API_URL,
@@ -189,10 +190,11 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI. The MCP server reads only artifacts created in this process.'),
       expectedSourceSha256: z.string().optional().describe('Optional SHA-256 of the current saved source from inspect/get_script_source. Rejects a stale full replacement.'),
       scriptLanguage: z.string().optional().default('javascript').describe('Script language, usually javascript or typescript'),
+      version: z.string().optional().describe('Optional advancing version. Omit to increment the current patch version.'),
       globalRulesAckKey: globalRulesAckParam(z),
       knowledgeAckKey: dynamicCodeKnowledgeAckParam(z),
     },
-    async ({ tableName, id, sourceCode, sourceFile, sourceResourceUri, expectedSourceSha256, scriptLanguage, globalRulesAckKey, knowledgeAckKey }) => {
+    async ({ tableName, id, sourceCode, sourceFile, sourceResourceUri, expectedSourceSha256, scriptLanguage, version, globalRulesAckKey, knowledgeAckKey }) => {
       assertGlobalRulesAck(globalRulesAckKey);
       assertDynamicCodeKnowledgeAck(knowledgeAckKey);
       validateTableName(tableName);
@@ -211,7 +213,7 @@ export function registerScriptTools(server, ENFYRA_API_URL) {
       }
       const prepared = await prepareGenericMutation(
         tableName,
-        JSON.stringify({ sourceCode: resolvedSourceCode, scriptLanguage }),
+        JSON.stringify({ sourceCode: resolvedSourceCode, scriptLanguage, ...(version === undefined ? {} : { version }) }),
       );
       const result = await fetchAPI(
         ENFYRA_API_URL,

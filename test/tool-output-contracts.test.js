@@ -24,9 +24,23 @@ test('core workflow tools receive formal output schemas', () => {
     'extension_workflow',
     'flow_workflow',
     'verify_extension_runtime',
+    'get_code_history',
+    'inspect_code_revision',
+    'restore_code_revision',
   ]) {
     assert.ok(getToolOutputSchema(name), `${name} has no output schema`);
   }
+});
+
+test('code history output contracts require exact targets and verified restore versions', () => {
+  const target = { tableName: 'enfyra_helper', recordId: '7', auditId: '2' };
+  assert.equal(validateStructuredToolOutput('get_code_history', { responseFormat: 'json-v1', data: [] }).success, true);
+  assert.equal(validateStructuredToolOutput('get_code_history', { responseFormat: 'json-v1' }).success, false);
+  assert.equal(validateStructuredToolOutput('inspect_code_revision', { responseFormat: 'json-v1', ...target, action: 'update', restorable: true }).success, true);
+  assert.equal(validateStructuredToolOutput('inspect_code_revision', { responseFormat: 'json-v1', ...target }).success, false);
+  const restored = { responseFormat: 'json-v1', ...target, action: 'code_revision_restored', version: '1.0.2', verified: true };
+  assert.equal(validateStructuredToolOutput('restore_code_revision', restored).success, true);
+  assert.equal(validateStructuredToolOutput('restore_code_revision', { ...restored, verified: false }).success, false);
 });
 
 test('output contract wrapper migrates contracted legacy calls to registerTool', () => {

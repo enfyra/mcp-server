@@ -281,11 +281,11 @@ export const TOOL_WORKFLOWS = [
       'Debugging macro, repository, or validation behavior.',
       'Splitting a large hook or handler into pre-hook, handler, post-hook, column-rule, guard, or flow responsibilities.',
     ],
-    keywords: ['sourcecode', 'script', 'shared helper', 'enfyra_helper', 'helpers.run', 'hook', 'pre hook', 'post hook', 'hook layering', 'god hook', 'split handler', 'large script', 'decompose script', 'compiledcode', 'macro', 'repos'],
+    keywords: ['code history', 'revision', 'restore', 'revert', 'version', 'sourcecode', 'script', 'shared helper', 'enfyra_helper', 'helpers.run', 'hook', 'pre hook', 'post hook', 'hook layering', 'god hook', 'split handler', 'large script', 'decompose script', 'compiledcode', 'macro', 'repos'],
     firstTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'build_dynamic_repository_usage', 'search_runtime_zone'],
-    inspectTools: ['search_runtime_zone(mode=search, zone=api_runtime|flow_runtime|websocket_runtime)', 'search_runtime_zone(mode=inspect)', 'trace_metadata_usage', 'discover_script_contexts'],
+    inspectTools: ['get_code_history', 'inspect_code_revision', 'search_runtime_zone(mode=search, zone=api_runtime|flow_runtime|websocket_runtime)', 'search_runtime_zone(mode=inspect)', 'trace_metadata_usage', 'discover_script_contexts'],
     knowledgeTools: ['get_enfyra_required_knowledge', 'discover_script_contexts', 'build_dynamic_repository_usage'],
-    writeTools: ['patch_script_source', 'update_script_source', 'create_records', 'update_records', 'delete_records', 'create_handler', 'create_pre_hook', 'create_post_hook', 'api_endpoint_workflow'],
+    writeTools: ['restore_code_revision', 'patch_script_source', 'update_script_source', 'create_records', 'update_records', 'delete_records', 'create_handler', 'create_pre_hook', 'create_post_hook', 'api_endpoint_workflow'],
     verifyTools: ['validate_dynamic_script', 'run_admin_test', 'test_rest_endpoint', 'test_flow_step'],
     avoidTools: [
       {

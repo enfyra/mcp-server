@@ -43,7 +43,7 @@ test('guided domain profiles expose a bounded task surface', () => {
   for (const profile of ['extension', 'schema', 'runtime', 'operations']) {
     const visible = [...registered].filter((name) => isToolInProfile(name, profile));
     assert.ok(visible.length >= 20, `${profile} exposes too few tools: ${visible.length}`);
-    assert.ok(visible.length <= 56, `${profile} includes too many internal operations: ${visible.length}`);
+    assert.ok(visible.length <= 59, `${profile} includes too many internal operations: ${visible.length}`);
     assert.ok(visible.includes('get_enfyra_api_context'));
     assert.ok(visible.includes('get_enfyra_required_knowledge'));
     assert.ok(visible.includes('discover_enfyra_workflows'));

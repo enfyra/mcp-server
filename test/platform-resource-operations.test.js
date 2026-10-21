@@ -155,14 +155,18 @@ test('updateExtensionCode uses sourceResourceUri through validate, save, re-read
   const expectedSha256 = createHash('sha256').update('<template></template>').digest('hex');
   const requests = [];
   let savedCode = '<template></template>';
+  let savedVersion = '1.0.0';
   const restore = setupFetch(async (url, init = {}) => {
     const urlText = String(url);
     requests.push({ url: urlText, method: init.method, body: init.body ? JSON.parse(init.body) : undefined });
-    if (urlText.includes('/enfyra_extension?')) return jsonResponse({ data: [{ id: 16, name: 'Bell', type: 'global', isEnabled: true, version: '1.0.0', code: savedCode }] });
+    if (urlText.includes('/enfyra_extension?')) return jsonResponse({ data: [{ id: 16, name: 'Bell', type: 'global', isEnabled: true, version: savedVersion, code: savedCode }] });
+    if (urlText.endsWith('/metadata')) return jsonResponse({ dbType: 'postgres' });
     if (urlText.endsWith('/enfyra_extension/preview')) return jsonResponse({ success: true, compiledCode: 'compiled' });
     if (urlText.endsWith('/enfyra_extension/16') && init.method === 'PATCH') {
-      savedCode = JSON.parse(init.body).code;
-      return jsonResponse({ data: [{ id: 16, name: 'Bell', type: 'global', isEnabled: true, version: '1.0.0' }] });
+      const body = JSON.parse(init.body);
+      savedCode = body.code;
+      savedVersion = body.version;
+      return jsonResponse({ data: [{ id: 16, name: 'Bell', type: 'global', isEnabled: true, version: savedVersion }] });
     }
     throw new Error(`Unexpected request: ${urlText}`);
   });
@@ -181,7 +185,8 @@ test('updateExtensionCode uses sourceResourceUri through validate, save, re-read
     assert.equal(result.verification.valid, true);
     assert.equal(result.sha256, createHash('sha256').update(source).digest('hex'));
     const patch = requests.find((request) => request.method === 'PATCH');
-    assert.deepEqual(patch.body, { code: source });
+    assert.deepEqual(patch.body, { code: source, version: '1.0.1' });
+    assert.equal(savedVersion, '1.0.1');
     assert.equal(Object.hasOwn(patch.body, 'sourceFile'), false);
     assert.equal(Object.hasOwn(patch.body, 'sourceResourceUri'), false);
     assert.equal(requests.filter((request) => request.url.endsWith('/enfyra_extension/preview')).length, 2);
@@ -197,7 +202,9 @@ test('updateExtensionCode skips source validation for isEnabled-only changes', a
     if (String(url).includes('/enfyra_extension?')) {
       return jsonResponse({ data: [{ id: 16, name: 'Bell', type: 'global', isEnabled: false, version: '1.0.0', code: '<template></template>' }] });
     }
-    return jsonResponse({ data: [{ id: 16, name: 'Bell', type: 'global', isEnabled: true, version: '1.0.0' }] });
+    if (String(url).endsWith('/metadata')) return jsonResponse({ dbType: 'postgres' });
+    assert.equal(init.method, 'PATCH');
+    return jsonResponse({ data: [{ id: 16, name: 'Bell', type: 'global', isEnabled: true, version: JSON.parse(init.body).version }] });
   });
 
   try {
@@ -214,9 +221,12 @@ test('updateExtensionCode skips source validation for isEnabled-only changes', a
     assert.equal(result.action, 'extension_state_updated');
     assert.deepEqual(result.validation, { skipped: true, reason: 'Only isEnabled changed.' });
     assert.equal(result.verification.skipped, true);
-    assert.equal(requests.length, 2);
-    assert.equal(requests[1].method, 'PATCH');
-    assert.deepEqual(requests[1].body, { isEnabled: true });
+    const versionRead = requests.find(request => new URL(request.url).searchParams.get('fields') === 'version');
+    assert.equal(new URL(versionRead.url).pathname, '/api/enfyra_extension');
+    assert.deepEqual(JSON.parse(new URL(versionRead.url).searchParams.get('filter')), { id: { _eq: '16' } });
+    const patch = requests.find(request => request.method === 'PATCH');
+    assert.deepEqual(patch.body, { isEnabled: true, version: '1.0.1' });
+    assert.equal(requests.filter(request => request.method === 'PATCH').length, 1);
   } finally {
     restore();
   }

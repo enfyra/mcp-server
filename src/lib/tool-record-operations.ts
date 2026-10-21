@@ -107,6 +107,7 @@ export function summarizeMutationResult(result, action, tableName) {
     action,
     tableName,
     id: getId(record),
+    version: record?.version,
     statusCode: result?.statusCode,
     success: result?.success,
     detailHint: `Use find_one_record or query_table with explicit fields to inspect ${tableName}.`,

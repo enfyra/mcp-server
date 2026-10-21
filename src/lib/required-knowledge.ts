@@ -284,6 +284,14 @@ const GLOBAL_RULES_SECTIONS = [
 
 const DYNAMIC_CODE_SECTIONS = [
   {
+    id: 'code-versions-and-history',
+    rules: [
+      'Updates to handlers, pre/post hooks, helpers, flow steps, websocket gateways/events, OAuth configs and extensions require a valid version greater than the persisted version. ESV validates but never generates update versions. Canonical MCP PATCH writes read only the current version and propose the next patch when version is omitted; supply a greater valid version for an intentional minor or major jump. Creation may omit version and defaults to 1.0.0.',
+      'History stores the previous published scalar fields for an exact tableName and recordId, not another copy of current source. Use get_code_history for a bounded list and inspect_code_revision for a selected source artifact. Keep history permissions narrow because previous source can contain sensitive logic.',
+      'restore_code_revision restores an inspected pre-image into the existing target as a new version. Preserve all intervening history; never recreate a deleted target. The backend requires history read, revert endpoint access and target PATCH permission. Version preflight is not an atomic source comparison or transaction; after an error inspect persisted state before retrying.',
+    ],
+  },
+  {
     id: 'secure-vs-trusted-repositories',
     rules: [
       '@REPOS.main is the secure repository for the current route main table and preserves normal route query behavior.',
@@ -470,7 +478,7 @@ const EXTENSION_SECTIONS = [
       'Dynamic extension templates expose the app empty-state component as <EmptyState>, not <CommonEmptyState>. Prefer the empty_state, resource_list, or resource_grid builder instead of writing either tag from memory.',
       'For theme choices, call build_extension_ui kind=theme_classes with an intent such as neutral_surface, primary_identity, primary_soft_icon_tile, status_success, primary_action, secondary_action, divider, or text instead of inventing classes from memory.',
       'Use build_extension_ui kind=runtime_review, theme_review, or review before saving generated snippets that include useApi, useNotify, theme classes, drawers, modals, fields, lists, tabs, upload modals, shell registry code, or native buttons.',
-      'For same-version edits to an existing extension, inspect the extension first and read its process-scoped enfyra-source resource URI when snippets are not enough. Local clients also receive a permission-restricted tmpFile fallback. Pass sourceFile or sourceResourceUri to update_extension_code when the reviewed file is the intended full replacement; use patch_extension_code for a focused exact patch. Do not regenerate the full Vue SFC for a small bug fix, styling adjustment, or contract correction unless the user explicitly asks for a rewrite or version-changing redesign.',
+      'For focused edits to an existing extension, inspect the extension first and read its process-scoped enfyra-source resource URI when snippets are not enough. Local clients also receive a permission-restricted tmpFile fallback. Pass sourceFile or sourceResourceUri to update_extension_code when the reviewed file is the intended full replacement; use patch_extension_code for a focused exact patch. Do not regenerate the full Vue SFC for a small bug fix, styling adjustment, or contract correction unless the user explicitly asks for a rewrite or a broader redesign. Every update advances the record version; omit version to increment the current patch or supply a greater valid value.',
       'patch_extension_code apply=true requires expectedSha256 and writes a bounded .diff artifact. update_extension_code accepts expectedSha256 for stale full-replacement protection.',
       'ensure_*_extension, update_extension_code, and patch_extension_code apply=true automatically re-read and verify the exact saved source, expected hash, server compilation, static UI/theme/runtime contracts, and page menu wiring. Use verify_extension_runtime for an additional independent recheck. browserRender=not_run means signed-in browser QA is still required for component execution, live data shape, console errors, and responsive layout.',
       'Extension validation rejects UInput/UTextarea/USelect/USelectMenu/UInputMenu/UInputNumber/UInputTags/UInputTime/UInputDate without class="w-full" unless the field is explicitly marked data-compact or data-inline.',

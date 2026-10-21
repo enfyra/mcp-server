@@ -22,6 +22,7 @@ const DESTRUCTIVE_TOOLS = new Set([
 
 const MUTATION_TOOL_PATTERN = /^(?:create|update|delete|ensure|patch|install|uninstall|enable|disable|reorder|reload|trigger|set|add|remove)_/;
 const MUTATION_TOOLS = new Set([
+  'restore_code_revision',
   'prepare_enfyra_workspace',
   'pull_enfyra_sources',
   'push_enfyra_sources',

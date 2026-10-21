@@ -4,6 +4,7 @@
  */
 
 import { getApiTokenHeaders } from './auth.js';
+import { prepareCodeUpdate } from './code-version.js';
 import {
   getRateLimitState,
   observeRateLimitHeaders,
@@ -58,10 +59,15 @@ export async function fetchAPI(apiUrl: string, path: string, options: FetchApiOp
   const url = `${apiUrl}${path}`;
   const method = String(options.method || 'GET').toUpperCase();
   const { timeoutMs: requestedTimeoutMs, ...requestOptions } = options;
+  if (method === 'PATCH' && typeof requestOptions.body === 'string') {
+    const body = JSON.parse(requestOptions.body);
+    const prepared = await prepareCodeUpdate(path, body, readPath => fetchAPI(apiUrl, readPath, { method: 'GET', headers: requestOptions.headers, timeoutMs: requestedTimeoutMs }));
+    requestOptions.body = JSON.stringify(prepared);
+  }
   const timeoutMs = Number.isFinite(requestedTimeoutMs) && Number(requestedTimeoutMs) > 0
     ? Number(requestedTimeoutMs)
     : FETCH_TIMEOUT;
-  const cacheable = isRuntimeCacheableGet(path, method);
+  const cacheable = !/[?&]fields=version(?:&|$)/.test(path) && isRuntimeCacheableGet(path, method);
   const cacheGeneration = cacheable ? runtimeCacheGenerationForPath(path) : undefined;
   if (cacheable) {
     const cached = getRuntimeCache(path);
