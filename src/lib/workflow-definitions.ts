@@ -432,9 +432,9 @@ export const TOOL_WORKFLOWS = [
     avoidTools: [
       {
         tool: 'ensure_script_flow_step',
-        when: 'a fixed query/create/update/delete/http/sleep/trigger/log step can express the operation',
+        when: 'the step mixes several business operations that should be separate named steps',
         useInstead: 'flow_workflow or plan_flow_steps',
-        reason: 'Atomic step types are easier to inspect, test, and maintain than oversized scripts.',
+        reason: 'One focused script step per business operation stays inspectable and testable.',
       },
     ],
     requiredAck: ['globalRulesAckKey', 'dynamicCodeAckKey for script or condition source'],
@@ -443,8 +443,8 @@ export const TOOL_WORKFLOWS = [
       'Use flow_workflow with apply=false for multi-step flows, or ensure_flow when only the base flow definition changes.',
       'Use ensure_flow_trigger after the flow exists to attach schedule, event, or webhook activation. Use remove_flow_trigger to disable one.',
       'Physical deletion is preview-first: use delete_flow for a disabled flow and its owned triggers/steps, or delete_flow_step for one step. Never confirm delete_flow while the flow is enabled.',
-      'Prefer fixed step types for static config. Fixed-step config is not template-transformed; use one focused script step for @FLOW_PAYLOAD/@FLOW_LAST/@FLOW values.',
-      'Keep one business operation per named step. Split mixed-responsibility script logic into fixed/script/condition steps or a triggered child flow, but keep repository operations together when they genuinely require one atomic transaction boundary.',
+      'Flow steps are script-only. Use condition steps only for true/false branching; put queries, mutations, HTTP calls, delays, child-flow triggers, and logs inside one focused script step. A condition source must return a real boolean (true/false, a comparison, or Boolean(value)); objects, arrays, strings, numbers, null, and undefined are rejected.',
+      'Keep one business operation per named step. Split mixed-responsibility script logic into script/condition steps or a triggered child flow, but keep repository operations together when they genuinely require one atomic transaction boundary.',
       'In scripts call @LOGS(message, details?); @LOGS has no .info/.warn/.error/.debug methods.',
       'Pass the reviewed sourceFile/sourceResourceUri to flow_workflow, ensure_*_flow_step, and test_flow_step so validation, test, and save consume the same tmp artifact.',
       'Trigger manually only after the saved steps are verified.',

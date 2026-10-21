@@ -73,7 +73,6 @@ export function normalizeFlowStepBody(step, flowId) {
     key: step.key,
     type: step.type,
     stepOrder: step.order ?? 0,
-    config: step.config ?? {},
     timeout: step.timeout,
     isEnabled: step.isEnabled ?? true,
     flow: { id: flowId },

@@ -42,6 +42,7 @@ Every failure that reached a dynamic script is recorded here exactly once. The r
 | F-024 | Unawaited `#table.find(...)` reads `undefined` | Repository calls are async and were not awaited | mcp-validation | Portable validation requires `await` before repository calls | `test/runtime-surface-contracts.test.js` | `validateAwaitedRepositoryCalls` |
 | F-025 | `pkg.obj.then(...)` resolves to `undefined` and silently skips the callback | Package proxies reserve `then`/`catch`/`finally` for Promise assimilation | mcp-validation | Preflight rejects literal reserved-member access and names `$property` | `test/script-package-contract-validation.test.js` | `validatePackageContract` |
 | F-026 | `const x = new pkg.Class(); x.field` reads an async proxy | A constructor returns a handle; fields are only readable after `await` | mcp-validation | Preflight rejects an unawaited constructor whose binding is property-read | `test/script-package-contract-validation.test.js` | `validatePackageContract` |
+| F-027 | A condition step saves with `return { ok: true }` or with no return at all, then the flow fails at runtime | Condition branching needs a real boolean, but the save path accepted any source | mcp-validation | Preflight rejects empty source, a missing or bare `return`, and obvious non-boolean returns; ESV throws at runtime and eApp blocks it in the step editor | `test/flow-condition-step-contract.test.js` | `validateConditionStepSource` |
 
 ## Static coverage boundaries
 

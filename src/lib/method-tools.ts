@@ -18,7 +18,7 @@ import {
   unwrapData,
 } from './enfyra-tool-logic.js';
 import { fetchAPI } from './fetch.js';
-import { validatePortableScriptSource } from './mutation-guards.js';
+import { validateConditionStepSource, validatePortableScriptSource } from './mutation-guards.js';
 import { materializeSourceInput } from './source-artifacts.js';
 import {
   assertGlobalRulesAck,
@@ -34,6 +34,12 @@ function resolveAdminTestTimeout(value: unknown) {
   return Number.isFinite(timeout) && timeout > 0
     ? timeout
     : DEFAULT_ADMIN_TEST_TIMEOUT_MS;
+}
+
+function rejectFlowStepConfig(body) {
+  if (body && Object.prototype.hasOwnProperty.call(body, 'config')) {
+    throw new Error('Flow steps have no config. Send type plus sourceCode (or a source artifact) for a flow_step test.');
+  }
 }
 
 export function registerMethodTools(server, ENFYRA_API_URL) {
@@ -239,16 +245,16 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
     ].join(' '),
     {
       kind: z.enum(['script', 'flow_step', 'websocket_event', 'websocket_connection']).describe('Admin test kind'),
-      body: z.union([z.record(z.any()), z.string()]).describe('Test body as a native JSON object. A JSON string is accepted for compatibility. Include script and optional context for script; type/config plus payload for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
+      body: z.union([z.record(z.any()), z.string()]).describe('Test body as a native JSON object. A JSON string is accepted for compatibility. Include script and optional context for script; type/sourceCode plus payload for flow_step; or script/gatewayPath/eventName/payload for websocket tests. Do not include kind; the tool adds it.'),
       timeout: z.number().int().positive().optional().describe('Timeout (ms).'),
       sourceFile: z.string().optional().describe('Previously returned script source artifact tmpFile. Use this when the exact reviewed source is already in tmp.'),
       sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the script under test.'),
     },
     async ({ kind, body, timeout, sourceFile, sourceResourceUri }) => {
       const parsed = parseJsonObjectInput(body, 'body');
-      const parsedFlowConfig = kind === 'flow_step' ? parseJsonObjectInput(parsed?.config, 'body.config') : null;
+      if (kind === 'flow_step') rejectFlowStepConfig(parsed);
       const sourceCode = kind === 'flow_step'
-        ? parsedFlowConfig?.sourceCode ?? parsedFlowConfig?.code
+        ? parsed?.sourceCode
         : parsed?.script ?? parsed?.sourceCode;
       const materialized = sourceFile || sourceResourceUri || typeof sourceCode === 'string'
         ? materializeSourceInput({
@@ -263,7 +269,8 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
       if (materialized) {
         validatePortableScriptSource(materialized.source);
         if (kind === 'flow_step') {
-          parsed.config = { ...(parsedFlowConfig || {}), sourceCode: materialized.source };
+          if (parsed.type === 'condition') validateConditionStepSource(materialized.source);
+          parsed.sourceCode = materialized.source;
         } else if (Object.prototype.hasOwnProperty.call(parsed, 'sourceCode')) {
           parsed.sourceCode = materialized.source;
         } else {
@@ -281,10 +288,10 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
 
   server.tool(
     'test_flow_step',
-    'Test a single flow step without saving it. Wraps POST /admin/test/run with kind=flow_step. Pass runtime @FLOW_PAYLOAD data through payload; the tool forwards it using the ESV test-run contract.',
+    'Test a single flow step without saving it. Wraps POST /admin/test/run with kind=flow_step. Flow steps are script-only, so pass type plus sourceCode (or a source artifact); there is no step config. Pass runtime @FLOW_PAYLOAD data through payload; the tool forwards it using the ESV test-run contract.',
     {
-      type: z.enum(['script', 'condition', 'query', 'create', 'update', 'delete', 'http', 'trigger_flow', 'sleep', 'log']).describe('Flow step type'),
-      config: z.union([z.record(z.any()), z.string()]).describe('Step config as a native JSON object. A JSON string is accepted for compatibility.'),
+      type: z.enum(['script', 'condition']).describe('Flow step type. A condition step must return a boolean.'),
+      sourceCode: z.string().optional().describe('Step sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
       timeout: z.number().int().positive().optional().describe('Timeout (ms).'),
       key: z.string().optional().describe('Optional step key for mock flow context'),
       payload: z.union([z.record(z.any()), z.string()]).optional().describe('Runtime payload object exposed to the script as @FLOW_PAYLOAD. A JSON object string is accepted for compatibility.'),
@@ -292,30 +299,27 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
       sourceFile: z.string().optional().describe('Previously returned script source artifact tmpFile. Use this when the exact reviewed source is already in tmp.'),
       sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the script under test.'),
     },
-    async ({ type, config, timeout, key, payload, mockFlow, sourceFile, sourceResourceUri }) => {
-      const parsedConfig = parseJsonObjectInput(config, 'config');
-      const sourceCode = parsedConfig?.sourceCode ?? parsedConfig?.code;
-      const materialized = sourceFile || sourceResourceUri || typeof sourceCode === 'string'
-        ? materializeSourceInput({
-          source: sourceFile || sourceResourceUri ? undefined : sourceCode,
-          sourceFile,
-          sourceResourceUri,
-          fieldName: 'sourceCode',
-          tableName: 'mcp-flow-test',
-          id: key || type,
-        })
-        : null;
-      if (materialized) {
-        validatePortableScriptSource(materialized.source);
-        parsedConfig.sourceCode = materialized.source;
+    async ({ type, sourceCode, timeout, key, payload, mockFlow, sourceFile, sourceResourceUri }) => {
+      if (sourceCode === undefined && sourceFile === undefined && sourceResourceUri === undefined) {
+        throw new Error(`${type} flow steps require sourceCode, sourceFile, or sourceResourceUri.`);
       }
+      const materialized = materializeSourceInput({
+        source: sourceFile || sourceResourceUri ? undefined : sourceCode,
+        sourceFile,
+        sourceResourceUri,
+        fieldName: 'sourceCode',
+        tableName: 'mcp-flow-test',
+        id: key || type,
+      });
+      validatePortableScriptSource(materialized.source);
+      if (type === 'condition') validateConditionStepSource(materialized.source);
       const parsedPayload = typeof payload === 'string' ? JSON.parse(payload) : payload;
       if (parsedPayload !== undefined && (!parsedPayload || typeof parsedPayload !== 'object' || Array.isArray(parsedPayload))) {
         throw new Error('payload must be a JSON object.');
       }
       const body = {
         type,
-        config: parsedConfig,
+        sourceCode: materialized.source,
         timeout: resolveAdminTestTimeout(timeout),
         ...(key ? { key } : {}),
         ...(parsedPayload !== undefined ? { payload: parsedPayload } : {}),
@@ -326,7 +330,7 @@ export function registerMethodTools(server, ENFYRA_API_URL) {
         body: JSON.stringify({ ...body, kind: 'flow_step' }),
         timeoutMs: resolveAdminTestTimeout(timeout) + TEST_RESPONSE_GRACE_MS,
       });
-      return { content: [{ type: 'text', text: JSON.stringify({ ...result, ...(materialized ? { sourceArtifact: materialized.sourceArtifact } : {}) }, null, 2) }] };
+      return { content: [{ type: 'text', text: JSON.stringify({ ...result, sourceArtifact: materialized.sourceArtifact }, null, 2) }] };
     },
   );
 

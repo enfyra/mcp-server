@@ -3,22 +3,20 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { readSourceTree } from '../test-support/source-tree.js';
 
-import { assertFixedFlowStepConfigIsStatic } from '../dist/lib/platform-operation-tools.js';
+import { assertFlowStepTypeIsSupported } from '../dist/lib/platform-operation-tools.js';
 import { validatePortableScriptSource } from '../dist/lib/mutation-guards.js';
 
-test('fixed flow step configs reject runtime flow macros that ESV does not interpolate', () => {
+test('flow steps accept only script and condition types', () => {
   assert.throws(
-    () => assertFixedFlowStepConfigIsStatic('create', {
-      table: 'audit_log',
-      data: { requestId: '@FLOW_PAYLOAD.requestId' },
-    }, 0),
-    /fixed flow step configs are static/i,
+    () => assertFlowStepTypeIsSupported('create'),
+    /script-only/i,
   );
-
-  assert.doesNotThrow(() => assertFixedFlowStepConfigIsStatic('create', {
-    table: 'audit_log',
-    data: { requestId: 'fixed-request-id' },
-  }, 0));
+  assert.throws(
+    () => assertFlowStepTypeIsSupported('sleep'),
+    /script-only/i,
+  );
+  assert.doesNotThrow(() => assertFlowStepTypeIsSupported('script'));
+  assert.doesNotThrow(() => assertFlowStepTypeIsSupported('condition'));
 });
 
 test('dynamic scripts reject method-style log calls and accept the callable log contract', () => {

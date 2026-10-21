@@ -14,7 +14,6 @@ export type FlowStepBody = {
   key: any;
   type: any;
   stepOrder: any;
-  config: any;
   timeout: any;
   isEnabled: any;
   flow: { id: any };

@@ -62,38 +62,26 @@ return order && order.total > 1000`,
   { "key": "write_audit_log", "stepOrder": 80, "type": "log" }
 ]`,
         notes: [
-          'Prefer flow_workflow for creating/updating a flow plus steps; it plans fixed step types before saving.',
+          'Prefer flow_workflow for creating/updating a flow plus steps; it plans the script/condition steps before saving.',
           'Use plan_flow_steps only as a lightweight dry-run when the flow itself is not being changed.',
           'Each step should return only ids, booleans, status keys, or small counters that later steps need.',
           'When refactoring an existing flow, add or extract adjacent focused enfyra_flow_step rows instead of making an oversized sourceCode block longer.',
         ],
       },
       {
-        name: 'Flow query step config',
-        code: `{
-  "table": "enfyra_user",
-  "filter": { "email": { "_contains": "@example.com" } },
-  "limit": 50
-}`,
+        name: 'Flow script step',
+        code: `const users = await #enfyra_user.find({
+  filter: { email: { _contains: '@example.com' } },
+  fields: ['id', 'email'],
+  limit: 50,
+})
+await @HELPERS.$sleep(500)
+await #todo.create({ data: { title: 'Review', status: 'open' } })
+return { count: users.data?.length ?? 0 }`,
         notes: [
-          'Step configs are JSON; script steps use code strings.',
-          'Use public-safe URLs for HTTP steps.',
-        ],
-      },
-      {
-        name: 'Flow create/update/delete step configs',
-        code: `// ensure_create_flow_step
-{ "table": "todo", "data": { "title": "Review", "status": "open" } }
-
-// ensure_update_flow_step
-{ "table": "todo", "id": "fixed-todo-id", "data": { "status": "done" } }
-
-// ensure_delete_flow_step
-{ "table": "todo", "id": "fixed-todo-id" }`,
-        notes: [
-          'Use fixed CRUD flow step tools only for static config; ESV does not interpolate @FLOW_PAYLOAD, @FLOW_LAST, or @FLOW inside fixed-step config.',
-          'Use one focused script step when a record id or body comes from runtime flow values, when a step coordinates multiple records, computes complex data, or calls packages.',
-          'Inside a script step, write captured logs with @LOGS(message, details?), not @LOGS.info().',
+          'Flow steps are script-only; condition steps exist only for true/false branching.',
+          'Query, create, update, delete, HTTP, delay, child-flow trigger, and logging all run inside one focused script step.',
+          'Use @REPOS/#table for repository access, @FETCH for HTTP, @HELPERS.$sleep for delays, @TRIGGER for child flows, and @LOGS(message, details?) for captured logs.',
         ],
       },
     ],

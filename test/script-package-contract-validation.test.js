@@ -82,6 +82,7 @@ test('the failure registry records every known failure class and its validator',
     'validateTriggerContract',
     'validateAwaitedRepositoryCalls',
     'validatePackageContract',
+    'validateConditionStepSource',
   ]) {
     assert.ok(registry.includes(validator), `registry must name ${validator}`);
   }

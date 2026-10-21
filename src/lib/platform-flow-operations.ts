@@ -22,6 +22,7 @@ import {
 } from './required-knowledge.js';
 import { materializeSourceInput } from './source-artifacts.js';
 import { executeSequentialBatch } from './sequential-batch.js';
+import { validateConditionStepSource } from './mutation-guards.js';
 
 export async function ensureFlow(apiUrl, {
   name,
@@ -399,7 +400,6 @@ export async function ensureFlowStep(apiUrl, {
   key,
   type,
   order,
-  config,
   sourceCode,
   sourceFile,
   sourceResourceUri,
@@ -412,11 +412,11 @@ export async function ensureFlowStep(apiUrl, {
   assertGlobalRulesAck(globalRulesAckKey);
   if (!flowName && !flowId) throw new Error('Provide flowName or flowId.');
   if (flowName && flowId) throw new Error('Provide flowName or flowId, not both.');
+  assertFlowStepTypeIsSupported(type);
   const flow = flowId
     ? await findRecord(apiUrl, 'enfyra_flow', { id: { _eq: flowId } }, 'id,_id,name')
     : await findRecord(apiUrl, 'enfyra_flow', { name: { _eq: flowName } }, 'id,_id,name');
   if (!flow) throw new Error(`Flow not found: ${flowId || flowName}`);
-  const parsedConfig = parseJsonObjectArg('config', config, {});
   const dynamicType = ['script', 'condition'].includes(type);
   if (dynamicType && sourceCode === undefined && sourceFile === undefined && sourceResourceUri === undefined) {
     throw new Error(`${type} flow steps require sourceCode, sourceFile, or sourceResourceUri.`);
@@ -432,6 +432,7 @@ export async function ensureFlowStep(apiUrl, {
     })
     : null;
   const effectiveSourceCode = materialized?.source;
+  if (type === 'condition') validateConditionStepSource(effectiveSourceCode);
   assertDynamicCodeKnowledgeAckIf(Boolean(effectiveSourceCode), knowledgeAckKey);
   const validation = effectiveSourceCode
     ? await validateDynamicScript(apiUrl, effectiveSourceCode, scriptLanguage)
@@ -444,7 +445,6 @@ export async function ensureFlowStep(apiUrl, {
     key,
     type,
     order,
-    config: parsedConfig,
     sourceCode: effectiveSourceCode,
     scriptLanguage,
     timeout,
@@ -454,65 +454,25 @@ export async function ensureFlowStep(apiUrl, {
   return { action: 'flow_step_ensured', flow: { id: getId(flow), name: flow.name }, step: { id: operation.id, key, type }, validation, ...(materialized ? { sourceArtifact: materialized.sourceArtifact } : {}), operation, reload };
 }
 
+const FLOW_STEP_TYPES = new Set(['script', 'condition']);
+
+export function assertFlowStepTypeIsSupported(type) {
+  if (!FLOW_STEP_TYPES.has(String(type))) {
+    throw new Error('Flow steps are script-only: type must be script or condition.');
+  }
+}
+
 export const FLOW_STEP_TOOL_GUIDANCE = [
-  {
-    tool: 'ensure_query_flow_step',
-    type: 'query',
-    when: 'Read/list records from one table without custom branching or transformation.',
-    config: { table: 'table_name', filter: {}, fields: 'id,name', limit: 20, sort: '-createdAt' },
-  },
-  {
-    tool: 'ensure_create_flow_step',
-    type: 'create',
-    when: 'Create one record from static config only. Fixed step config is not template-transformed; use a script step when data comes from @FLOW_PAYLOAD, @FLOW_LAST, or @FLOW.',
-    config: { table: 'table_name', data: { field: 'value' } },
-  },
-  {
-    tool: 'ensure_update_flow_step',
-    type: 'update',
-    when: 'Update one statically known record. Use a script step when id or data comes from runtime flow values.',
-    config: { table: 'table_name', id: '<static-id>', data: { field: 'value' } },
-  },
-  {
-    tool: 'ensure_delete_flow_step',
-    type: 'delete',
-    when: 'Delete one statically known record. Use a script step when id comes from runtime flow values.',
-    config: { table: 'table_name', id: '<static-id>' },
-  },
-  {
-    tool: 'ensure_http_flow_step',
-    type: 'http',
-    when: 'Call an external HTTP API.',
-    config: { url: 'https://example.com/api', method: 'POST', headers: {}, body: {}, timeout: 10000 },
-  },
   {
     tool: 'ensure_condition_flow_step',
     type: 'condition',
-    when: 'Branch into true/false child steps based on JavaScript truthiness.',
+    when: 'Branch into true/false child steps. The source must return a real boolean; the server rejects objects, arrays, strings, numbers, null, and undefined.',
     sourceCode: 'return Boolean(@FLOW_PAYLOAD.enabled)',
-  },
-  {
-    tool: 'ensure_sleep_flow_step',
-    type: 'sleep',
-    when: 'Wait for a short bounded delay.',
-    config: { ms: 1000 },
-  },
-  {
-    tool: 'ensure_trigger_flow_step',
-    type: 'trigger_flow',
-    when: 'Trigger another flow as a child/orchestration step.',
-    config: { flowName: 'child-flow', payload: {} },
-  },
-  {
-    tool: 'ensure_log_flow_step',
-    type: 'log',
-    when: 'Record a small execution note for diagnostics.',
-    config: { message: 'Reached step_name' },
   },
   {
     tool: 'ensure_script_flow_step',
     type: 'script',
-    when: 'Use only when logic needs loops, multiple tables, crypto, package calls, non-trivial transforms, or runtime checks not covered by the atomic step tools.',
+    when: 'The only executable step kind. Query, create, update, delete, HTTP, delay, child-flow trigger, and logging all run inside one focused script step using @REPOS/#table, @FETCH, @HELPERS.$sleep, @TRIGGER, and @LOGS.',
     sourceCode: 'return { ok: true }',
   },
 ];
@@ -521,45 +481,7 @@ export function chooseFlowStepTool(intent) {
   const text = String(intent || '').toLowerCase();
   const hasAny = (patterns) => patterns.some((pattern) => pattern.test(text));
   if (hasAny([/\bif\b/, /\belse\b/, /\bbranch\b/, /\bcondition\b/, /\bwhen\b/, /\bcheck\b/, /nếu/, /điều kiện/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'condition');
-  if (hasAny([/\bhttp\b/, /\bapi\b/, /\bwebhook\b/, /\bfetch\b/, /\brequest\b/, /\bpost\b/, /\bget\b/, /\bcall\b/, /gọi api/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'http');
-  if (hasAny([/\bsleep\b/, /\bwait\b/, /\bdelay\b/, /\bpause\b/, /chờ/, /đợi/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'sleep');
-  if (hasAny([/\btrigger\b/, /\bchild flow\b/, /\banother flow\b/, /\bsubflow\b/, /flow khác/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'trigger_flow');
-  if (hasAny([/\bdelete\b/, /\bremove\b/, /\bdestroy\b/, /xóa/, /xoá/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'delete');
-  if (hasAny([/\bupdate\b/, /\bpatch\b/, /\bset\b/, /\bmark\b/, /\bchange\b/, /cập nhật/, /đánh dấu/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'update');
-  if (hasAny([/\bcreate\b/, /\binsert\b/, /\badd\b/, /\bstore\b/, /\bsave\b/, /tạo/, /thêm/, /lưu/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'create');
-  if (hasAny([/\blog\b/, /\bdebug\b/, /\btrace\b/, /ghi log/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'log');
-  if (hasAny([/\bquery\b/, /\bfind\b/, /\blist\b/, /\bread\b/, /\bload\b/, /\bcount\b/, /\bsearch\b/, /đọc/, /tìm/, /liệt kê/])) return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'query');
   return FLOW_STEP_TOOL_GUIDANCE.find((item) => item.type === 'script');
-}
-
-const FIXED_FLOW_STEP_TYPES = new Set(['query', 'create', 'update', 'delete', 'http', 'sleep', 'trigger_flow', 'log']);
-
-const FLOW_RUNTIME_MACRO_PATTERN = /@FLOW(?:_PAYLOAD|_LAST|_META)?\b/u;
-
-function findFlowRuntimeMacro(value): string | null {
-  if (typeof value === 'string') return FLOW_RUNTIME_MACRO_PATTERN.exec(value)?.[0] || null;
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const match = findFlowRuntimeMacro(item);
-      if (match) return match;
-    }
-    return null;
-  }
-  if (!value || typeof value !== 'object') return null;
-  for (const item of Object.values(value)) {
-    const match = findFlowRuntimeMacro(item);
-    if (match) return match;
-  }
-  return null;
-}
-
-export function assertFixedFlowStepConfigIsStatic(type, config, index = 0) {
-  if (!FIXED_FLOW_STEP_TYPES.has(String(type))) return;
-  const macro = findFlowRuntimeMacro(config);
-  if (!macro) return;
-  throw new Error(
-    `steps[${index}] uses ${macro} inside a ${type} config, but ESV fixed flow step configs are static and are not template-transformed. Use a script step for runtime payload/previous-step values, keep one business operation in that script, and call @LOGS(message, details?) for captured logs.`
-  );
 }
 
 export function planFlowSteps(steps) {
@@ -578,9 +500,7 @@ export function planFlowSteps(steps) {
         key,
         name: typeof step === 'object' && step?.name ? step.name : key.replace(/_/g, ' '),
         order: index + 1,
-        ...(recommendation.config ? { config: recommendation.config } : {}),
         ...(recommendation.sourceCode ? { sourceCode: recommendation.sourceCode } : {}),
-        ...(recommendation.condition ? { condition: recommendation.condition } : {}),
       },
       reason: recommendation.when,
     };
@@ -609,7 +529,6 @@ function normalizeFlowWorkflowStep(step, index) {
     intent,
     type,
     order: input.order ?? index * 10,
-    config: input.config ?? guidance.config ?? {},
     sourceCode: input.sourceCode ?? (input.sourceFile || input.sourceResourceUri ? undefined : guidance.sourceCode),
     sourceFile: input.sourceFile,
     sourceResourceUri: input.sourceResourceUri,
@@ -619,7 +538,6 @@ function normalizeFlowWorkflowStep(step, index) {
     chosenByIntent: !input.type,
     recommendedTool: guidance.tool,
   };
-  assertFixedFlowStepConfigIsStatic(type, normalized.config, index);
   return normalized;
 }
 
@@ -646,7 +564,7 @@ export async function runFlowWorkflow(apiUrl, opts) {
       plan,
       requiredAckParams: ['globalRulesAckKey', ...(hasDynamicCode ? ['knowledgeAckKey'] : [])],
       nextSteps: [
-        'Review the plan. Prefer fixed step types only for static config; ESV does not interpolate @FLOW_PAYLOAD/@FLOW_LAST/@FLOW inside fixed-step config. Use one focused script step when runtime values are required.',
+        'Review the plan. Flow steps are script-only; every query, mutation, HTTP call, delay, child-flow trigger, and log belongs in one focused script step.',
         'Call flow_workflow again with apply=true and the required ack params to create/update the flow and steps sequentially.',
         'Use test_flow_step for script, condition, or high-risk steps before triggering the flow.',
       ],
@@ -666,7 +584,6 @@ export async function runFlowWorkflow(apiUrl, opts) {
       key: step.key,
       type: step.type,
       order: step.order,
-      config: step.config,
       sourceCode: step.sourceCode,
       sourceFile: step.sourceFile,
       sourceResourceUri: step.sourceResourceUri,

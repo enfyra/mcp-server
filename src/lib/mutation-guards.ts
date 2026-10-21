@@ -270,6 +270,9 @@ export function rejectUnsafeScriptPayload(tableName, payload) {
   if (CODE_ALIAS_FORBIDDEN_TABLES.has(tableName) && Object.prototype.hasOwnProperty.call(payload, 'code')) {
     throw new Error(`Do not send code to ${tableName}. Use sourceCode/scriptLanguage, or the dedicated MCP create_* tool for this script surface.`);
   }
+  if (tableName === 'enfyra_flow_step' && Object.prototype.hasOwnProperty.call(payload, 'config')) {
+    throw new Error('enfyra_flow_step has no config column. Flow steps are script-only: send type (script or condition) with sourceCode/scriptLanguage.');
+  }
 }
 
 export function validatePortableScriptSource(sourceCode) {
@@ -280,6 +283,51 @@ export function validatePortableScriptSource(sourceCode) {
   validateAwaitedRepositoryCalls(sourceCode);
   validateThrowContract(sourceCode);
   validatePackageContract(sourceCode);
+}
+
+const CONDITION_RETURN_VALUE = /\breturn\b([^;\n}]*)/gu;
+
+const CONDITION_NON_BOOLEAN_VALUES = [
+  /^\{/u,
+  /^\[/u,
+  /^(?:null|undefined)$/u,
+  /^void\s+(?:0|\d+)$/u,
+  /^[+-]?(?:\d+\.?\d*|\.\d+)$/u,
+  /^'(?:[^'\\]|\\.)*'$/u,
+  /^"(?:[^"\\]|\\.)*"$/u,
+  /^`(?:[^`\\$]|\\.)*`$/u,
+];
+
+/**
+ * Condition flow steps must resolve to a boolean. The server rejects any other
+ * runtime value, so this preflight blocks the statically obvious violations
+ * before a save or test call reaches the API.
+ */
+export function validateConditionStepSource(sourceCode) {
+  if (typeof sourceCode !== 'string' || sourceCode.trim() === '') {
+    throw new Error(
+      'Condition flow steps require sourceCode that returns true or false. Add e.g. `return Boolean(@FLOW_PAYLOAD.enabled)` or `return rows.data.length > 0`.'
+    );
+  }
+  const code = sourceCode
+    .replace(/\/\*[\s\S]*?\*\//gu, ' ')
+    .replace(/\/\/[^\n]*/gu, ' ');
+  const returnValues = [...code.matchAll(CONDITION_RETURN_VALUE)].map((match) => match[1].trim());
+  if (returnValues.length === 0) {
+    throw new Error(
+      'Condition flow steps must return a boolean. Add a top-level `return true` or `return false` (or a boolean expression such as `return count > 0`).'
+    );
+  }
+  if (returnValues.includes('')) {
+    throw new Error(
+      'Condition flow steps must return a boolean value, not a bare `return`. Return true or false, or wrap the value: `return Boolean(value)`.'
+    );
+  }
+  if (returnValues.every((value) => CONDITION_NON_BOOLEAN_VALUES.some((pattern) => pattern.test(value)))) {
+    throw new Error(
+      'Condition flow steps must return a boolean. Returning an object, array, null, undefined, string, or number is rejected; use `return Boolean(value)` or a comparison such as `return count > 0`.'
+    );
+  }
 }
 
 // One package proxy chain with no call in it: `@PKGS.foo.bar` or
@@ -538,6 +586,9 @@ export async function validateScriptSourceIfPresent(fetchAPI, apiUrl, tableName,
     id: 'mutation',
   });
   validatePortableScriptSource(materialized.source);
+  if (tableName === 'enfyra_flow_step' && payload.type === 'condition') {
+    validateConditionStepSource(materialized.source);
+  }
 
   try {
     const result = await fetchAPI(apiUrl, '/admin/script/validate', {

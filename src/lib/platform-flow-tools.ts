@@ -28,8 +28,8 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
         'Workflow front door for creating or updating an Enfyra flow and its steps in one guided path.',
         'For a fully specified, non-destructive flow, use apply=true to create/update the flow and all steps sequentially in one call. Use apply=false only when step types or risk need review.',
         'Prefer this over choosing individual ensure_*_flow_step tools in guided mode.',
-        'Fixed query/create/update/delete/http/sleep/trigger/log config is static in current ESV and does not interpolate @FLOW_PAYLOAD/@FLOW_LAST/@FLOW; use a focused script step for runtime values.',
-        'Keep one business operation per step. Split long or mixed-responsibility script logic into named fixed/script/condition steps, or a triggered child flow for a cohesive reusable unit, while preserving operations that truly require one atomic transaction boundary.',
+        'Flow steps are script-only: every query, mutation, HTTP call, delay, child-flow trigger, and log runs inside one focused script step. Use condition steps only for true/false branching.',
+        'Keep one business operation per step. Split long or mixed-responsibility script logic into named script/condition steps, or a triggered child flow for a cohesive reusable unit, while preserving operations that truly require one atomic transaction boundary.',
       ].join(' '),
       {
         name: z.string().describe('Flow name. Existing flow with this name is updated.'),
@@ -38,9 +38,8 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
           z.object({
             key: z.string().optional().describe('Stable step key. Generated from intent when omitted.'),
             name: z.string().optional().describe('Human label. Defaults from intent.'),
-            intent: z.string().optional().describe('Plain-language step intent. Used to choose a fixed step type when type is omitted.'),
-            type: z.enum(['query', 'create', 'update', 'delete', 'http', 'condition', 'sleep', 'trigger_flow', 'log', 'script']).optional().describe('Explicit step type. Omit to let the workflow choose from intent.'),
-            config: z.union([z.record(z.any()), z.string()]).optional().describe('Step config object or JSON string. Fixed-step config is static and cannot contain @FLOW_PAYLOAD/@FLOW_LAST/@FLOW. Use a focused script step for runtime values.'),
+            intent: z.string().optional().describe('Plain-language step intent. Used to choose script or condition when type is omitted.'),
+            type: z.enum(['script', 'condition']).optional().describe('Explicit step type. Omit to let the workflow choose script or condition from intent.'),
             sourceCode: z.string().optional().describe('Only for script or condition steps. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
             sourceFile: z.string().optional().describe('Previously returned script source artifact tmpFile for this step.'),
             sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for this step.'),
@@ -63,7 +62,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_flow',
-      'Business operation: create or update an Enfyra flow. Flows are always triggerable from code ($trigger, trigger_flow step, admin API). Use ensure_flow_trigger to add schedule/event/webhook triggers.',
+      'Business operation: create or update an Enfyra flow. Flows are always triggerable from code ($trigger, @TRIGGER, admin API). Use ensure_flow_trigger to add schedule/event/webhook triggers.',
       {
         name: z.string().describe('Flow name. Existing flow with this name is updated.'),
         timeout: z.number().int().positive().optional().describe('Flow timeout in ms.'),
@@ -172,7 +171,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
           availableStepTools: FLOW_STEP_TOOL_GUIDANCE,
           nextSteps: [
             `Call ${recommendation.tool} with a stable key and order.`,
-            'Use ensure_script_flow_step only when the atomic tools cannot express the behavior.',
+            'Flow steps are script-only; condition is the only branch step type.',
             'After saving script or condition steps, use test_flow_step before relying on the flow.',
           ],
         });
@@ -190,7 +189,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
             name: z.string().optional().describe('Human label. Defaults from key.'),
             intent: z.string().describe('Plain-language description of this step.'),
           }),
-        ])).min(1).max(30).describe('Ordered step intents. Use this before ensure_*_flow_step calls when a flow has multiple steps.'),
+        ])).min(1).max(30).describe('Ordered step intents. Use this before ensure_script_flow_step/ensure_condition_flow_step calls when a flow has multiple steps.'),
       },
       async ({ steps }) => {
         const plan = planFlowSteps(steps);
@@ -200,8 +199,8 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
           plan,
           nextSteps: [
             'Create or update the flow with ensure_flow first, then attach schedule/event/webhook activation with ensure_flow_trigger when needed.',
-            'Call each planned ensure_*_flow_step in order, adding flowName or flowId plus table/query/config details.',
-            'Use ensure_script_flow_step only for steps where the plan chose script because fixed step types are insufficient.',
+            'Call ensure_script_flow_step or ensure_condition_flow_step for each planned step, passing flowName or flowId plus sourceCode/sourceFile/sourceResourceUri.',
+            'Every planned step is a script step unless it is a condition branch.',
             'Use test_flow_step for script/condition/high-risk steps before triggering the full flow.',
           ],
         });
@@ -210,7 +209,7 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_script_flow_step',
-      'Business operation: create or update one focused script flow step. Use this for JavaScript/TypeScript flow logic instead of choosing type=script manually. If the source mixes multiple business operations or becomes hard to test, split it into named fixed/script/condition steps or a triggered child flow; keep truly atomic repository mutations in one transaction boundary.',
+      'Business operation: create or update one focused script flow step. Every flow step is script-only; use condition steps only for true/false branching. If the source mixes multiple business operations or becomes hard to test, split it into named script/condition steps or a triggered child flow; keep truly atomic repository mutations in one transaction boundary.',
       {
         flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
         flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
@@ -219,7 +218,6 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
         sourceFile: z.string().optional().describe('Previously returned script source artifact tmpFile.'),
         sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the script.'),
         order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        config: z.string().optional().describe('Step config JSON object.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
         timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
         isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
@@ -234,16 +232,15 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
 
   server.tool(
       'ensure_condition_flow_step',
-      'Business operation: create or update one focused condition flow step. Use this for dynamic conditional branching instead of choosing type=condition manually. Keep branching decisions separate from unrelated mutations or side effects, and split those into later named steps.',
+      'Business operation: create or update one focused condition flow step. Use this for dynamic conditional branching instead of choosing type=condition manually. The sourceCode must return a real boolean (true or false); the server rejects objects, arrays, strings, numbers, null, and undefined, so wrap values with Boolean(...) or return a comparison. Keep branching decisions separate from unrelated mutations or side effects, and split those into later named steps.',
       {
         flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
         flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
         key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        sourceCode: z.string().optional().describe('Condition sourceCode. Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
+        sourceCode: z.string().optional().describe('Condition sourceCode that returns a boolean (true or false). Prefer sourceFile/sourceResourceUri when the reviewed source already exists as an MCP artifact.'),
         sourceFile: z.string().optional().describe('Previously returned script source artifact tmpFile.'),
         sourceResourceUri: z.string().optional().describe('Previously returned enfyra-source artifact URI for the condition.'),
         order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        config: z.string().optional().describe('Step config JSON object.'),
         scriptLanguage: z.enum(['javascript', 'typescript']).optional().default('javascript').describe('Script language.'),
         timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
         isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
@@ -256,155 +253,4 @@ export function registerPlatformFlowTools(server, ENFYRA_API_URL) {
       })),
     );
 
-  server.tool(
-      'ensure_query_flow_step',
-      'Business operation: create or update one query flow step. Use this for repository/query-style flow steps instead of choosing type=query manually.',
-      {
-        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
-        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
-        key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        config: z.string().describe('Step config JSON object.'),
-        order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
-        isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
-        globalRulesAckKey: globalRulesAckParam(z),
-      },
-      async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
-        ...input,
-        type: 'query',
-      })),
-    );
-
-  server.tool(
-      'ensure_http_flow_step',
-      'Business operation: create or update one HTTP flow step. Use this for outbound HTTP calls instead of choosing type=http manually.',
-      {
-        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
-        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
-        key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        config: z.string().describe('Step config JSON object.'),
-        order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
-        isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
-        globalRulesAckKey: globalRulesAckParam(z),
-      },
-      async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
-        ...input,
-        type: 'http',
-      })),
-    );
-
-  server.tool(
-      'ensure_create_flow_step',
-      'Business operation: create or update one create-record flow step. Use this for a single table insert instead of writing script code.',
-      {
-        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
-        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
-        key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        config: z.string().describe('Step config JSON object: { "table": "...", "data": { ... } }.'),
-        order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
-        isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
-        globalRulesAckKey: globalRulesAckParam(z),
-      },
-      async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
-        ...input,
-        type: 'create',
-      })),
-    );
-
-  server.tool(
-      'ensure_update_flow_step',
-      'Business operation: create or update one update-record flow step. Use this for a single table update by id instead of writing script code.',
-      {
-        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
-        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
-        key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        config: z.string().describe('Step config JSON object: { "table": "...", "id": "...", "data": { ... } }.'),
-        order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
-        isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
-        globalRulesAckKey: globalRulesAckParam(z),
-      },
-      async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
-        ...input,
-        type: 'update',
-      })),
-    );
-
-  server.tool(
-      'ensure_delete_flow_step',
-      'Business operation: create or update one delete-record flow step. Use this for a single table delete by id instead of writing script code.',
-      {
-        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
-        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
-        key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        config: z.string().describe('Step config JSON object: { "table": "...", "id": "..." }.'),
-        order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
-        isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
-        globalRulesAckKey: globalRulesAckParam(z),
-      },
-      async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
-        ...input,
-        type: 'delete',
-      })),
-    );
-
-  server.tool(
-      'ensure_sleep_flow_step',
-      'Business operation: create or update one sleep/wait flow step. Use this for delays instead of choosing type=sleep manually.',
-      {
-        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
-        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
-        key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        config: z.string().describe('Step config JSON object.'),
-        order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
-        isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
-        globalRulesAckKey: globalRulesAckParam(z),
-      },
-      async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
-        ...input,
-        type: 'sleep',
-      })),
-    );
-
-  server.tool(
-      'ensure_log_flow_step',
-      'Business operation: create or update one log flow step. Use this for lightweight execution diagnostics instead of script code.',
-      {
-        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
-        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
-        key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        config: z.string().describe('Step config JSON object: { "message": "..." }.'),
-        order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
-        isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
-        globalRulesAckKey: globalRulesAckParam(z),
-      },
-      async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
-        ...input,
-        type: 'log',
-      })),
-    );
-
-  server.tool(
-      'ensure_trigger_flow_step',
-      'Business operation: create or update one child-flow trigger step. Use this for flow-to-flow orchestration instead of choosing type=trigger_flow manually.',
-      {
-        flowName: z.string().optional().describe('Flow name. Use flowName or flowId.'),
-        flowId: z.union([z.string(), z.number()]).optional().describe('Flow id. Use flowName or flowId.'),
-        key: z.string().describe('Stable step key. Existing step with flow+key is updated.'),
-        config: z.string().describe('Step config JSON object.'),
-        order: z.number().optional().default(0).describe('Step order. Saved as enfyra_flow_step.stepOrder.'),
-        timeout: z.number().int().positive().optional().describe(FLOW_STEP_TIMEOUT_DESCRIPTION),
-        isEnabled: z.boolean().optional().default(true).describe('Enable step.'),
-        globalRulesAckKey: globalRulesAckParam(z),
-      },
-      async (input) => jsonText(await ensureFlowStep(ENFYRA_API_URL, {
-        ...input,
-        type: 'trigger_flow',
-      })),
-    );
 }

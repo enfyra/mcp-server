@@ -1,6 +1,6 @@
 export {
   applyExtensionCodePatches,
-  assertFixedFlowStepConfigIsStatic,
+  assertFlowStepTypeIsSupported,
   buildExtensionAccountPanelSnippet,
   buildExtensionApiUsageSnippet,
   buildExtensionConfirmSnippet,

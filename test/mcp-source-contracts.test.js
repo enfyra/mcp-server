@@ -299,14 +299,8 @@ test('mcp server exposes route platform operation tools', () => {
   assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_script_flow_step['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_condition_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_query_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_create_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_update_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_delete_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_http_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_sleep_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_trigger_flow_step['"]/);
-  assert.match(platformTools, /server\.tool\(\s*['"]ensure_log_flow_step['"]/);
+  assert.doesNotMatch(platformTools, /server\.tool\(\s*['"]ensure_(query|create|update|delete|http|sleep|trigger|log)_flow_step['"]/);
+  assert.match(platformTools, /Flow steps are script-only/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]ensure_menu_access['"]/);
   assert.match(platformTools, /server\.tool\(\s*['"]assess_permission_exposure['"]/);
