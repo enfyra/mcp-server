@@ -127,6 +127,7 @@ function formatConstraintFieldHints(fields: string[], relationNames: string[], l
 }
 
 export function preflightCreateTableDefinitions(items: AnyRecord[]) {
+  const strippedRelationIndexes: Array<{ table: string; indexes: string[][] }> = [];
   items.forEach((item, index) => {
     const columns = Array.isArray(item.columns) ? item.columns : parseJsonArrayParam(`items[${index}].columns`, item.columns || '[]');
     const relations = Array.isArray(item.relations) ? item.relations : parseJsonArrayParam(`items[${index}].relations`, item.relations || '[]');
@@ -141,8 +142,10 @@ export function preflightCreateTableDefinitions(items: AnyRecord[]) {
     const uniques = normalizeConstraintGroupsValue(`items[${index}].uniques`, item.uniques ?? []);
     assertIndexesDoNotReferenceUniqueFields(indexes, uniques);
     const owningRelations = new Set(relations.filter(relation => ['many-to-one', 'one-to-one'].includes(relation.type)).map(relation => relation.propertyName));
-    if (indexes.some(group => group.length === 1 && owningRelations.has(group[0]))) {
-      throw new Error('Owning relations already have automatic indexes; omit manually declared single-relation indexes.');
+    const autoIndexed = indexes.filter(group => group.length === 1 && owningRelations.has(group[0]));
+    if (autoIndexed.length > 0) {
+      item.indexes = indexes.filter(group => !autoIndexed.includes(group));
+      strippedRelationIndexes.push({ table: String(item.name ?? ''), indexes: autoIndexed.map(group => [...group]) });
     }
     const unknownConstraintFields = [...indexes, ...uniques]
       .flat()
@@ -158,6 +161,7 @@ export function preflightCreateTableDefinitions(items: AnyRecord[]) {
       );
     }
   });
+  return { strippedRelationIndexes };
 }
 
 export function normalizeCreateTableDefinitions(items: AnyRecord[]) {

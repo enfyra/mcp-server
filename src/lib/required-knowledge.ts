@@ -234,7 +234,7 @@ const GLOBAL_RULES_SECTIONS = [
       'Filters use Enfyra operators, not SQL operators. Use _contains, _starts_with, or _ends_with for text matching; do not use _like.',
       'This auto-add behavior is MCP query_table only. Inside dynamic server scripts, repository find({ deep }) requires the relation property to also be present in top-level fields, otherwise row.<relation> may be undefined.',
       'For table schema, an explicit index must not duplicate an ordered leading prefix of a unique group: uniques [["event","attendee"]] covers indexes [["event"]], not [["attendee"]] or [["attendee","event"]].',
-      'Use logical relation propertyName values in indexes/uniques, not physical FK names. Owning relations and temporal fields receive automatic indexes when not covered by a unique lookup.',
+      'Use logical relation propertyName values in indexes/uniques, not physical FK names. Owning relations and temporal fields receive automatic indexes when not covered by a unique lookup. A single-field index for an owning relation is redundant: MCP strips it and reports it under schemaConstraintNormalization instead of failing, so omit it and use compound groups only for real multi-field lookups.',
       'Use uniques for data integrity and explicit compound indexes for query shapes not already covered.',
       'create_tables preflights all items before posting tables and rejects redundant unique-prefix indexes for the whole batch; update_tables checks current metadata and verifies persisted constraints after PATCH.',
       'Before update_tables with indexes/uniques, inspect the current table and remove indexes already covered by the leading fields of unique constraints.',

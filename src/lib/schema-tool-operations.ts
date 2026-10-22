@@ -582,8 +582,15 @@ export function createSchemaToolOperations(ENFYRA_API_URL, toolset) {
         assertIndexesDoNotReferenceUniqueFields(indexes ?? [], uniques ?? []);
         const existingIndexKeys = new Set(normalizeLogicalConstraintGroups(existing, normalizeConstraintGroupsValue('indexes', existing.indexes)).map(group => JSON.stringify(group)));
         const owningRelations = new Set((existing.relations || []).filter(relation => !relation.mappedBy && !relation.mappedById && ['many-to-one', 'one-to-one'].includes(relation.type)).map(relation => relation.propertyName));
-        if (args.indexes !== undefined && indexes.some(group => group.length === 1 && owningRelations.has(group[0]) && !existingIndexKeys.has(JSON.stringify(group)))) {
-          throw new Error('Owning relations already have automatic indexes; omit manually declared single-relation indexes.');
+        const autoIndexed = (indexes ?? []).filter(group => group.length === 1 && owningRelations.has(group[0]) && !existingIndexKeys.has(JSON.stringify(group)));
+        if (args.indexes !== undefined && autoIndexed.length > 0) {
+          indexes = (indexes ?? []).filter(group => !autoIndexed.includes(group));
+          body.indexes = indexes;
+          schemaConstraintNormalization = {
+            ...(schemaConstraintNormalization || {}),
+            strippedRelationIndexes: autoIndexed,
+            reason: 'Owning relations receive an automatic lookup index; the duplicate single-relation indexes in this request were removed instead of failing the update.',
+          };
         }
       }
   

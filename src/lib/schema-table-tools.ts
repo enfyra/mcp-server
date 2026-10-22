@@ -205,7 +205,7 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
           constraints: {
             indexes: 'JSON array of non-unique logical field groups, e.g. [["status","createdAt"]]. Relation propertyName values are allowed.',
             uniques: 'JSON array of unique logical field groups, e.g. [["record","actor"]].',
-            uniqueIndexRule: 'An explicit index must not duplicate the ordered leading prefix of a unique group. uniques [["event","attendee"]] covers indexes [["event"]], but not [["attendee"]] or [["attendee","event"]]. Use logical relation propertyName values; owning relations and temporal fields receive automatic indexes when not covered.',
+            uniqueIndexRule: 'An explicit index must not duplicate the ordered leading prefix of a unique group. uniques [["event","attendee"]] covers indexes [["event"]], but not [["attendee"]] or [["attendee","event"]]. Use logical relation propertyName values; owning relations and temporal fields receive automatic indexes when not covered. A single-field index for an owning relation is redundant and is stripped from the request with a schemaConstraintNormalization note, so omit it.',
             createTablesPreflight: 'create_tables rejects constraints that reference fields not declared as scalar columns, auto-managed columns, or relation propertyName values in that same table item before it creates anything.',
             relationBasedUniques: 'For one-pass schema creation, put the owning relations in the same create_tables item as the relation-based unique group. If relations already exist, add relation-based uniques later with update_tables.',
           },
@@ -254,7 +254,7 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
         if (items !== undefined && tables !== undefined) throw new Error('Pass either items or tables to create_tables, not both.');
   	      const parsedItems = normalizeCreateTableDefinitions(parseBulkItemsParam('items', items ?? tables));
   	      assertBulkLimit('create_tables', parsedItems, maxItems);
-  	      preflightCreateTableDefinitions(parsedItems);
+  	      const preflight = preflightCreateTableDefinitions(parsedItems);
   	      const recordDeleteOrder = computeBatchCleanupOrder(parsedItems);
 	      const batchTableNames = new Set(parsedItems.map((item) => String(item.name || '').toLowerCase()).filter(Boolean));
 	      if (batchTableNames.size !== parsedItems.length) {
@@ -371,6 +371,12 @@ export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { tool
   	        sequential: true,
   	        relationPhaseAfterTables: true,
   	        constraintPhaseAfterRelations: true,
+  	        ...(preflight.strippedRelationIndexes.length > 0 ? {
+  	          schemaConstraintNormalization: {
+  	            strippedRelationIndexes: preflight.strippedRelationIndexes,
+  	            reason: 'Owning relations receive an automatic lookup index; the duplicate single-relation indexes in this request were removed instead of failing the create.',
+  	          },
+  	        } : {}),
   	        cleanupHints: {
   	          recordCreateOrder: [...recordDeleteOrder].reverse(),
   	          recordDeleteOrder,

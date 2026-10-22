@@ -17,8 +17,18 @@ test('rejects ordered unique prefixes, but preserves useful suffix/reordered loo
   assert.doesNotThrow(() => assertIndexesDoNotReferenceUniqueFields([['discount'], ['discount', 'user'], ['user', 'createdAt']], [['user', 'discount']]));
 });
 
-test('create preflight rejects a manual relation singleton already managed automatically', () => {
-  assert.throws(() => preflightCreateTableDefinitions([{ name: 'link', relations: [{ propertyName: 'user', type: 'many-to-one', targetTable: 1 }], indexes: [['user']] }]), /automatic indexes/iu);
+test('create preflight strips a manual relation singleton already managed automatically', () => {
+  const items = [{ name: 'link', relations: [{ propertyName: 'user', type: 'many-to-one', targetTable: 1 }], indexes: [['user'], ['createdAt']] }];
+  const result = preflightCreateTableDefinitions(items);
+  assert.deepEqual(items[0].indexes, [['createdAt']]);
+  assert.deepEqual(result.strippedRelationIndexes, [{ table: 'link', indexes: [['user']] }]);
+});
+
+test('create preflight keeps a compound index that only starts with a relation', () => {
+  const items = [{ name: 'link', relations: [{ propertyName: 'user', type: 'many-to-one', targetTable: 1 }], indexes: [['user', 'createdAt']] }];
+  const result = preflightCreateTableDefinitions(items);
+  assert.deepEqual(items[0].indexes, [['user', 'createdAt']]);
+  assert.deepEqual(result.strippedRelationIndexes, []);
 });
 
 test('relation constraints retain logical property names at the public mutation boundary', () => {
