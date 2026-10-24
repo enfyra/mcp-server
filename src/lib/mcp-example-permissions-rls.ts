@@ -162,7 +162,7 @@ inspect_route({ path: "/auth/login" })`,
   globalRulesAckKey: "<globalRulesAckKey from get_enfyra_required_knowledge>"
 })`,
         notes: [
-          'Column rules validate canonical POST/PATCH body payloads.',
+          'Column rules validate canonical POST/PATCH body payloads and generated GraphQL create/update mutation inputs.',
           'The rule value payload uses the { v: ... } shape; do not pass ruleConfig.',
           'Use column rules before writing custom validation code when the rule is simple.',
         ],

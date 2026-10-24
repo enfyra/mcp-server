@@ -186,8 +186,8 @@ const GLOBAL_RULES_SECTIONS = [
       'Rule precedence is user-specific + condition, role + condition, user-specific without condition, then role/general without condition. Within one precedence tier, deny wins; if no rule matches, the surface default remains in effect.',
       'Before a field-permission mutation, read get_enfyra_required_knowledge, confirm the target with get_enfyra_api_context, search_runtime_zone(zone="schema_data") for the table/field/rules, and use auth_security only to resolve the role/user scope.',
       'Use ensure_field_permission for create/update and remove_field_permission for permanent removal. Do not raw-CRUD enfyra_field_permission when a dedicated operation exists; do not use ensure_route_access, ensure_guard, or a pre-hook as a substitute for field visibility.',
-      'After a write, inspect the exact field-permission row and table field exposure. For REST use inspect_rest_projection or a bounded test_rest_endpoint; for generated GraphQL use test_graphql. isPublished=false is global publication metadata and is separate from role/user field permissions.',
-      'For ordinary application columns, omit isPublished and isUpdatable: both default true. Set isPublished=false only when the field must be private by default across metadata/API, not merely hidden in UI. Set isUpdatable=false only when canonical PATCH must never change the value; it removes the field from canonical update input. isEncrypted does not imply either behavior, and role/user-specific access belongs in field permissions.',
+      'After a write, inspect the exact field-permission row and table field exposure. For REST use inspect_rest_projection or a bounded test_rest_endpoint; for generated GraphQL use test_graphql. isPublished=false is global publication metadata: on enforced reads (REST, GraphQL, @REPOS.main, and @REPOS.secure.<table>), unpublished fields and relations are hidden from everyone—including isRootAdmin—for projection, filter, sort, and aggregate unless an explicit enfyra_field_permission read allow rule grants the caller. Root admin only bypasses deny rules on published fields (isPublished !== false) and retains create/update write authority on unpublished fields while read responses still omit them without a read grant.',
+      'For ordinary application columns, omit isPublished and isUpdatable: both default true. Set isPublished=false only when the field must be private by default across metadata/API, not merely hidden in UI. Set isUpdatable=false only when canonical PATCH must never change the value; it removes the field from canonical update input. On create/update mutations (both REST and GraphQL), fields denied by field permissions for non-root callers are silently stripped before body validation and persistence rather than returning 403. isEncrypted does not imply either behavior, and role/user-specific access belongs in field permissions.',
     ],
   },
   {
@@ -311,7 +311,7 @@ const DYNAMIC_CODE_SECTIONS = [
       'Repository create/update with data: @BODY is the supported TypeORM-style partial-entity contract. Secure repositories enforce field permissions and persistence sanitation, but handlers must still force server-owned fields after ...@BODY and enforce business invariants.',
       'Do not change canonical column metadata such as isUpdatable merely to let a custom action update a server-owned field. First prove owner/tenant scope with a secure repository lookup; when the action must change an intentionally non-updatable field, perform an exact trusted internal write without raw @BODY and shape the response explicitly.',
       'Do not bypass a custom-endpoint canonical collision by calling create_handler on the table route. create_handler requires explicit canonical acknowledgement for a new main-table handler; third-party endpoint-specific behavior belongs on a separate route.',
-      'Canonical POST/PATCH routes run metadata column-rule/Zod body validation. Custom repository handlers do not inherit that middleware and must validate endpoint-specific body semantics when required.',
+      'Canonical POST/PATCH routes and generated GraphQL create/update mutations run metadata column-rule/Zod body validation. Custom repository handlers do not inherit that middleware and must validate endpoint-specific body semantics when required.',
       'For canonical table reads and shared RLS, merge security filters into @QUERY.filter and preserve @QUERY.fields, @QUERY.deep, @QUERY.sort, @QUERY.limit, @QUERY.page, @QUERY.meta, and debugMode. Grouped analytics use a separate repository.aggregate call.',
     ],
   },
@@ -347,10 +347,10 @@ const DYNAMIC_CODE_SECTIONS = [
   {
     id: 'hidden-field-query-surfaces',
     rules: [
-      'Unpublished fields and private relations are sensitive even when the field is not selected.',
+      'Unpublished fields and private relations are sensitive even when the field is not selected. On enforced reads, isPublished=false is blocked for both root administrators and normal users across projection, filter, sort, and aggregate unless an explicit enfyra_field_permission read allow rule matches.',
       'Do not expose filter predicate-oracle behavior over hidden fields in user-facing endpoints.',
       'Do not expose aggregate, _max, _min, _count, sort helpers, or counts over unpublished fields/private relations unless the endpoint intentionally exposes that fact.',
-      'If a normal REST read returns an isPublished=false field through fields/deep/dotted projection, use inspect_rest_projection to verify the metadata contract and authenticated/anonymous response shape. Treat confirmed anonymous exposure as an Enfyra core bug.',
+      'If a normal REST read returns an isPublished=false field through fields/deep/dotted projection without a matching read allow permission, use inspect_rest_projection to verify the metadata contract and authenticated/anonymous response shape. Treat ungranted exposure as an Enfyra core bug.',
     ],
   },
   {

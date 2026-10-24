@@ -142,6 +142,8 @@ export function buildDynamicScriptContextTypeContract() {
         "$crypto.sha256(value: string, encoding?: 'hex' | 'base64' | 'base64url'): Promise<string>",
         "$crypto.hmacSha256(value: string, secret: string, encoding?: 'hex' | 'base64' | 'base64url'): Promise<string>",
         '$crypto.generateSshKeyPair(comment?: string): Promise<{ publicKey: string; privateKey: string }>',
+        '$pat.create(input: { userId: Id; name: string; expiresAt?: string; mode?: "exchange" | "reusable" }): Promise<{ id: Id; name: string; prefix: string; last4: string; token: string; expiresAt: string }>',
+        '$pat.verify(token: string): Promise<{ userId: string; tokenId: string; expiresAt: string }>',
         '$rateLimit.check/byIp/byUser/byRoute/byIpGlobal/byUserGlobal/status(...): Promise<{ allowed: boolean; remaining: number; resetAt: number; retryAfter: number; limit: number; window: number }> — HTTP dynamic routes only',
         '$rateLimit.reset(key: string): Promise<void> — HTTP dynamic routes only',
       ],
