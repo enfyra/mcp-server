@@ -132,7 +132,13 @@ test('get_all_tables applies search and explicit all contract', async () => {
 
     const designResult = await server.get('get_schema_design_context').handler({});
     const designPayload = JSON.parse(designResult.content[0].text);
-    assert.deepEqual(designPayload.supportedColumnTypes, ['int', 'varchar', 'text', 'boolean', 'uuid', 'ObjectId', 'bigint', 'date', 'datetime', 'timestamp', 'enum', 'simple-json', 'code', 'array-select', 'richtext', 'float']);
+    assert.deepEqual(designPayload.supportedColumnTypes, ['int', 'varchar', 'text', 'boolean', 'uuid', 'ObjectId', 'bigint', 'date', 'datetime', 'enum', 'simple-json', 'code', 'array-select', 'richtext', 'float']);
+    assert.match(designPayload.columnDefinitionInput.temporalContract, /2026-10-26T17:00:00\.000Z/);
+    assert.match(designPayload.columnDefinitionInput.temporalContract, /_gte/);
+    assert.match(designPayload.columnDefinitionInput.temporalContract, /_lt/);
+    assert.match(designPayload.columnDefinitionInput.temporalContract, /milliseconds/i);
+    assert.match(designPayload.createTableInput.timestampSemantics.domainTimestampRule, /datetime column/);
+    assert.match(designPayload.createTableInput.timestampSemantics.scheduledFlowRule, /datetime column/);
     assert.match(designPayload.primaryKeyContext.createTableDefault, /SQL id\/int primary key/);
     assert.match(JSON.stringify(designPayload.recommendedSequence), /Create independent lookup\/base tables first/);
     assert.match(JSON.stringify(designPayload.relationDefinitionInput.forbiddenPhysicalFields), /foreignKeyColumn/);

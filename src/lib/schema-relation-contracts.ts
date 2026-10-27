@@ -323,7 +323,7 @@ export function normalizeColumnOptionsValue(options: unknown) {
 
 const mongoColumnTypeMap: Record<string, string> = {
   varchar: 'string', text: 'string', longtext: 'string', boolean: 'bool',
-  ObjectId: 'objectId', bigint: 'long', datetime: 'date', timestamp: 'date',
+  ObjectId: 'objectId', bigint: 'long',
   'simple-json': 'json', float: 'double',
 };
 
@@ -361,7 +361,7 @@ export function normalizeColumnTypeForLiveMetadata(type: unknown, supportedTypes
               : ['json', 'jsonb', 'object', 'array'].includes(normalized)
                 ? chooseFirstSupported(supported, ['simple-json', 'json', 'text'])
                 : ['date-time', 'timestamptz'].includes(normalized)
-                  ? chooseFirstSupported(supported, ['datetime', 'timestamp', 'date'])
+                  ? chooseFirstSupported(supported, ['datetime'])
                   : null;
 
   if (!alias) {

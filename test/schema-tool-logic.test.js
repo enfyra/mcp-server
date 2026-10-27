@@ -271,7 +271,8 @@ test('schema constraint validation rejects only ordered unique-prefix indexes', 
 test('column type guidance uses the Enfyra schema contract and normalizes common SQL aliases', () => {
   const supportedTypes = getSupportedColumnTypes();
 
-  assert.deepEqual(supportedTypes, ['int', 'varchar', 'text', 'boolean', 'uuid', 'ObjectId', 'bigint', 'date', 'datetime', 'timestamp', 'enum', 'simple-json', 'code', 'array-select', 'richtext', 'float']);
+  assert.deepEqual(supportedTypes, ['int', 'varchar', 'text', 'boolean', 'uuid', 'ObjectId', 'bigint', 'date', 'datetime', 'enum', 'simple-json', 'code', 'array-select', 'richtext', 'float']);
+  assert.throws(() => normalizeColumnTypeForLiveMetadata('timestamp', supportedTypes), /Unsupported column type/);
   assert.deepEqual(
     normalizeColumnTypeForLiveMetadata('decimal', supportedTypes),
     { type: 'float', changed: true, originalType: 'decimal' },
@@ -302,7 +303,7 @@ test('column type guidance uses the Enfyra schema contract and normalizes common
   );
   assert.throws(
     () => normalizeColumnTypeForLiveMetadata('geometry', supportedTypes),
-    /Valid Enfyra types: int, varchar, text, boolean, uuid, ObjectId, bigint, date, datetime, timestamp, enum, simple-json, code, array-select, richtext, float/,
+    /Valid Enfyra types: int, varchar, text, boolean, uuid, ObjectId, bigint, date, datetime, enum, simple-json, code, array-select, richtext, float/,
   );
 });
 
@@ -316,6 +317,9 @@ test('MCP column types follow the current ESV SQL and Mongo contracts', () => {
   assert.deepEqual(getSupportedColumnTypes('mysql'), sql);
   assert.deepEqual(getSupportedColumnTypes('postgres'), sql.filter(type => type !== 'longtext'));
   assert.deepEqual(getSupportedColumnTypes('mongodb'), mongo);
+  assert.equal(normalizeColumnTypeForLiveMetadata('datetime', mongo).type, 'datetime');
+  assert.equal(normalizeColumnTypeForLiveMetadata('date', mongo).type, 'date');
+  assert.throws(() => normalizeColumnTypeForLiveMetadata('timestamp', mongo), /Unsupported column type/);
   assert.equal(normalizeColumnTypeForLiveMetadata('longtext', getSupportedColumnTypes('mysql')).type, 'longtext');
   for (const [input, output] of [['varchar', 'string'], ['boolean', 'bool'], ['bigint', 'long'], ['simple-json', 'json'], ['ObjectId', 'objectId'], ['float', 'double']]) {
     assert.equal(normalizeColumnTypeForLiveMetadata(input, mongo).type, output);

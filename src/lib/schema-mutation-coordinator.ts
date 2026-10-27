@@ -57,7 +57,6 @@ export const ENFYRA_COLUMN_TYPES = [
   'bigint',
   'date',
   'datetime',
-  'timestamp',
   'enum',
   'simple-json',
   'code',
