@@ -312,7 +312,7 @@ export const TOOL_WORKFLOWS = [
       'Generate repository access with build_dynamic_repository_usage instead of composing secure/trusted syntax from memory.',
       'Use the source artifact returned by search_runtime_zone(mode=inspect) or trace_metadata_usage when patching. For a full replacement, pass its sourceFile/sourceResourceUri to update_script_source so the MCP process reads the reviewed file without echoing the source through the model call.',
       'Use the exact sourceFile/sourceResourceUri artifact for every validate/test/workflow/apply call; the MCP process materializes inline input once and never regenerates code between validation and persistence.',
-      'Verify each layer with the route/test runner that matches the script surface, including a short-circuit/error-path case when pre-hooks, post-hooks, or guards are involved.',
+      'Verify each layer with the route/test runner that matches the script surface, including pre-hook early-return continuation, throw rejection and post-hook error-path cases when hooks are involved, plus guard denial when applicable.',
     ],
     recommendedScope: 'dynamic-code',
   },

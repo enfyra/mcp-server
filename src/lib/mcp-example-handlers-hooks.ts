@@ -343,7 +343,8 @@ return payload\`
 })`,
         notes: [
           'This is a layering pattern, not a copy-paste table contract: inspect the real route, methods, columns, and ownership relation first.',
-          'The pre-hook owns canonical shared row scope and may short-circuit before the handler. Keep endpoint-specific validation and writes in the handler.',
+          'The pre-hook owns canonical shared row scope. An early return skips only that hook; throw to stop the request before the handler. Post-hooks still observe ordinary pre-hook/handler errors through @ERROR. Keep endpoint-specific validation and writes in the handler.',
+          'When hooks share a decision, assign explicit method scopes and distinct priorities, initialize @SHARE in the earliest hook, refine it only in matching later hooks and consume it in the handler. Unrelated hooks return immediately.',
           'The post-hook owns response-only or best-effort work. It can observe @ERROR; post-hook failures are isolated, so required delivery belongs in a flow or the synchronous handler boundary.',
           'Put rate limits/IP allow-deny in Guard Engine, deterministic body checks in column rules, and field visibility in field permissions instead of adding more script code.',
           'Do not duplicate one invariant in all three scripts. If two checks remain for defense-in-depth, document that they protect different boundaries.',

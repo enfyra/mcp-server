@@ -148,6 +148,11 @@ test('dynamic code knowledge defines hook layer responsibilities', () => {
   assert.match(rules, /column rules/);
   assert.match(rules, /flows/);
   assert.match(rules, /post-hook failure is isolated/);
+  assert.match(rules, /return.*ignored.*later hooks.*handler continue/i);
+  assert.match(rules, /stop the request before the handler, throw/i);
+  assert.match(rules, /pre-hook or handler error.*@ERROR/i);
+  assert.match(rules, /distinct priorities.*@SHARE/i);
+  assert.doesNotMatch(rules, /returns a value short-circuits/);
 });
 
 test('dynamic code knowledge requires awaiting helper bridge calls', () => {

@@ -1,0 +1,558 @@
+/**
+ * Table & Column tools for Enfyra MCP Server
+ */
+import { z } from 'zod';
+import { destructivePreviewContent } from './destructive-preview.js';
+import {
+  fetchMetadataContext,
+  fetchTableCatalog,
+  fetchTableMetadata
+} from './metadata-client.js';
+import { assertGlobalRulesAck, globalRulesAckParam } from './required-knowledge.js';
+import { jsonContent } from './response-format.js';
+import { createSchemaToolOperations } from './schema-tool-operations.js';
+import { executeSequentialBatch } from './sequential-batch.js';
+import {
+  AnyRecord,
+  FORBIDDEN_RELATION_KEYS,
+  assertBulkLimit,
+  buildInverseDecision,
+  bulkObjectArrayParam,
+  computeBatchCleanupOrder,
+  getId,
+  getSupportedColumnTypes,
+  fetchTableWithDetails,
+  metadataColumnNames,
+  metadataColumnOptions,
+  normalizeCreateTableDefinitions,
+  normalizeRelationType,
+  parseBulkItemsParam,
+  parseJsonArrayParam,
+  preflightCreateTableDefinitions,
+  resolveTableIdentifierFromMetadata,
+  sanitizeExistingRelationForTablePatch,
+  withSchemaQueue,
+} from './table-tool-logic.js';
+
+const COLUMN_SCHEMA_ATTRIBUTES = [
+  'name',
+  'type',
+  'isNullable',
+  'isUnique',
+  'isPublished',
+  'isUpdatable',
+  'isEncrypted',
+  'defaultValue',
+  'description',
+  'options',
+  'placeholder',
+  'metadata',
+];
+
+export function registerSchemaTableTools(server, ENFYRA_API_URL, options: { toolset?: string } = {}) {
+  const toolset = options.toolset || 'guided';
+  const {
+    appendRelationToTable,
+    applyDeferredConstraints,
+    createOneTable,
+    deleteOneTable,
+    updateOneTable,
+  } = createSchemaToolOperations(ENFYRA_API_URL, toolset);
+  // ─── READ ───
+  
+    server.tool(
+      'get_all_tables',
+      'List table definitions from metadata. Complete lists must pass either limit or all=true. If search is provided without limit, the tool returns a bounded lookup window of 10 matches.',
+      {
+        limit: z.number().int().positive().optional().describe('Maximum tables returned after search. Required unless all=true or search is provided.'),
+        all: z.boolean().optional().describe('Return all matched tables. Use this when a complete table list is required.'),
+        search: z.string().optional().describe('Optional table name, alias, or description substring filter.'),
+      },
+      async ({ limit, all, search }) => {
+        if (!all && limit === undefined && !search?.trim()) {
+          throw new Error('get_all_tables requires either limit or all=true. Do not invent arbitrary limits for complete table lists; use all=true.');
+        }
+        if (all && limit !== undefined) {
+          throw new Error('get_all_tables accepts either all=true or limit, not both.');
+        }
+        const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+        const needle = search?.trim().toLowerCase();
+        const tables = catalog
+          .map((table) => ({
+            id: getId(table),
+            name: table.name ?? null,
+            alias: table.alias ?? null,
+            description: table.description ?? null,
+            isSingleRecord: table.isSingleRecord ?? null,
+            columnCount: null,
+            relationCount: null,
+            routeBacked: null,
+          }))
+          .filter((table) => {
+            if (!needle) return true;
+            return [table.name, table.alias, table.description]
+              .some((value) => String(value || '').toLowerCase().includes(needle));
+          });
+        const effectiveLimit = all ? tables.length : (limit ?? 10);
+        const returnedTables = all ? tables : tables.slice(0, effectiveLimit);
+        return jsonContent({
+          action: 'get_all_tables',
+          totalTableCount: catalog.length,
+          matchedTableCount: tables.length,
+          returnedTableCount: returnedTables.length,
+  	        all: Boolean(all),
+  	        implicitSearchLimit: Boolean(!all && limit === undefined && search?.trim()),
+  	        hardCap: all ? null : effectiveLimit,
+          search: search || null,
+          tables: returnedTables,
+          detailHint: 'Use inspect_table with a table id/name for columns, relations, indexes, routes, permissions, and GraphQL state.',
+        });
+      }
+    );
+
+  server.tool(
+      'get_schema_design_context',
+      [
+        'Step-zero schema design guide for Enfyra table creation.',
+        'Call this before creating a new app schema or multiple tables.',
+        'It returns supported column types, metadata attributes, relation types, constraint shape, and the exact creation sequence so the model does not guess SQL types or physical FK fields.',
+      ].join(' '),
+      {},
+      async () => {
+        const [metadataContext, tableMetadata, relationMetadata] = await Promise.all([
+          fetchMetadataContext(ENFYRA_API_URL),
+          fetchTableMetadata(ENFYRA_API_URL, 'enfyra_table'),
+          fetchTableMetadata(ENFYRA_API_URL, 'enfyra_relation'),
+        ]);
+        const supportedColumnTypes = getSupportedColumnTypes(metadataContext.dbType);
+        const relationTypes = metadataColumnOptions(relationMetadata, 'enfyra_relation', 'type');
+        const onDeleteOptions = metadataColumnOptions(relationMetadata, 'enfyra_relation', 'onDelete');
+        const tableAttributes = metadataColumnNames(tableMetadata, 'enfyra_table');
+        const columnAttributes = COLUMN_SCHEMA_ATTRIBUTES;
+        const relationAttributes = metadataColumnNames(relationMetadata, 'enfyra_relation');
+        const primaryColumnNames = [metadataContext.dbType === 'mongodb' ? '_id' : 'id'];
+        const primaryColumnTypes = [metadataContext.dbType === 'mongodb' ? 'objectId' : 'int'];
+  
+        return jsonContent({
+          action: 'schema_design_context',
+          stepZero: 'Read this response before create_tables/create_columns/create_relations. Use these supported attributes and types, not SQL dialect guesses.',
+          supportedColumnTypes,
+          primaryKeyContext: {
+            observedPrimaryColumnNames: primaryColumnNames,
+            observedPrimaryColumnTypes: primaryColumnTypes,
+            createTableDefault: metadataContext.dbType === 'mongodb'
+              ? 'create_tables auto-includes the Mongo _id/objectId primary key.'
+              : 'create_tables auto-includes the SQL id/int primary key.',
+          },
+          createTableInput: {
+            directFields: ['name', 'description', 'isSingleRecord'],
+            cascadeFields: ['columns', 'relations'],
+            constraintFields: ['indexes', 'uniques'],
+            notAcceptedAtCreate: ['alias', 'graphqlEnabled'],
+            autoManagedColumns: ['id', 'createdAt', 'updatedAt'],
+            idColumn: metadataContext.dbType === 'mongodb'
+              ? 'create_tables auto-includes _id/objectId; do not include your own primary key.'
+              : 'create_tables auto-includes id/int; do not include your own primary key.',
+            reservedColumnRule: 'Do not declare id, _id, createdAt, or updatedAt in create_tables/create_columns. create_tables strips them before save and reports skippedAutoColumns; create_columns rejects them.',
+            timestampSemantics: {
+              createdAt: 'System-managed insert timestamp. It is assigned when the record is created and is not a domain-specific creation event.',
+              updatedAt: 'System-managed last persisted-write timestamp. Enfyra refreshes it on record updates; use it for generic last-mutation or changed-since logic.',
+              domainTimestampRule: 'Only add a separate timestamp when it represents a distinct business event, such as lastProcessedAt, lastSyncedAt, lastSuccessfulRunAt, publishedAt, or completedAt. Do not add lastUpdated/lastModified as aliases for updatedAt.',
+              scheduledFlowRule: 'A flow that runs every few minutes uses a schedule trigger config.cron. A timestamp column is not the scheduler.',
+            },
+          },
+          columnDefinitionInput: {
+            allowedFields: ['name', 'type', 'isNullable', 'isUnique', 'isPublished', 'isUpdatable', 'isEncrypted', 'defaultValue', 'description', 'options', 'placeholder', 'metadata'],
+            supportedTypes: supportedColumnTypes,
+            typeSelection: [
+              'varchar (SQL) or string (MongoDB): short text, labels, slugs, status strings.',
+              'text/richtext: long prose.',
+              'float (SQL) or double (MongoDB): prices, amounts, ratings, percentages, decimal-like numbers unless supportedTypes contains decimal.',
+              'int/bigint (SQL) or int/long (MongoDB): counts, ordering, integer quantities.',
+              'boolean (SQL) or bool (MongoDB): true/false flags.',
+              'date: calendar date in YYYY-MM-DD; datetime: UTC instant in ISO 8601 ending in Z.',
+              'enum: constrained option strings when options are provided.',
+              'simple-json (SQL) or json/object/array (MongoDB): structured values when listed in supportedTypes.',
+              'code: source-code fields.',
+            ],
+            forbiddenGuesses: ['json', 'jsonb', 'longtext', 'decimal'].filter((type) => !supportedColumnTypes.includes(type)),
+            aliasNormalization: 'Schema tools normalize common aliases where possible and return schemaNormalization, but models should choose from supportedTypes directly.',
+            visibilityAndMutationDefaults: {
+              normalFieldRule: 'For an ordinary application field, send only name, type, and any real nullability/constraint requirement. Omit isPublished and isUpdatable; both default to true.',
+              isPublished: 'Set false only for a field that must be private by default, such as a credential, token hash, internal audit payload, or server-only implementation detail. It changes default read/create/update field access; it is not a UI-only visibility flag. For role/user-specific access, use ensure_field_permission instead.',
+              isUpdatable: 'Set false only when a value must not change through canonical PATCH after creation, such as an immutable external identifier or server-owned lifecycle value. Canonical PATCH removes the field from update input; this is not a form-control setting.',
+              isEncrypted: 'isEncrypted=true encrypts stored values at rest. It does not imply private visibility or immutability; combine flags only when each independent requirement applies.',
+              platformOwnedFlags: 'Do not set isPrimary or isSystem for ordinary application fields. Do not declare id, _id, createdAt, or updatedAt; Enfyra manages them.',
+            },
+            metadataGuidance: {
+              columnField: 'metadata',
+              richTextPath: 'metadata.richText for columns with type richtext.',
+              jsonSafeShape: '{ plugins?: string[], toolbar?: string, customButtons?: [{ name, text?, tooltip?, format?, icon?, onAction?: string }], formats?: { [name]: { tag?, inline?, block?, wrapper?, classes?: string|string[], classStyles?: object, css?: object, attributes?: object } } }',
+              staticOnly: 'Column metadata is persisted as JSON. Use static strings, arrays, objects, and JSON-safe CSS; function callbacks belong in the eApp source config and cannot be sent through MCP.',
+              updateRule: 'create_tables, create_columns, and update_columns preserve metadata. Inspect the column after a write when the editor configuration matters.',
+            },
+            namespaceRule: 'Column names and relation propertyName values share one table namespace. Do not define a scalar column and a relation with the same name in one table.',
+          },
+          relationDefinitionInput: {
+            allowedFields: ['targetTableId', 'targetTable', 'type', 'propertyName', 'isNullable', 'onDelete', 'description'],
+            relationTypes: relationTypes.length ? relationTypes : ['many-to-one', 'one-to-many', 'one-to-one', 'many-to-many'],
+            onDeleteOptions: onDeleteOptions.length ? onDeleteOptions : ['CASCADE', 'SET NULL', 'RESTRICT'],
+            forbiddenPhysicalFields: FORBIDDEN_RELATION_KEYS,
+            rule: 'Use relations for links between records. Do not create scalar FK columns such as userId, owner_id, categoryIds, or courseId unless the user explicitly wants denormalized snapshot data.',
+            namespaceRule: 'Relation propertyName must be unique among both relation names and scalar column names on the same table. If a relation is named owner, do not also create ownerId/owner as a scalar field.',
+            inverseDesignRule: 'Create the owning relation first without inversePropertyName or mappedBy. Evaluate the returned inverseDecision. Only when a concrete reverse response, UI, deep query, aggregate, or parent-to-child consumer exists, call create_inverse_relation with that consumer and a semantic inversePropertyName.',
+          },
+          constraints: {
+            indexes: 'JSON array of non-unique logical field groups, e.g. [["status","createdAt"]]. Relation propertyName values are allowed.',
+            uniques: 'JSON array of unique logical field groups, e.g. [["record","actor"]].',
+            uniqueIndexRule: 'An explicit index must not duplicate the ordered leading prefix of a unique group. uniques [["event","attendee"]] covers indexes [["event"]], but not [["attendee"]] or [["attendee","event"]]. Use logical relation propertyName values; owning relations and temporal fields receive automatic indexes when not covered. A single-field index for an owning relation is redundant and is stripped from the request with a schemaConstraintNormalization note, so omit it.',
+            createTablesPreflight: 'create_tables rejects constraints that reference fields not declared as scalar columns, auto-managed columns, or relation propertyName values in that same table item before it creates anything.',
+            relationBasedUniques: 'For one-pass schema creation, put the owning relations in the same create_tables item as the relation-based unique group. If relations already exist, add relation-based uniques later with update_tables.',
+          },
+          recommendedSequence: [
+            '1. Name domain entities and decide which existing tables are reused, especially enfyra_user for users/owners/actors.',
+            '2. Create independent lookup/base tables first with scalar columns only.',
+            '3. Create dependent tables with scalar columns and relations whose target tables already exist.',
+            '4. Use create_relations after both tables exist when an owning relation could not be included during table creation.',
+            '5. Add relation-based unique groups in the same create_tables item when the relations are declared there, or via update_tables after relations exist.',
+            '6. Evaluate each returned inverseDecision. Call create_inverse_relation only for a concrete target-to-source consumer; otherwise keep the relation one-way.',
+            '7. Insert records using column names and relation propertyName values, never hidden FK columns.',
+            '8. Re-inspect each table with inspect_table before writing records or adding query examples.',
+          ],
+          schemaContractAttributes: {
+            table: tableAttributes,
+            column: columnAttributes,
+            relation: relationAttributes,
+          },
+        });
+      },
+    );
+
+  // ─── TABLE MUTATIONS ───
+  
+    server.tool(
+      'create_tables',
+      [
+        'Create one or more table definitions. Always pass items as a native JSON array; for one table, pass one item.',
+        'The tool creates tables sequentially, creates columns with each table, then creates all requested owning relations after every table in the batch exists. This avoids relation target races for weak agents.',
+        'Each item supports { name, description?, isSingleRecord?, columns?, relations?, indexes?, uniques? }. Relations reject inversePropertyName, mappedBy, and one-to-many; evaluate inverseDecisions after creation and use create_inverse_relation only for a concrete reverse consumer. columns/relations/indexes/uniques may be arrays inside the item.',
+        'Column items may include metadata and placeholder. For ordinary application fields, omit isPublished and isUpdatable because both default to true; false has API-access and canonical-PATCH consequences, not merely UI consequences. For type richtext, store editor configuration at column.metadata.richText using JSON-safe values; function callbacks are eApp source configuration, not column JSON.',
+        'Do not include id, _id, createdAt, or updatedAt in columns; Enfyra manages them and create_tables strips them before save.',
+        'Every field named in indexes/uniques must be a scalar column, auto-managed column, or relation propertyName in the same table item; otherwise the tool rejects the whole batch before creating tables.',
+        'Use get_schema_design_context first for live column types, metadata fields, and relation rules. Do not include physical FK fields.',
+        'The response includes cleanupHints.recordCreateOrder; use it when seeding records so parent/target rows are created before child/source rows.',
+        'The response includes cleanupHints.recordDeleteOrder; use it when deleting seeded test records so child/source rows are removed before parent/target rows.',
+      ].join(' '),
+      {
+        items: bulkObjectArrayParam(z, 'Table definitions').optional().describe('Native JSON array of table definitions. Pass one object in the array for a single table.'),
+        tables: bulkObjectArrayParam(z, 'Table definitions').optional().describe('Alias for items when the caller naturally names the batch tables. Pass either items or tables, not both.'),
+        maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100; operations still run sequentially.'),
+        globalRulesAckKey: globalRulesAckParam(z),
+      },
+      async ({ items, tables, maxItems, globalRulesAckKey }) => {
+        assertGlobalRulesAck(globalRulesAckKey);
+        if (items !== undefined && tables !== undefined) throw new Error('Pass either items or tables to create_tables, not both.');
+  	      const parsedItems = normalizeCreateTableDefinitions(parseBulkItemsParam('items', items ?? tables));
+  	      assertBulkLimit('create_tables', parsedItems, maxItems);
+  	      const preflight = preflightCreateTableDefinitions(parsedItems);
+  	      const recordDeleteOrder = computeBatchCleanupOrder(parsedItems);
+	      const batchTableNames = new Set(parsedItems.map((item) => String(item.name || '').toLowerCase()).filter(Boolean));
+	      if (batchTableNames.size !== parsedItems.length) {
+	        const seen = new Set<string>();
+	        const dupes: string[] = [];
+	        for (const item of parsedItems) {
+	          const n = String(item.name || '').toLowerCase();
+	          if (seen.has(n)) dupes.push(n);
+	          seen.add(n);
+	        }
+	        throw new Error(`create_tables batch contains duplicate table names after case normalization: ${dupes.join(', ')}`);
+	      }
+		      const created: AnyRecord[] = [];
+	      const deferredRelations: AnyRecord[] = [];
+	      const deferredConstraints: AnyRecord[] = [];
+	      const createdTableIds = new Map<string, number | string>();
+
+	      for (const [index, item] of parsedItems.entries()) {
+	        const result = await withSchemaQueue(() => createOneTable(item, batchTableNames, createdTableIds));
+	        const tableId = result.table.id || result.table.name;
+	        createdTableIds.set(String(item.name || '').toLowerCase(), tableId);
+	        created.push({ index, ...result, deferredRelations: undefined, selfRefRelations: undefined });
+	        for (const relation of result.selfRefRelations || []) {
+	          await withSchemaQueue(() => appendRelationToTable({
+	            sourceTableId: tableId,
+	            targetTableId: tableId,
+	            type: relation.type,
+	            propertyName: relation.propertyName,
+	            isNullable: relation.isNullable,
+	            onDelete: relation.onDelete,
+	            description: relation.description,
+	            globalRulesAckKey,
+	          }));
+	        }
+	        for (const relation of result.deferredRelations || []) {
+	          deferredRelations.push({ index, sourceTableId: tableId, ...relation });
+	        }
+	        if ((result.deferredConstraints?.indexes || []).length || (result.deferredConstraints?.uniques || []).length) {
+	          deferredConstraints.push({
+	            index,
+	            tableId,
+	            ...result.deferredConstraints,
+	          });
+	        }
+	      }
+  
+        const createdRelations: AnyRecord[] = [];
+        deferredRelations.sort((left, right) => {
+          const leftPriority = normalizeRelationType(left.type) === 'one-to-many' ? 1 : 0;
+          const rightPriority = normalizeRelationType(right.type) === 'one-to-many' ? 1 : 0;
+          return leftPriority - rightPriority;
+        });
+        for (const relation of deferredRelations) {
+          const targetName = typeof relation.targetTable === 'string' ? String(relation.targetTable).toLowerCase() : null;
+          const resolvedTargetId = (targetName && createdTableIds.has(targetName)) ? createdTableIds.get(targetName) : relation.targetTable;
+          const relationResult = await appendRelationToTable({
+            sourceTableId: relation.sourceTableId,
+            targetTableId: resolvedTargetId,
+            type: relation.type,
+            propertyName: relation.propertyName,
+            isNullable: relation.isNullable,
+            onDelete: relation.onDelete,
+            description: relation.description,
+            globalRulesAckKey,
+          });
+  	        createdRelations.push({ index: relation.index, ...JSON.parse(relationResult.content[0].text) });
+  	      }
+  
+        const appliedDeferredConstraints: AnyRecord[] = [];
+  	      for (const constraints of deferredConstraints) {
+  	        const constraintResult = await withSchemaQueue(() => applyDeferredConstraints(constraints.tableId, {
+  	          indexes: constraints.indexes,
+  	          uniques: constraints.uniques,
+  	        }));
+  	        if (constraintResult) appliedDeferredConstraints.push({ index: constraints.index, ...constraintResult });
+	      }
+
+        const inverseDecisions: AnyRecord[] = [];
+        for (const [index, item] of parsedItems.entries()) {
+          const tableId = createdTableIds.get(String(item.name || '').toLowerCase());
+          if (tableId === undefined) continue;
+          const requestedRelations = Array.isArray(item.relations)
+            ? item.relations
+            : parseJsonArrayParam(`items[${index}].relations`, item.relations || '[]');
+          if (requestedRelations.length === 0) continue;
+          const liveTable = await fetchTableWithDetails(ENFYRA_API_URL, tableId).catch(() => null);
+          for (const requestedRelation of requestedRelations) {
+            const liveRelation = (liveTable?.relations || []).find(
+              (relation: AnyRecord) => relation.propertyName === requestedRelation.propertyName,
+            );
+            const relation = liveRelation
+              ? sanitizeExistingRelationForTablePatch(liveRelation)
+              : requestedRelation;
+            inverseDecisions.push(buildInverseDecision({
+              sourceTableId: tableId,
+              sourceTableName: item.name,
+              targetTableId: relation.targetTable ?? relation.targetTableId,
+              targetTableName: liveRelation?.targetTableName || liveRelation?.targetTable?.name,
+              relationId: getId(relation),
+              propertyName: relation.propertyName,
+              type: relation.type,
+            }));
+          }
+        }
+
+	      return jsonContent({
+  	        action: 'tables_created',
+  	        requested: parsedItems.length,
+  	        createdCount: created.length,
+  	        deferredRelationCount: deferredRelations.length,
+  	        createdRelationCount: createdRelations.length,
+  	        deferredConstraintCount: deferredConstraints.length,
+  	        appliedDeferredConstraintCount: appliedDeferredConstraints.length,
+  	        sequential: true,
+  	        relationPhaseAfterTables: true,
+  	        constraintPhaseAfterRelations: true,
+  	        ...(preflight.strippedRelationIndexes.length > 0 ? {
+  	          schemaConstraintNormalization: {
+  	            strippedRelationIndexes: preflight.strippedRelationIndexes,
+  	            reason: 'Owning relations receive an automatic lookup index; the duplicate single-relation indexes in this request were removed instead of failing the create.',
+  	          },
+  	        } : {}),
+  	        cleanupHints: {
+  	          recordCreateOrder: [...recordDeleteOrder].reverse(),
+  	          recordDeleteOrder,
+  	          tableDeleteOrder: recordDeleteOrder,
+  	          recordCreateRule: 'When seeding sample data, create records sequentially in recordCreateOrder; parent/target rows must exist before child/source rows reference them.',
+  	          recordRule: 'If you delete seeded records before deleting test tables, delete record batches sequentially in recordDeleteOrder; do not parallelize parent/child deletes.',
+  	          tableRule: 'For full test cleanup, prefer delete_tables with tableDeleteOrder after deleting custom routes/flows; table deletion removes the remaining table data.',
+  	        },
+          created: created.map(({ result, supportedColumnTypes, schema, ...item }) => ({
+  	          ...item,
+  	          schema: {
+  	            intended: schema?.intended,
+  	            liveMetadataAvailable: schema?.liveMetadataAvailable,
+  	            liveMetadataError: schema?.liveMetadataError,
+  	          },
+  	        })),
+          createdRelations: createdRelations.map(({ result, responseFormat, ...item }) => item),
+          appliedDeferredConstraints: appliedDeferredConstraints.map(({ result, ...item }) => item),
+          inverseDecisions,
+	      });
+  	    }
+  	  );
+
+  server.tool(
+      'update_tables',
+      'Update one or more table definitions. Always pass items as a native JSON array; for one table, pass one item. Items run sequentially through the schema queue.',
+      {
+        items: bulkObjectArrayParam(z, 'Table update items').describe('Native JSON array of table update items: [{ tableId, name?, alias?, description?, isSingleRecord?, graphqlEnabled?, indexes?, uniques? }]. indexes/uniques may be arrays.'),
+        maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+        globalRulesAckKey: globalRulesAckParam(z),
+      },
+      async ({ items, maxItems, globalRulesAckKey }) => {
+        assertGlobalRulesAck(globalRulesAckKey);
+        const parsedItems = parseBulkItemsParam('items', items);
+        assertBulkLimit('update_tables', parsedItems, maxItems);
+        const updated: AnyRecord[] = [];
+        for (const [index, item] of parsedItems.entries()) {
+          if (!item.tableId) throw new Error(`items[${index}].tableId is required.`);
+          const result = await withSchemaQueue(() => updateOneTable(item));
+          updated.push({ index, ...result });
+        }
+        return jsonContent({ action: 'tables_updated', requested: parsedItems.length, updatedCount: updated.length, sequential: true, updated });
+      }
+    );
+
+  server.tool(
+      'delete_tables',
+      'Delete one or more table definitions. Always pass items as a native JSON array; for one table, pass one item. confirm=false previews every target; confirm=true deletes sequentially and verifies catalog absence. Partial failures return a checkpoint and require a new preview before retry.',
+      {
+        items: bulkObjectArrayParam(z, 'Table delete items').describe('Native JSON array of delete items: [{ tableId }] or [{ tableName, expectedTableId? }]. Names are resolved through live metadata. When confirming a tableName preview, pass its returned tableId as expectedTableId.'),
+        maxItems: z.number().int().min(1).max(100).optional().default(100).describe('Safety cap for one schema batch. Default/max is 100.'),
+        confirm: z.boolean().optional().default(false).describe('Required true to apply destructive deletes. Omit/false returns previews only.'),
+        globalRulesAckKey: globalRulesAckParam(z).optional().describe('Required when confirm=true. Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+      },
+      async ({ items, maxItems, confirm, globalRulesAckKey }) => {
+        const parsedItems = parseBulkItemsParam('items', items);
+        assertBulkLimit('delete_tables', parsedItems, maxItems);
+        for (const [index, item] of parsedItems.entries()) {
+          if (!item.tableId && !item.tableName) throw new Error(`items[${index}] requires tableId or tableName.`);
+        }
+        if (confirm) {
+          assertGlobalRulesAck(globalRulesAckKey);
+          const catalog = await fetchTableCatalog(ENFYRA_API_URL);
+          for (const [index, item] of parsedItems.entries()) {
+            if (!item.tableName || item.tableId) continue;
+            if (!item.expectedTableId) {
+              throw new Error(`items[${index}].expectedTableId is required when confirming tableName "${item.tableName}". Pass the tableId returned by the preview.`);
+            }
+            const resolvedTableId = resolveTableIdentifierFromMetadata(catalog, item.tableName, `items[${index}].tableName`);
+            if (String(resolvedTableId) !== String(item.expectedTableId)) {
+              throw new Error(`items[${index}] table id mismatch: resolved ${resolvedTableId}, expected ${item.expectedTableId}.`);
+            }
+          }
+        }
+        if (!confirm) {
+          const results: AnyRecord[] = [];
+          for (const [index, item] of parsedItems.entries()) {
+            const result = await withSchemaQueue(() => deleteOneTable({
+              tableId: item.tableId,
+              tableName: item.tableName,
+              expectedTableId: undefined,
+              confirm: false,
+            }));
+            results.push({ index, ...result });
+          }
+          const payload = {
+            action: 'delete_tables_preview',
+            requested: parsedItems.length,
+            sequential: true,
+            destructive: true,
+            results,
+            postcondition: {
+              verificationMethod: 'not_run_preview',
+              confirmedAbsent: false,
+              remainingTables: results.map((item) => ({
+                id: item.tableId,
+                name: item.tableName,
+              })),
+            },
+            next: 'Call delete_tables again with the same locators and confirm=true. For every tableName locator, add expectedTableId from its preview result.',
+          };
+          return destructivePreviewContent('delete_tables', payload, parsedItems.length);
+        }
+
+        const batch = await executeSequentialBatch(parsedItems, async (item, index) => ({
+          index,
+          ...await withSchemaQueue(() => deleteOneTable({
+            tableId: item.tableId,
+            tableName: item.tableName,
+            expectedTableId: item.expectedTableId,
+            confirm: true,
+          })),
+        }));
+        const results = batch.completed;
+        const postcondition = {
+          verificationMethod: 'table_catalog_by_id_and_name',
+          confirmedAbsent: batch.status === 'completed'
+            && results.every((item) => item.postcondition?.confirmedAbsent === true),
+          remainingTables: results.flatMap((item) => item.postcondition?.remainingTables || []),
+          verificationErrors: results
+            .map((item) => item.postcondition?.verificationError)
+            .filter(Boolean),
+        };
+        const unverified = postcondition.confirmedAbsent !== true;
+        const payload = {
+          action: batch.status === 'partial_failure'
+            ? 'delete_tables_partial_failure'
+            : unverified
+              ? 'delete_tables_unverified'
+              : 'tables_deleted',
+          requested: parsedItems.length,
+          sequential: true,
+          destructive: true,
+          results,
+          postcondition,
+          ...(batch.status === 'partial_failure' ? {
+            status: 'partial_failure',
+            failure: batch.failure,
+            remainingIndexes: batch.remainingIndexes,
+            requiresNewPreview: true,
+          } : {}),
+        };
+        const result = jsonContent(payload);
+        return batch.status === 'partial_failure' || unverified ? { ...result, isError: true } : result;
+      }
+    );
+
+  server.tool(
+    'confirm_schema_mutation',
+    'Execute a pending destructive schema mutation that returned a requiredConfirmHash preview. Pass the exact requiredConfirmHash, confirmPath, and confirmMethod from the preview response.',
+    {
+      requiredConfirmHash: z.string().describe('The requiredConfirmHash returned by the preview response.'),
+      confirmPath: z.string().describe('The confirmPath returned by the preview response, e.g. /enfyra_table/120.'),
+      confirmMethod: z.enum(['DELETE', 'PATCH', 'POST']).describe('The confirmMethod returned by the preview response.'),
+      globalRulesAckKey: globalRulesAckParam(z).optional().describe('Use globalRulesAckKey from get_enfyra_required_knowledge.'),
+    },
+    async ({ requiredConfirmHash, confirmPath, confirmMethod, globalRulesAckKey }) => {
+      assertGlobalRulesAck(globalRulesAckKey);
+      const { fetchAPI } = await import('./fetch.js');
+      const separator = confirmPath.includes('?') ? '&' : '?';
+      const result = await fetchAPI(ENFYRA_API_URL, `${confirmPath}${separator}schemaConfirmHash=${encodeURIComponent(requiredConfirmHash)}`, {
+        method: confirmMethod,
+      });
+      const previewData = Array.isArray(result?.data) ? result.data[0] : result?.data;
+      const stillPreview = previewData?._preview === true && previewData?.requiredConfirmHash;
+      if (stillPreview) {
+        return jsonContent({
+          action: 'schema_mutation_still_pending',
+          message: 'The mutation still returned a preview. The schema changed since the original preview. Re-run the original operation to get a fresh preview.',
+          newRequiredConfirmHash: previewData.requiredConfirmHash,
+        });
+      }
+      return jsonContent({
+        action: 'schema_mutation_confirmed',
+        result,
+      });
+    },
+  );
+}

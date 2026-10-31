@@ -58,6 +58,10 @@ test('dynamic-code write tools surface decomposition guidance at the point of us
   assert.match(server.description('api_endpoint_workflow'), /decompose/i);
   assert.match(server.description('create_handler'), /pre-hooks.*post-hooks.*flows/i);
   assert.match(server.description('create_pre_hook'), /one responsibility/i);
+  assert.match(server.description('create_pre_hook'), /return early.*skip only itself/i);
+  assert.match(server.description('create_pre_hook'), /Post-hooks still run/i);
+  assert.match(server.description('create_pre_hook'), /priorities.*@SHARE/i);
+  assert.doesNotMatch(server.description('create_pre_hook'), /return.*becomes the response/i);
   assert.match(server.description('create_post_hook'), /one responsibility/i);
   assert.match(server.description('flow_workflow'), /one business operation per step/i);
   assert.match(server.description('ensure_script_flow_step'), /split/i);

@@ -247,7 +247,8 @@ export function registerRouteDefinitionTools(server, ENFYRA_API_URL) {
         'Use `routeId` from `create_route` or `get_all_routes` — do not create a new table just to get a route id.',
         'Macros: @BODY, @QUERY, @PARAMS, @USER, @REPOS, @HELPERS, @THROW400..@THROW503.',
         'For canonical table reads, merge security filters into @QUERY.filter and preserve @QUERY.fields/deep/sort/limit/page/meta/aggregate.',
-        'If the hook returns a value, that value becomes the response (handler is skipped).',
+        'A pre-hook may return early to skip only itself; its return value is ignored and later hooks and the handler continue. To stop the request before the handler, throw with @THROW.http or @THROW.json. Post-hooks still run after an ordinary pre-hook/handler error with @ERROR populated.',
+        'For shared decisions, split responsibilities into ordered named pre-hooks with explicit method scopes and distinct priorities (lower first). Store the default decision in @SHARE, let matching later hooks refine it and unrelated hooks return immediately, then let the handler consume that decision.',
         'Keep one responsibility per pre-hook. Split unrelated shared policies into separate named hooks with explicit methods and priorities instead of growing one god hook; keep endpoint-specific business orchestration in the handler.',
       ].join(' '),
       {

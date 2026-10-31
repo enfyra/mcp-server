@@ -78,7 +78,7 @@ function primaryPathFor(workflow: ToolWorkflow): WorkflowPathStep[] {
         step(3, 'search_runtime_zone', 'Locate and inspect the route plus linked pre-hooks, handlers, and post-hooks before deciding where each concern belongs.'),
         step(4, 'build_dynamic_repository_usage', 'Generate secure or intentional trusted repository access when the script reads or writes table data.'),
         step(5, 'patch_script_source or update_script_source', 'Patch or replace the inspected source artifact with validation and hash checks.'),
-        step(6, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify each selected layer, including pre-hook short-circuit and post-hook error behavior when those layers are part of the contract.'),
+        step(6, 'test_rest_endpoint / run_admin_test / test_flow_step', 'Verify each selected layer, including pre-hook return/throw and post-hook error behavior when those layers are part of the contract.'),
       ];
     case 'route-access':
       return [

@@ -794,7 +794,7 @@ test('workflow routing gives progressive tool plans and negative boundaries', ()
   }).workflows[0];
   assert.equal(layeredHooks.key, 'dynamic-script');
   assert.match(JSON.stringify(layeredHooks.primaryPath), /linked pre-hooks, handlers, and post-hooks/);
-  assert.match(JSON.stringify(layeredHooks.primaryPath), /pre-hook short-circuit and post-hook error behavior/);
+  assert.match(JSON.stringify(layeredHooks.primaryPath), /pre-hook return\/throw and post-hook error behavior/);
 
   const schema = discoverWorkflowRoutes({
     intent: 'create a multi table app schema with columns relations and sample records',
